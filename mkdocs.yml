@@ -1,6 +1,6 @@
 site_name: Claude Code Proxy API
 site_description: High-performance API server that provides Anthropic and OpenAI-compatible interfaces for Claude AI models
-site_url: https://CaddyGlow.github.io/claude-code-proxy-api
+site_url: https://caddyglow.github.io/claude-code-proxy-api
 repo_url: https://github.com/CaddyGlow/claude-code-proxy-api
 repo_name: CaddyGlow/claude-code-proxy-api
 edit_uri: edit/main/docs/
@@ -105,6 +105,7 @@ plugins:
             - https://docs.python.org/3/objects.inv
             - https://docs.pydantic.dev/latest/objects.inv
             - https://fastapi.tiangolo.com/objects.inv
+          paths: [claude_code_proxy]
           options:
             docstring_style: google
             docstring_options:

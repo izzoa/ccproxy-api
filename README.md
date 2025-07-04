@@ -413,9 +413,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Comprehensive documentation is available:
 
-- **[Online Documentation](https://CaddyGlow.github.io/claude-code-proxy-api)** - Full documentation site
-- **[API Reference](https://CaddyGlow.github.io/claude-code-proxy-api/api-reference/overview/)** - Complete API documentation
-- **[Developer Guide](https://CaddyGlow.github.io/claude-code-proxy-api/developer-guide/architecture/)** - Architecture and development
+- **[Online Documentation](https://caddyglow.github.io/claude-code-proxy-api)** - Full documentation site
+- **[API Reference](https://caddyglow.github.io/claude-code-proxy-api/api-reference/overview/)** - Complete API documentation
+- **[Developer Guide](https://caddyglow.github.io/claude-code-proxy-api/developer-guide/architecture/)** - Architecture and development
 
 ### Building Documentation Locally
 
@@ -433,7 +433,7 @@ make docs-build
 ## Support
 
 - Issues: [GitHub Issues](https://github.com/CaddyGlow/claude-code-proxy-api/issues)
-- Documentation: [Project Documentation](https://CaddyGlow.github.io/claude-code-proxy-api)
+- Documentation: [Project Documentation](https://caddyglow.github.io/claude-code-proxy-api)
 
 ## Acknowledgments
 

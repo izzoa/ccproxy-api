@@ -117,14 +117,14 @@ This documentation is organized into several sections:
 - **[Configuration](getting-started/configuration.md)**: Personal setup and customization options
 - **[API Reference](api-reference/overview.md)**: Complete API endpoint documentation
 - **[Examples](examples/python-client.md)**: Practical usage examples in different languages
-- **[Architecture](architecture.md)**: System design and component overview
-- **[Docker Setup](deployment.md)**: Containerized deployment for security and isolation
+- **[Architecture](developer-guide/architecture.md)**: System design and component overview
+- **[Docker Setup](deployment/overview.md)**: Containerized deployment for security and isolation
 
 ## Community and Support
 
 - **Issues**: [GitHub Issues](https://github.com/CaddyGlow/claude-code-proxy-api/issues)
 - **Source Code**: [GitHub Repository](https://github.com/CaddyGlow/claude-code-proxy-api)
-- **Documentation**: [Project Documentation](https://CaddyGlow.github.io/claude-code-proxy-api)
+- **Documentation**: [Project Documentation](https://caddyglow.github.io/claude-code-proxy-api)
 
 ## License
 
