@@ -105,12 +105,6 @@ class DockerCommandBuilder:
         image = docker_image or self.settings.docker_image
         cmd.append(image)
 
-        # Add claude command
-        cmd.append("claude")
-
-        # Add claude arguments
-        cmd.extend(claude_args)
-
         return cmd
 
     def _get_merged_volumes(

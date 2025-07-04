@@ -2,14 +2,135 @@
 
 Get up and running with Claude Code Proxy API on your local machine in minutes.
 
+## The `ccproxy` Command
+
+The `ccproxy` command is your unified interface for Claude Code Proxy API:
+
+```bash
+# Run Claude commands locally
+ccproxy claude -- /status
+
+# Run Claude commands in Docker (isolated environment)  
+ccproxy claude --docker -- /status
+```
+
+**How it works:**
+- **Unified Interface**: Same command syntax for both local and Docker execution
+- **Claude CLI Passthrough**: Forwards all Claude CLI commands and flags seamlessly
+- **Automatic Docker Management**: Handles container lifecycle when using `--docker` flag
+- **Isolated Configuration**: Docker mode uses separate config at `~/.config/cc-proxy/home`
+- **Workspace Mapping**: Working directory remains consistent between local and Docker execution
+
+## API Server Commands
+
+Choose the right command based on your use case:
+
+### `ccproxy api` - Production Ready
+```bash
+# Production server locally
+ccproxy api
+
+# Production server with Docker
+ccproxy api --docker --port 8080
+```
+**Use for**: Production deployments, maximum stability and performance.
+
+### `ccproxy run` - Balanced Development  
+```bash
+# Development server locally
+ccproxy run
+
+# Development server with reload
+ccproxy run --reload --port 8080
+```
+**Use for**: General development work, testing, and debugging.
+
+### `ccproxy dev` - Full Development Features
+```bash
+# Full development mode
+ccproxy dev
+
+# Development with all features
+ccproxy dev --reload --log-level DEBUG
+```
+**Use for**: Active development, hot-reload, detailed logging.
+
 ## Prerequisites
 
 Before starting, ensure you have:
 
 - **Python 3.11 or higher**
+- **Claude Code CLI** installed and authenticated
 - **Claude subscription** (personal or professional account)
 - **Git** for cloning the repository
 - **Docker** (optional, recommended for isolation)
+
+### Claude Code CLI Setup
+
+The proxy requires Claude Code CLI to be available, either installed locally or via Docker.
+
+#### Option 1: Local Installation
+
+Install Claude Code CLI following the [official instructions](https://docs.anthropic.com/en/docs/claude-code).
+
+**Authentication:**
+```bash
+claude auth login
+```
+
+**Verification:**
+```bash
+# Clone and navigate to the project directory first
+git clone https://github.com/CaddyGlow/claude-code-proxy-api.git
+cd claude-code-proxy-api
+
+# Test Claude CLI detection and authentication
+ccproxy claude -- /status
+```
+
+#### Option 2: Docker (Recommended)
+
+Docker users don't need to install Claude CLI locally - it's included in the Docker image.
+
+**Docker Volume Configuration:**
+- **Claude Home**: `~/.config/cc-proxy/home` (isolated from your local Claude config)
+- **Working Directory**: Current user path (same as local execution)
+- **Custom Path**: Override with environment variables if needed
+
+**Authentication:**
+```bash
+# Authenticate Claude in Docker (first time setup)
+ccproxy claude --docker -- auth login
+```
+
+**Verification:**
+```bash
+# Test Docker Claude CLI
+ccproxy claude --docker -- /status
+```
+
+**Expected output for both options:**
+```
+Executing: /path/to/claude /status
+
+╭─────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Code!                               │
+│                                                         │
+│   /help for help, /status for your current setup        │
+╰─────────────────────────────────────────────────────────╯
+
+ Claude Code Status v1.0.43
+
+ Account • /login
+  L Login Method: Claude Max Account
+  L Organization: your-email@example.com's Organization
+  L Email: your-email@example.com
+
+ Model • /model
+  L sonnet (claude-sonnet-4-20250514)
+```
+
+If you see authentication errors, refer to the [troubleshooting section](#claude-cli-not-found) below.
 
 ## Installation
 
@@ -70,32 +191,44 @@ PORT=8080 LOG_LEVEL=DEBUG uv run python main.py
 
 ### Docker (Isolated Execution)
 
-Run Claude Code Proxy in a secure, isolated container:
+Run Claude Code Proxy in a secure, isolated container with proper volume mapping:
 
 ```bash
 # Run with Docker (for secure local execution)
 docker run -d \
   --name claude-code-proxy-api \
   -p 8000:8000 \
-  -v ~/.config/claude:/root/.config/claude:ro \
+  -v ~/.config/cc-proxy/home:/data/home \
+  -v $(pwd):/data/workspace \
   claude-code-proxy-api
 
-# With custom settings
+# With custom settings and working directory
 docker run -d \
   --name claude-code-proxy-api \
   -p 8080:8000 \
   -e PORT=8000 \
   -e LOG_LEVEL=INFO \
-  -v ~/.config/claude:/root/.config/claude:ro \
+  -v ~/.config/cc-proxy/home:/data/home \
+  -v /path/to/your/workspace:/data/workspace \
   claude-code-proxy-api
 ```
+
+**Volume Mapping Explanation:**
+- **`~/.config/cc-proxy/home:/data/home`**: Isolated Claude configuration (separate from your local Claude config)
+- **`$(pwd):/data/workspace`**: Current directory as working directory for Claude
+- **Custom workspace**: Override with any path using `-v /custom/path:/data/workspace`
+
+This setup ensures:
+- Your local Claude configuration remains untouched
+- Claude in Docker has its own isolated configuration
+- Working directory matches your current location (or custom path)
 
 ### Docker Compose (Personal Setup)
 
 ```yaml
 version: '3.8'
 services:
-  claude-code-proxy-api-api:
+  claude-code-proxy-api:
     build: .
     ports:
       - "8000:8000"
@@ -103,7 +236,8 @@ services:
       - LOG_LEVEL=INFO
       - PORT=8000
     volumes:
-      - ~/.config/claude:/root/.config/claude:ro
+      - ~/.config/cc-proxy/home:/data/home
+      - .:/data/workspace
     restart: unless-stopped
 ```
 
@@ -212,9 +346,45 @@ Now that you have the server running locally:
 
 ### Claude CLI not found
 
-1. Install Claude CLI following [official instructions](https://docs.anthropic.com/en/docs/claude-code)
-2. Verify installation: `claude --version`
-3. Set custom path: `export CLAUDE_CLI_PATH=/path/to/claude`
+**For Local Installation:**
+1. **Install Claude CLI** following [official instructions](https://docs.anthropic.com/en/docs/claude-code)
+2. **Verify installation**: `claude --version`
+3. **Test authentication**: `claude auth login`
+4. **Verify proxy detection**: `ccproxy claude -- /status`
+5. **Set custom path** (if needed): `export CLAUDE_CLI_PATH=/path/to/claude`
+
+**For Docker Users:**
+1. **No local installation needed** - Claude CLI is included in Docker image
+2. **Test Docker Claude**: `ccproxy claude --docker -- /status`
+3. **Check volume mapping**: Ensure `~/.config/cc-proxy/home` directory exists
+4. **Verify workspace**: Check that workspace volume is properly mounted
+
+### Claude authentication issues
+
+**For Local Installation:**
+If `ccproxy claude -- /status` shows authentication errors:
+1. **Re-authenticate**: `claude auth login`
+2. **Check account status**: `claude /status`
+3. **Verify subscription**: Ensure your Claude account has an active subscription
+4. **Check permissions**: Ensure Claude CLI has proper permissions to access your account
+
+**For Docker Users:**
+If `ccproxy claude --docker -- /status` shows authentication errors:
+1. **Authenticate in Docker**: `ccproxy claude --docker -- auth login`
+2. **Check Docker volumes**: Verify `~/.config/cc-proxy/home` is properly mounted
+3. **Verify isolated config**: Docker uses separate config from your local Claude installation
+4. **Check container permissions**: Ensure Docker container has proper file permissions
+
+### Expected ccproxy output
+
+When running `ccproxy claude -- /status` or `ccproxy claude --docker -- /status`, you should see:
+- **Executing**: Shows the Claude CLI path being used (local or Docker)
+- **Welcome message**: Confirms Claude CLI is working
+- **Account info**: Shows your authentication status
+- **Model info**: Displays available model
+- **Working Directory**: Shows correct workspace path
+
+If any of these are missing, review the Claude CLI setup steps above.
 
 ### API calls fail
 

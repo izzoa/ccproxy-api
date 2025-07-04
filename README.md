@@ -41,6 +41,80 @@ A personal API proxy server that enables you to use your existing Claude subscri
 - Claude account with an active subscription (Pro, Team, or Enterprise) or Anthropic API key
 - Claude Code CLI (will be set up automatically)
 
+### The `ccproxy` Command
+
+The `ccproxy` command is your unified interface for both local and Docker execution:
+
+```bash
+# Run Claude commands locally
+ccproxy claude -- /status
+
+# Run Claude commands in Docker (isolated environment)
+ccproxy claude --docker -- /status
+```
+
+**Key Features:**
+- **Unified Interface**: Same command syntax for local and Docker execution
+- **Automatic Docker Management**: Handles container lifecycle when using `--docker` flag
+- **Claude CLI Passthrough**: Forwards all Claude CLI commands and flags seamlessly
+- **Isolated Configuration**: Docker mode uses separate config at `~/.config/cc-proxy/home`
+- **Workspace Mapping**: Working directory remains consistent between local and Docker execution
+
+### API Server Commands
+
+Choose the right command for your use case:
+
+#### `ccproxy api` - Production Ready
+```bash
+# Start API server locally (production mode)
+ccproxy api
+
+# Start API server with Docker (production mode)
+ccproxy api --docker
+
+# Custom port and settings
+ccproxy api --port 8080 --host 0.0.0.0
+```
+
+**Best for:**
+- Production deployments
+- Stable, optimized performance
+- When you need maximum reliability
+
+#### `ccproxy run` - Balanced Development
+```bash
+# Start API server locally (balanced mode)
+ccproxy run
+
+# Start API server with Docker
+ccproxy run --docker
+
+# With reload for development
+ccproxy run --reload --port 8080
+```
+
+**Best for:**
+- General development work
+- Testing and debugging
+- When you need a balance of features and performance
+
+#### `ccproxy dev` - Full Development Features
+```bash
+# Start API server with full development features
+ccproxy dev
+
+# Development mode with Docker
+ccproxy dev --docker
+
+# Custom development settings
+ccproxy dev --reload --port 8080 --log-level DEBUG
+```
+
+**Best for:**
+- Active development and debugging
+- When you need hot-reload and detailed logging
+- Rapid iteration and testing
+
 ### Installation
 
 1. Clone the repository:
@@ -68,11 +142,17 @@ export LOG_LEVEL=INFO  # Optional, defaults to INFO
 ### Running Your Personal Proxy
 
 ```bash
-# Using uv
-uv run python main.py
+# Production mode (recommended for most users)
+ccproxy api
 
-# Or directly with Python
-python main.py
+# Development mode with auto-reload
+ccproxy run --reload
+
+# Full development mode with debugging
+ccproxy dev --log-level DEBUG
+
+# Using Docker for isolation
+ccproxy api --docker
 ```
 
 The proxy will start on `http://localhost:8000` and automatically handle Claude authentication.

@@ -12,7 +12,7 @@ from typing import Optional
 import fastapi_cli.discover
 import typer
 import uvicorn
-from fastapi_cli.cli import app as fastapi_app
+from fastapi_cli.cli import app as fastapi_app, _run
 from fastapi_cli.exceptions import FastAPICLIException
 
 from claude_code_proxy._version import __version__
@@ -56,16 +56,17 @@ def main(
 # Remove the fastapi callback to avoid the warning
 # fastapi_app.callback()(lambda: None)
 fastapi_app.callback()(None)  # type: ignore[type-var]
+
+# Register fastapi app with typer
 app.add_typer(fastapi_app)
+
+app_entry_path = get_package_dir() / "claude_code_proxy" / "main.py"
 
 
 def get_default_path_hook() -> Path:
-    potential_paths = (get_package_dir() / "claude_code_proxy" / "main.py",)
-
-    for full_path in potential_paths:
-        path = Path(full_path)
-        if path.is_file():
-            return path
+    path = app_entry_path
+    if path.is_file():
+        return path
 
     raise FastAPICLIException(
         "Could not find a default file to run, please provide an explicit path"
@@ -108,8 +109,134 @@ def generate_token() -> None:
 
 
 @app.command()
+def api(
+    docker: bool = typer.Option(
+        False,
+        "--docker",
+        "-d",
+        help="Run API server using Docker instead of local execution",
+    ),
+    port: int = typer.Option(
+        8000,
+        "--port",
+        "-p",
+        help="Port to run the server on",
+    ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        "-h",
+        help="Host to bind the server to",
+    ),
+    reload: bool = typer.Option(
+        False,
+        "--reload",
+        help="Enable auto-reload for development",
+    ),
+    docker_image: str | None = typer.Option(
+        None,
+        "--docker-image",
+        help="Docker image to use (overrides config)",
+    ),
+    docker_env: list[str] = typer.Option(
+        [],
+        "--docker-env",
+        help="Environment variables to pass to Docker (KEY=VALUE format, can be used multiple times)",
+    ),
+    docker_volume: list[str] = typer.Option(
+        [],
+        "--docker-volume",
+        help="Volume mounts to add (host:container[:options] format, can be used multiple times)",
+    ),
+    docker_arg: list[str] = typer.Option(
+        [],
+        "--docker-arg",
+        help="Additional Docker run arguments (can be used multiple times)",
+    ),
+    docker_home: str | None = typer.Option(
+        None,
+        "--docker-home",
+        help="Home directory inside Docker container (overrides config)",
+    ),
+    docker_workspace: str | None = typer.Option(
+        None,
+        "--docker-workspace",
+        help="Workspace directory inside Docker container (overrides config)",
+    ),
+) -> None:
+    """
+    Start the Claude Code Proxy API server.
+
+    This command starts the API server either locally or in Docker.
+    The server provides both Anthropic and OpenAI-compatible endpoints.
+
+    Examples:
+        ccproxy run
+        ccproxy run --port 8080 --reload
+        ccproxy run --docker
+        ccproxy run --docker --docker-image custom:latest --port 8080
+    """
+    try:
+        if docker:
+            # Load settings to get Docker configuration
+            settings = get_settings()
+
+            # Prepare server command using fastapi
+            server_args = [
+                "run",
+                "--host",
+                "0.0.0.0",  # Docker needs to bind to 0.0.0.0
+                "--port",
+                str(port),
+            ]
+
+            if reload:
+                server_args.append("--reload")
+
+            # Build Docker command with settings and CLI overrides
+            docker_cmd = DockerCommandBuilder.from_settings_and_overrides(
+                settings.docker_settings,
+                server_args,
+                docker_image=docker_image,
+                docker_env=docker_env + [f"PORT={port}"],
+                docker_volume=docker_volume,
+                docker_arg=docker_arg + ["-p", f"{port}:{port}"],
+                docker_home=docker_home,
+                docker_workspace=docker_workspace,
+            )
+
+            docker_cmd.extend(server_args)
+            typer.echo(f"Starting Claude Code Proxy API server with Docker...")
+            typer.echo(f"Server will be available at: http://{host}:{port}")
+            typer.echo(f"Executing: {' '.join(docker_cmd)}")
+            typer.echo("")
+
+            # Use os.execvp to replace current process with docker command
+            os.execvp(docker_cmd[0], docker_cmd)
+        else:
+            # Run server locally using fastapi-cli's _run function
+            typer.echo(f"Starting Claude Code Proxy API server locally...")
+            typer.echo(f"Server will be available at: http://{host}:{port}")
+            typer.echo("")
+
+            # Use fastapi-cli's internal _run function
+            _run(
+                command="production",
+                path=app_entry_path,
+                host=host,
+                port=port,
+                reload=reload,
+            )
+
+    except Exception as e:
+        typer.echo(f"Error starting server: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
 def claude(
-    args: list[str] = typer.Argument(
+    args: list[str] | None = typer.Argument(
+        default=None,
         help="Arguments to pass to claude CLI (e.g. --version, doctor, config)"
     ),
     docker: bool = typer.Option(
@@ -163,6 +290,10 @@ def claude(
         ccproxy claude --docker --docker-image custom:latest -- --version
         ccproxy claude --docker --docker-env API_KEY=sk-... --docker-volume ./data:/data -- chat
     """
+    # Handle None args case
+    if args is None:
+        args = []
+        
     try:
         if docker:
             # Load settings to get Docker configuration
@@ -179,6 +310,12 @@ def claude(
                 docker_home=docker_home,
                 docker_workspace=docker_workspace,
             )
+
+            # Add claude command
+            cmd.append("claude")
+
+            # Add claude arguments
+            cmd.extend(claude_args)
 
             typer.echo(f"Executing: {' '.join(docker_cmd)}")
             typer.echo("")

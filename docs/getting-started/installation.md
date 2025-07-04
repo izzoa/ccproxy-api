@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Python 3.10 or higher
-- Claude CLI installed and configured
+- Claude CLI (installed locally OR use Docker - see configuration section)
 
 ## Installation Methods
 
@@ -29,11 +29,77 @@ uv sync
 
 ## Configuration
 
-After installation, you need to configure the Claude CLI:
+You have two options for Claude CLI configuration:
+
+### Option 1: Local Claude CLI Installation
+
+Install and configure Claude CLI locally:
 
 ```bash
+# Install Claude CLI (follow official instructions)
+# Then authenticate
 claude auth login
 ```
+
+**Verification:**
+```bash
+# Test Claude CLI directly
+claude --version
+claude /status
+
+# Test with the proxy (after cloning the repository)
+ccproxy claude -- /status
+```
+
+### Option 2: Docker (Recommended)
+
+Use Docker with included Claude CLI (no local installation needed):
+
+**Volume Configuration:**
+- **Claude Home**: `~/.config/cc-proxy/home` (isolated from local Claude config)
+- **Working Directory**: Current user path (same as local execution)
+
+**Authentication:**
+```bash
+# Authenticate Claude in Docker (first time setup)
+ccproxy claude --docker -- auth login
+```
+
+**Verification:**
+```bash
+# Test Docker Claude CLI
+ccproxy claude --docker -- /status
+```
+
+### Expected Output
+
+For both options, `ccproxy claude -- /status` or `ccproxy claude --docker -- /status` should show:
+
+```
+Executing: /path/to/claude /status
+
+╭─────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Code!                               │
+│                                                         │
+│   /help for help, /status for your current setup        │
+╰─────────────────────────────────────────────────────────╯
+
+ Claude Code Status v1.0.43
+
+ Account • /login
+  L Login Method: Claude Max Account  
+  L Organization: your-email@example.com's Organization
+  L Email: your-email@example.com
+
+ Model • /model
+  L sonnet (claude-sonnet-4-20250514)
+```
+
+**This confirms:**
+- Claude CLI is properly installed and accessible (local or Docker)
+- Your authentication is working
+- The proxy can detect and use Claude CLI
+- **Docker**: Uses isolated config at `~/.config/cc-proxy/home`
 
 ## Quick Start
 
