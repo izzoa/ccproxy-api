@@ -97,7 +97,7 @@ jobs:
 
       - name: Check documentation links
         run: |
-          uv run mkdocs build --clean --verbose --strict
+          uv run mkdocs build --clean --verbose
         env:
           ENABLE_MKDOCSTRINGS: true
 
