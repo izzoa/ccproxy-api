@@ -49,6 +49,7 @@ app = typer.Typer(
     add_completion=True,
     no_args_is_help=False,
     pretty_exceptions_enable=False,
+    invoke_without_command=True,
 )
 
 # Logger will be configured by configuration manager
@@ -86,6 +87,14 @@ def app_main(
     # Store config path for commands to use
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config
+
+    # If no command is invoked, run the serve command by default
+    if ctx.invoked_subcommand is None:
+        # Import here to avoid circular imports
+        from .commands.serve import api
+
+        # Invoke the serve command
+        ctx.invoke(api)
 
 
 # Register config command
