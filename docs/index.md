@@ -1,175 +1,279 @@
-# CCProxy API
+# CCProxy API Server
 
-A local reverse proxy server that routes requests to api.anthropic.com/v1/messages, leveraging your existing Claude subscription without requiring separate API costs.
+`ccproxy` is a local reverse proxy server for Anthropic Claude LLM at `api.anthropic.com/v1/messages`. It allows you to use your existing Claude Max subscription to interact with the Anthropic API, bypassing the need for separate API key billing.
 
-## What is CCProxy?
+The server provides two primary modes of operation:
+*   **SDK Mode (`/sdk`):** Routes requests through the local `claude-code-sdk`. This enables access to tools configured in your Claude environment.
+*   **API Mode (`/api`):** Acts as a direct reverse proxy, injecting the necessary authentication headers. This provides full access to the underlying API features and model settings.
 
-CCProxy is a lightweight server that runs on your computer and acts as a bridge between your applications and Claude AI. It uses the official claude-code-sdk to authenticate with your Claude account, allowing you to:
+It includes a translation layer to support both Anthropic and OpenAI-compatible API formats for requests and responses, including streaming.
 
-- **Use your Claude Pro/Team/Enterprise subscription** instead of paying for API access
-- **Access Claude through standard API interfaces** (both Anthropic and OpenAI formats)
-- **Run everything locally** with no external dependencies
-
-## Key Features
-
-### 🔐 Subscription-Based Access
-- Uses OAuth2 authentication with your existing Claude account
-- No API keys required - just login with your Claude credentials
-- Automatic token management and renewal
-
-### 🔄 Two Access Modes
-
-#### Claude Code Mode (Default at `/`)
-- Processes requests through claude-code-sdk
-- Provides access to all Claude Code tools and features
-- Some limitations: no direct ToolCall support, limited model settings
-
-#### API Mode (at `/api/`)
-- Direct reverse proxy to api.anthropic.com
-- Full API feature access including ToolCall
-- Complete control over all model settings
-- Only adds necessary authentication headers
-
-### 🌐 Universal Compatibility
-- **Anthropic API format** at `/v1/messages`
-- **OpenAI API format** at `/v1/chat/completions`
-- Drop-in replacement for existing applications
-- Streaming support for real-time responses
-
-## Quick Start
-
-### 1. Install CCProxy
+## Installation
 
 ```bash
-# Using pipx (recommended)
-pipx install git+https://github.com/CaddyGlow/ccproxy-api.git
+# The official claude-code CLI is required for SDK mode
+npm install -g @anthropic-ai/claude-code
 
-# Or from source for development
-git clone https://github.com/CaddyGlow/ccproxy-api.git
-cd ccproxy-api
-uv sync
+# run it with uv
+uvx ccproxy-api
+
+# run it with pipx
+pipx run ccproxy-api
+
+# install with uv
+uv tool install ccproxy-api
+
+# Install ccproxy with pip
+pipx install ccproxy-api
+
+# Optional: Enable shell completion
+eval "$(ccproxy --show-completion zsh)"  # For zsh
+eval "$(ccproxy --show-completion bash)" # For bash
 ```
 
-### 2. Authenticate with Claude
 
-```bash
-# Login to your Claude account
-ccproxy auth login
+For dev version replace `ccproxy-api` with `git+https://github.com/caddyglow/ccproxy-api.git@dev`
 
-# Verify authentication
-ccproxy auth validate
-```
+## Authentication
 
-### 3. Start the Server
+The proxy uses two different authentication mechanisms depending on the mode.
+
+1.  **Claude CLI (`sdk` mode):**
+    This mode relies on the authentication handled by the `claude-code-sdk`.
+    ```bash
+    claude /login
+    ```
+
+    It's also possible now to get a long live token to avoid renewing issues
+    using
+    ```sh
+    ```bash
+    claude setup-token`
+
+2.  **ccproxy (`api` mode):**
+    This mode uses its own OAuth2 flow to obtain credentials for direct API access.
+    ```bash
+    ccproxy auth login
+    ```
+
+    If you are already connected with Claude CLI the credentials should be found automatically
+
+You can check the status of these credentials with `ccproxy auth validate` and `ccproxy auth info`.
+
+Warning is show on start up if no credentials are setup.
+
+## Usage
+
+### Running the Server
 
 ```bash
 # Start the proxy server
 ccproxy
+```
+The server will start on `http://127.0.0.1:8000` by default.
 
-# Or with custom settings
-ccproxy --port 8080 --log-level DEBUG
+### Client Configuration
+
+Point your existing tools and applications to the local proxy instance by setting the appropriate environment variables. A dummy API key is required by most client libraries but is not used by the proxy itself.
+
+**For OpenAI-compatible clients:**
+```bash
+# For SDK mode
+export OPENAI_BASE_URL="http://localhost:8000/sdk/v1"
+# For API mode
+export OPENAI_BASE_URL="http://localhost:8000/api/v1"
+
+export OPENAI_API_KEY="dummy-key"
 ```
 
-### 4. Use with Your Applications
+**For Anthropic-compatible clients:**
+```bash
+# For SDK mode
+export ANTHROPIC_BASE_URL="http://localhost:8000/sdk"
+# For API mode
+export ANTHROPIC_BASE_URL="http://localhost:8000/api"
 
-```python
-# Example with Python
-from anthropic import Anthropic
-
-# Claude Code mode (default) - with all tools
-client = Anthropic(
-    base_url="http://localhost:8000",
-    api_key="dummy"  # Not used but required by SDK
-)
-
-# API mode - direct proxy for full control
-client = Anthropic(
-    base_url="http://localhost:8000/api",
-    api_key="dummy"
-)
-
-response = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    messages=[{"role": "user", "content": "Hello!"}],
-    max_tokens=100
-)
+export ANTHROPIC_API_KEY="dummy-key"
 ```
 
-## Why CCProxy?
 
-### 💰 Cost Savings
-- Use your existing Claude Pro/Team subscription
-- No separate API costs
-- Same powerful Claude models
+## Using with Aider
 
-### 🔒 Privacy & Security
-- Runs entirely on your local machine
-- Your data never leaves your computer
-- Credentials stored securely locally
+CCProxy works seamlessly with Aider and other AI coding assistants:
 
-### 🛠️ Developer Friendly
-- Compatible with existing Anthropic and OpenAI SDKs
-- No code changes needed in your applications
-- Just point to `localhost:8000`
+### Anthropic Mode
+```bash
+export ANTHROPIC_API_KEY=dummy
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8000/api
+aider --model claude-sonnet-4-20250514
+```
+
+### OpenAI Mode with Model Mapping
+
+If your tool only supports OpenAI settings, ccproxy automatically maps OpenAI models to Claude:
+
+```bash
+export OPENAI_API_KEY=dummy
+export OPENAI_BASE_URL=http://127.0.0.1:8000/api/v1
+aider --model o3-mini
+```
+
+### API Mode (Direct Proxy)
+
+For minimal interference and direct API access:
+
+```bash
+export OPENAI_API_KEY=dummy
+export OPENAI_BASE_URL=http://127.0.0.1:8000/api/v1
+aider --model o3-mini
+```
+
+### `curl` Example
+
+```bash
+# SDK mode
+curl -X POST http://localhost:8000/sdk/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-5-sonnet-20241022",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "max_tokens": 100
+  }'
+
+# API mode
+curl -X POST http://localhost:8000/api/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-5-sonnet-20241022",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "max_tokens": 100
+  }'
+```
+More examples are available in the `examples/` directory.
+
+## Endpoints
+
+The proxy exposes endpoints under two prefixes, corresponding to its operating modes.
+
+| Mode | URL Prefix | Description | Use Case |
+|------|------------|-------------|----------|
+| **SDK** | `/sdk/` | Uses `claude-code-sdk` with its configured tools. | Accessing Claude with local tools. |
+| **API** | `/api/` | Direct proxy with header injection. | Full API control, direct access. |
+
+*   **Anthropic:**
+    *   `POST /sdk/v1/messages`
+    *   `POST /api/v1/messages`
+*   **OpenAI-Compatible:**
+    *   `POST /sdk/v1/chat/completions`
+    *   `POST /api/v1/chat/completions`
+*   **Utility:**
+    *   `GET /health`
+    *   `GET /sdk/models`, `GET /api/models`
+    *   `GET /sdk/status`, `GET /api/status`
+    *   `GET /oauth/callback`
+*   **Observability (Optional):**
+    *   `GET /metrics`
+    *   `GET /logs/status`, `GET /logs/query`
+    *   `GET /dashboard`
 
 ## Supported Models
 
-All models available to your Claude subscription:
+CCProxy supports recent Claude models including Opus, Sonnet, and Haiku variants. The specific models available to you will depend on your Claude account and the features enabled for your subscription.
 
-| Model | Description |
-|-------|-------------|
-| `claude-opus-4-20250514` | Claude 4 Opus (most capable) |
-| `claude-sonnet-4-20250514` | Claude 4 Sonnet (latest) |
-| `claude-3-7-sonnet-20250219` | Claude 3.7 Sonnet |
-| `claude-3-5-sonnet-20241022` | Claude 3.5 Sonnet |
+ * `claude-opus-4-20250514`
+ * `claude-sonnet-4-20250514`
+ * `claude-3-7-sonnet-20250219`
+ * `claude-3-5-sonnet-20241022`
+ * `claude-3-5-sonnet-20240620`
 
-## How It Works
+## Configuration
 
-```mermaid
-graph LR
-    A[Your App] -->|API Request| B[CCProxy]
-    B -->|OAuth2 Auth| C[claude-code-sdk]
-    C -->|Authenticated Request| D[api.anthropic.com]
-    D -->|Response| C
-    C -->|Response| B
-    B -->|API Response| A
-```
+Settings can be configured through (in order of precedence):
+1. Command-line arguments
+2. Environment variables
+3. `.env` file
+4. TOML configuration files (`.ccproxy.toml`, `ccproxy.toml`, or `~/.config/ccproxy/config.toml`)
+5. Default values
 
-1. Your application sends standard API requests to CCProxy
-2. CCProxy uses your Claude credentials via claude-code-sdk
-3. Requests are forwarded to api.anthropic.com with proper authentication
-4. Responses are returned to your application
+For complex configurations, you can use a nested syntax for environment variables with `__` as a delimiter:
 
-## Authentication
-
-### Initial Setup
 ```bash
-# One-time authentication
-ccproxy auth login
+# Server settings
+SERVER__HOST=0.0.0.0
+SERVER__PORT=8080
+# etc.
 ```
 
-### Managing Credentials
+## Securing the Proxy (Optional)
+
+You can enable token authentication for the proxy. This supports multiple header formats (`x-api-key` for Anthropic, `Authorization: Bearer` for OpenAI) for compatibility with standard client libraries.
+
+**1. Generate a Token:**
 ```bash
-# Check status
-ccproxy auth validate
-
-# View details (auto-renews if expired)
-ccproxy auth info
+ccproxy generate-token
+# Output: SECURITY__AUTH_TOKEN=abc123xyz789...
 ```
 
-## Next Steps
+**2. Configure the Token:**
+```bash
+# Set environment variable
+export SECURITY__AUTH_TOKEN=abc123xyz789...
 
-- **[Quick Start Guide](getting-started/quickstart.md)** - Get up and running in minutes
-- **[Installation Options](getting-started/installation.md)** - Detailed installation instructions
-- **[API Usage](user-guide/api-usage.md)** - Learn about the two proxy modes
-- **[Examples](examples.md)** - See code examples for various use cases
+# Or add to .env file
+echo "SECURITY__AUTH_TOKEN=abc123xyz789..." >> .env
+```
 
-## Need Help?
+**3. Use in Requests:**
+When authentication is enabled, include the token in your API requests.
+```bash
+# Anthropic Format (x-api-key)
+curl -H "x-api-key: your-token" ...
 
-- **[Troubleshooting](getting-started/quickstart.md#troubleshooting)** - Common issues and solutions
-- **[GitHub Issues](https://github.com/CaddyGlow/ccproxy-api/issues)** - Report bugs or request features
-- **[API Reference](api-reference.md)** - Complete endpoint documentation
+# OpenAI/Bearer Format
+curl -H "Authorization: Bearer your-token" ...
+```
+
+## Observability
+
+`ccproxy` includes an optional but powerful observability suite for monitoring and analytics. When enabled, it provides:
+
+*   **Prometheus Metrics:** A `/metrics` endpoint for real-time operational monitoring.
+*   **Access Log Storage:** Detailed request logs, including token usage and costs, are stored in a local DuckDB database.
+*   **Analytics API:** Endpoints to query and analyze historical usage data.
+*   **Real-time Dashboard:** A live web interface at `/dashboard` to visualize metrics and request streams.
+
+These features are disabled by default and can be enabled via configuration. For a complete guide on setting up and using these features, see the [Observability Documentation](docs/observability.md).
+
+## Troubleshooting
+
+### Common Issues
+
+1.  **Authentication Error:** Ensure you're using the correct mode (`/sdk` or `/api`) for your authentication method.
+2.  **Claude Credentials Expired:** Run `ccproxy auth login` to refresh credentials for API mode. Run `claude /login` for SDK mode.
+3.  **Missing API Auth Token:** If you've enabled security, include the token in your request headers.
+4.  **Port Already in Use:** Start the server on a different port: `ccproxy --port 8001`.
+5.  **Model Not Available:** Check that your Claude subscription includes the requested model.
+
+## Contributing
+
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## License
 
-This project is licensed under the MIT License. CCProxy is not affiliated with Anthropic. It's a community tool that helps you use your existing Claude subscription more effectively.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Documentation
+
+- **[Online Documentation](https://caddyglow.github.io/ccproxy-api)**
+- **[API Reference](https://caddyglow.github.io/ccproxy-api/api-reference/overview/)**
+- **[Developer Guide](https://caddyglow.github.io/ccproxy-api/developer-guide/architecture/)**
+
+## Support
+
+- Issues: [GitHub Issues](https://github.com/CaddyGlow/ccproxy-api/issues)
+- Documentation: [Project Documentation](https://caddyglow.github.io/ccproxy-api)
+
+## Acknowledgments
+
+- [Anthropic](https://anthropic.com) for Claude and the Claude Code SDK
+- The open-source community

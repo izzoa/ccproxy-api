@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-07-22
+
+### Added
+- **Permission Mode Support**: Restored `--permission-mode` option supporting default, acceptEdits, and bypassPermissions modes
+- **Custom Permission Tool**: Restored `--permission-prompt-tool-name` option to specify custom permission tool names
+- **Permission Response Models**: Added `PermissionToolAllowResponse` and `PermissionToolDenyResponse` models with proper JSON serialization
+
+### Changed
+- **Message Formatting**: Modified `MessageConverter.combine_text_parts()` to join text parts with newlines instead of spaces, preserving formatting in multi-line content
+- **Settings Integration**: Enhanced OptionsHandler to apply default Claude options from settings before API parameters
+- **Configuration**: Extended settings to persist permission_mode and permission_prompt_tool_name
+
+### Fixed
+- **Claude SDK Options**: Integrated Settings dependency into ClaudeSDKService to support configuration-based options
+
 ## [0.1.1] - 2025-07-22
 
 ### Added
