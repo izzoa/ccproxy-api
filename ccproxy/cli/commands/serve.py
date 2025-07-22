@@ -3,7 +3,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import typer
 import uvicorn
@@ -23,48 +23,25 @@ from ccproxy.config.settings import (
 )
 from ccproxy.core.async_utils import get_root_package_name
 from ccproxy.docker import (
-    DockerEnv,
-    DockerPath,
-    DockerUserContext,
-    DockerVolume,
     create_docker_adapter,
 )
 
 from ..docker import (
     _create_docker_adapter_from_settings,
 )
-from ..docker.params import (
-    docker_arg_option,
-    docker_env_option,
-    docker_home_option,
-    docker_image_option,
-    docker_volume_option,
-    docker_workspace_option,
-    user_gid_option,
-    user_mapping_option,
-    user_uid_option,
-)
 from ..options.claude_options import (
     ClaudeOptions,
-    allowed_tools_option,
-    append_system_prompt_option,
-    claude_cli_path_option,
-    cwd_option,
-    disallowed_tools_option,
-    max_thinking_tokens_option,
-    max_turns_option,
-    permission_mode_option,
-    permission_prompt_tool_name_option,
+    validate_claude_cli_path,
+    validate_cwd,
+    validate_max_thinking_tokens,
+    validate_max_turns,
+    validate_permission_mode,
 )
-from ..options.core_options import CoreOptions, config_option
-from ..options.security_options import SecurityOptions, auth_token_option
+from ..options.security_options import SecurityOptions, validate_auth_token
 from ..options.server_options import (
     ServerOptions,
-    host_option,
-    log_file_option,
-    log_level_option,
-    port_option,
-    reload_option,
+    validate_log_level,
+    validate_port,
 )
 
 
@@ -306,42 +283,236 @@ def _run_local_server(settings: Settings, cli_overrides: dict[str, Any]) -> None
 
 def api(
     # Configuration
-    config: Path | None = config_option(),
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Path to configuration file (TOML, JSON, or YAML)",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            rich_help_panel="Configuration",
+        ),
+    ] = None,
     # Server options
-    port: int | None = port_option(),
-    host: str | None = host_option(),
-    reload: bool | None = reload_option(),
-    log_level: str | None = log_level_option(),
-    log_file: str | None = log_file_option(),
+    port: Annotated[
+        int | None,
+        typer.Option(
+            "--port",
+            "-p",
+            help="Port to run the server on",
+            callback=validate_port,
+            rich_help_panel="Server Settings",
+        ),
+    ] = None,
+    host: Annotated[
+        str | None,
+        typer.Option(
+            "--host",
+            "-h",
+            help="Host to bind the server to",
+            rich_help_panel="Server Settings",
+        ),
+    ] = None,
+    reload: Annotated[
+        bool | None,
+        typer.Option(
+            "--reload/--no-reload",
+            help="Enable auto-reload for development",
+            rich_help_panel="Server Settings",
+        ),
+    ] = None,
+    log_level: Annotated[
+        str | None,
+        typer.Option(
+            "--log-level",
+            help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+            callback=validate_log_level,
+            rich_help_panel="Server Settings",
+        ),
+    ] = None,
+    log_file: Annotated[
+        str | None,
+        typer.Option(
+            "--log-file",
+            help="Path to JSON log file. If specified, logs will be written to this file in JSON format",
+            rich_help_panel="Server Settings",
+        ),
+    ] = None,
     # Security options
-    auth_token: str | None = auth_token_option(),
+    auth_token: Annotated[
+        str | None,
+        typer.Option(
+            "--auth-token",
+            help="Bearer token for API authentication",
+            callback=validate_auth_token,
+            rich_help_panel="Security Settings",
+        ),
+    ] = None,
     # Claude options
-    max_thinking_tokens: int | None = max_thinking_tokens_option(),
-    allowed_tools: str | None = allowed_tools_option(),
-    disallowed_tools: str | None = disallowed_tools_option(),
-    claude_cli_path: str | None = claude_cli_path_option(),
-    append_system_prompt: str | None = append_system_prompt_option(),
-    permission_mode: str | None = permission_mode_option(),
-    max_turns: int | None = max_turns_option(),
-    cwd: str | None = cwd_option(),
-    permission_prompt_tool_name: str | None = permission_prompt_tool_name_option(),
+    max_thinking_tokens: Annotated[
+        int | None,
+        typer.Option(
+            "--max-thinking-tokens",
+            help="Maximum thinking tokens for Claude Code",
+            callback=validate_max_thinking_tokens,
+            rich_help_panel="Claude Settings",
+        ),
+    ] = None,
+    allowed_tools: Annotated[
+        str | None,
+        typer.Option(
+            "--allowed-tools",
+            help="List of allowed tools (comma-separated)",
+            rich_help_panel="Claude Settings",
+        ),
+    ] = None,
+    disallowed_tools: Annotated[
+        str | None,
+        typer.Option(
+            "--disallowed-tools",
+            help="List of disallowed tools (comma-separated)",
+            rich_help_panel="Claude Settings",
+        ),
+    ] = None,
+    claude_cli_path: Annotated[
+        str | None,
+        typer.Option(
+            "--claude-cli-path",
+            help="Path to Claude CLI executable",
+            callback=validate_claude_cli_path,
+            rich_help_panel="Claude Settings",
+        ),
+    ] = None,
+    append_system_prompt: Annotated[
+        str | None,
+        typer.Option(
+            "--append-system-prompt",
+            help="Additional system prompt to append",
+            rich_help_panel="Claude Settings",
+        ),
+    ] = None,
+    permission_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--permission-mode",
+            help="Permission mode: default, acceptEdits, or bypassPermissions",
+            callback=validate_permission_mode,
+            rich_help_panel="Claude Settings",
+        ),
+    ] = None,
+    max_turns: Annotated[
+        int | None,
+        typer.Option(
+            "--max-turns",
+            help="Maximum conversation turns",
+            callback=validate_max_turns,
+            rich_help_panel="Claude Settings",
+        ),
+    ] = None,
+    cwd: Annotated[
+        str | None,
+        typer.Option(
+            "--cwd",
+            help="Working directory path",
+            callback=validate_cwd,
+            rich_help_panel="Claude Settings",
+        ),
+    ] = None,
+    permission_prompt_tool_name: Annotated[
+        str | None,
+        typer.Option(
+            "--permission-prompt-tool-name",
+            help="Permission prompt tool name",
+            rich_help_panel="Claude Settings",
+        ),
+    ] = None,
     # Core settings
-    docker: bool = typer.Option(
-        False,
-        "--docker",
-        "-d",
-        help="Run API server using Docker instead of local execution",
-    ),
+    docker: Annotated[
+        bool,
+        typer.Option(
+            "--docker",
+            "-d",
+            help="Run API server using Docker instead of local execution",
+        ),
+    ] = False,
     # Docker settings using shared parameters
-    docker_image: str | None = docker_image_option(),
-    docker_env: list[str] = docker_env_option(),
-    docker_volume: list[str] = docker_volume_option(),
-    docker_arg: list[str] = docker_arg_option(),
-    docker_home: str | None = docker_home_option(),
-    docker_workspace: str | None = docker_workspace_option(),
-    user_mapping_enabled: bool | None = user_mapping_option(),
-    user_uid: int | None = user_uid_option(),
-    user_gid: int | None = user_gid_option(),
+    docker_image: Annotated[
+        str | None,
+        typer.Option(
+            "--docker-image",
+            help="Docker image to use (overrides configuration)",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    docker_env: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--docker-env",
+            "-e",
+            help="Environment variables to pass to Docker container",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    docker_volume: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--docker-volume",
+            "-v",
+            help="Volume mounts for Docker container",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    docker_arg: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--docker-arg",
+            help="Additional arguments to pass to docker run",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    docker_home: Annotated[
+        str | None,
+        typer.Option(
+            "--docker-home",
+            help="Override the home directory for Docker",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    docker_workspace: Annotated[
+        str | None,
+        typer.Option(
+            "--docker-workspace",
+            help="Override the workspace directory for Docker",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    user_mapping_enabled: Annotated[
+        bool | None,
+        typer.Option(
+            "--user-mapping/--no-user-mapping",
+            help="Enable user mapping for Docker",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    user_uid: Annotated[
+        int | None,
+        typer.Option(
+            "--user-uid",
+            help="User UID for Docker user mapping",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    user_gid: Annotated[
+        int | None,
+        typer.Option(
+            "--user-gid",
+            help="User GID for Docker user mapping",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
 ) -> None:
     """
     Start the CCProxy API server.
@@ -496,26 +667,95 @@ def api(
 
 
 def claude(
-    args: list[str] | None = typer.Argument(
-        default=None,
-        help="Arguments to pass to claude CLI (e.g. --version, doctor, config)",
-    ),
-    docker: bool = typer.Option(
-        False,
-        "--docker",
-        "-d",
-        help="Run claude command from docker image instead of local CLI",
-    ),
+    args: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help="Arguments to pass to claude CLI (e.g. --version, doctor, config)",
+        ),
+    ] = None,
+    docker: Annotated[
+        bool,
+        typer.Option(
+            "--docker",
+            "-d",
+            help="Run claude command from docker image instead of local CLI",
+        ),
+    ] = False,
     # Docker settings using shared parameters
-    docker_image: str | None = docker_image_option(),
-    docker_env: list[str] = docker_env_option(),
-    docker_volume: list[str] = docker_volume_option(),
-    docker_arg: list[str] = docker_arg_option(),
-    docker_home: str | None = docker_home_option(),
-    docker_workspace: str | None = docker_workspace_option(),
-    user_mapping_enabled: bool | None = user_mapping_option(),
-    user_uid: int | None = user_uid_option(),
-    user_gid: int | None = user_gid_option(),
+    docker_image: Annotated[
+        str | None,
+        typer.Option(
+            "--docker-image",
+            help="Docker image to use (overrides configuration)",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    docker_env: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--docker-env",
+            "-e",
+            help="Environment variables to pass to Docker container",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    docker_volume: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--docker-volume",
+            "-v",
+            help="Volume mounts for Docker container",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    docker_arg: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--docker-arg",
+            help="Additional arguments to pass to docker run",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    docker_home: Annotated[
+        str | None,
+        typer.Option(
+            "--docker-home",
+            help="Override the home directory for Docker",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    docker_workspace: Annotated[
+        str | None,
+        typer.Option(
+            "--docker-workspace",
+            help="Override the workspace directory for Docker",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    user_mapping_enabled: Annotated[
+        bool | None,
+        typer.Option(
+            "--user-mapping/--no-user-mapping",
+            help="Enable user mapping for Docker",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    user_uid: Annotated[
+        int | None,
+        typer.Option(
+            "--user-uid",
+            help="User UID for Docker user mapping",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
+    user_gid: Annotated[
+        int | None,
+        typer.Option(
+            "--user-gid",
+            help="User GID for Docker user mapping",
+            rich_help_panel="Docker Settings",
+        ),
+    ] = None,
 ) -> None:
     """
     Execute claude CLI commands directly.

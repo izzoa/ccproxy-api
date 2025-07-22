@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import UTC, datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Annotated, Optional
 
 import typer
 from rich import box
@@ -52,16 +52,20 @@ def get_docker_credential_paths() -> list[Path]:
 
 @app.command(name="validate")
 def validate_credentials(
-    docker: bool = typer.Option(
-        False,
-        "--docker",
-        help="Use Docker credential paths (from get_claude_docker_home_dir())",
-    ),
-    credential_file: str | None = typer.Option(
-        None,
-        "--credential-file",
-        help="Path to specific credential file to validate",
-    ),
+    docker: Annotated[
+        bool,
+        typer.Option(
+            "--docker",
+            help="Use Docker credential paths (from get_claude_docker_home_dir())",
+        ),
+    ] = False,
+    credential_file: Annotated[
+        str | None,
+        typer.Option(
+            "--credential-file",
+            help="Path to specific credential file to validate",
+        ),
+    ] = None,
 ) -> None:
     """Validate Claude CLI credentials.
 
@@ -176,16 +180,20 @@ def validate_credentials(
 
 @app.command(name="info")
 def credential_info(
-    docker: bool = typer.Option(
-        False,
-        "--docker",
-        help="Use Docker credential paths (from get_claude_docker_home_dir())",
-    ),
-    credential_file: str | None = typer.Option(
-        None,
-        "--credential-file",
-        help="Path to specific credential file to display info for",
-    ),
+    docker: Annotated[
+        bool,
+        typer.Option(
+            "--docker",
+            help="Use Docker credential paths (from get_claude_docker_home_dir())",
+        ),
+    ] = False,
+    credential_file: Annotated[
+        str | None,
+        typer.Option(
+            "--credential-file",
+            help="Path to specific credential file to display info for",
+        ),
+    ] = None,
 ) -> None:
     """Display detailed credential information.
 
@@ -376,16 +384,20 @@ def credential_info(
 
 @app.command(name="login")
 def login_command(
-    docker: bool = typer.Option(
-        False,
-        "--docker",
-        help="Use Docker credential paths (from get_claude_docker_home_dir())",
-    ),
-    credential_file: str | None = typer.Option(
-        None,
-        "--credential-file",
-        help="Path to specific credential file to save to",
-    ),
+    docker: Annotated[
+        bool,
+        typer.Option(
+            "--docker",
+            help="Use Docker credential paths (from get_claude_docker_home_dir())",
+        ),
+    ] = False,
+    credential_file: Annotated[
+        str | None,
+        typer.Option(
+            "--credential-file",
+            help="Path to specific credential file to save to",
+        ),
+    ] = None,
 ) -> None:
     """Login to Claude using OAuth authentication.
 
@@ -470,18 +482,22 @@ def login_command(
 
 @app.command()
 def renew(
-    docker: bool = typer.Option(
-        False,
-        "--docker",
-        "-d",
-        help="Renew credentials for Docker environment",
-    ),
-    credential_file: Path | None = typer.Option(
-        None,
-        "--credential-file",
-        "-f",
-        help="Path to custom credential file",
-    ),
+    docker: Annotated[
+        bool,
+        typer.Option(
+            "--docker",
+            "-d",
+            help="Renew credentials for Docker environment",
+        ),
+    ] = False,
+    credential_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--credential-file",
+            "-f",
+            help="Path to custom credential file",
+        ),
+    ] = None,
 ) -> None:
     """Force renew Claude credentials without checking expiration.
 

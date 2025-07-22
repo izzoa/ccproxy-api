@@ -4,7 +4,7 @@ import json
 import os
 import secrets
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Annotated, Any, Optional, cast
 
 import typer
 from click import get_current_context
@@ -59,24 +59,28 @@ logger = get_logger(__name__)
 @app.callback()
 def app_main(
     ctx: typer.Context,
-    version: bool = typer.Option(
-        False,
-        "--version",
-        "-V",
-        callback=version_callback,
-        is_eager=True,
-        help="Show version and exit.",
-    ),
-    config: Path | None = typer.Option(
-        None,
-        "--config",
-        "-c",
-        help="Path to configuration file (TOML, JSON, or YAML)",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-    ),
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            "-V",
+            callback=version_callback,
+            is_eager=True,
+            help="Show version and exit.",
+        ),
+    ] = False,
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Path to configuration file (TOML, JSON, or YAML)",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = None,
 ) -> None:
     """CCProxy API Server - Anthropic and OpenAI compatible interface for Claude."""
     # Store config path for commands to use
@@ -98,10 +102,10 @@ app.command(name="serve")(api)
 
 @app.command()
 def permission_tool(
-    tool_name: str = typer.Argument(
-        ..., help="Name of the tool to check permissions for"
-    ),
-    tool_input: str = typer.Argument(..., help="JSON string of the tool input"),
+    tool_name: Annotated[
+        str, typer.Argument(help="Name of the tool to check permissions for")
+    ],
+    tool_input: Annotated[str, typer.Argument(help="JSON string of the tool input")],
 ) -> None:
     """
     MCP permission prompt tool for Claude Code SDK.

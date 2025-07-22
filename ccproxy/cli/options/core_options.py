@@ -6,19 +6,7 @@ from typing import Any
 import typer
 
 
-def config_option() -> Any:
-    """Configuration file parameter."""
-    return typer.Option(
-        None,
-        "--config",
-        "-c",
-        help="Path to configuration file (TOML, JSON, or YAML)",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        rich_help_panel="Configuration",
-    )
+# Factory functions removed - use Annotated syntax directly in commands
 
 
 class CoreOptions:

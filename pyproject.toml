@@ -48,6 +48,7 @@ packages = ["ccproxy"]
 [project.scripts]
 # ccproxy = "ccproxy.cli:app"
 ccproxy = "ccproxy.cli:main"
+ccproxy-api = "ccproxy.cli:main"
 
 [dependency-groups]
 dev = [

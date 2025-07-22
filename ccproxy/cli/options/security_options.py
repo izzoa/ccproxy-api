@@ -18,15 +18,7 @@ def validate_auth_token(
     return value
 
 
-def auth_token_option() -> Any:
-    """Auth token parameter."""
-    return typer.Option(
-        None,
-        "--auth-token",
-        help="Bearer token for API authentication",
-        callback=validate_auth_token,
-        rich_help_panel="Security Settings",
-    )
+# Factory functions removed - use Annotated syntax directly in commands
 
 
 class SecurityOptions:

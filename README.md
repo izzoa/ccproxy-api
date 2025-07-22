@@ -14,13 +14,25 @@ It includes a translation layer to support both Anthropic and OpenAI-compatible 
 # The official claude-code CLI is required for SDK mode
 npm install -g @anthropic-ai/claude-code
 
-# Install ccproxy
-pipx install git+https://github.com/caddyglow/ccproxy-api.git@dev
+# install with uv
+uv tool install ccproxy-api
+
+# run it with uv
+uvx ccproxy-api
+
+# Install ccproxy with pip
+pipx install ccproxy-api
+
+# run it with pipx
+pipx run ccproxy-api
 
 # Optional: Enable shell completion
 eval "$(ccproxy --show-completion zsh)"  # For zsh
 eval "$(ccproxy --show-completion bash)" # For bash
 ```
+
+
+For dev version replace `ccproxy-api` with `git+https://github.com/caddyglow/ccproxy-api.git@dev`
 
 ## Authentication
 
