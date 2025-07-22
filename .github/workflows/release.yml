@@ -130,6 +130,9 @@ jobs:
     needs: [build-package, build-release-docker]
     runs-on: ubuntu-latest
 
+    permissions:
+      id-token: write
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
