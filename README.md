@@ -96,6 +96,38 @@ export ANTHROPIC_BASE_URL="http://localhost:8000/api"
 export ANTHROPIC_API_KEY="dummy-key"
 ```
 
+
+## Using with Aider
+
+CCProxy works seamlessly with Aider and other AI coding assistants:
+
+### Anthropic Mode
+```bash
+export ANTHROPIC_API_KEY=dummy
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8000/api
+aider --model claude-sonnet-4-20250514
+```
+
+### OpenAI Mode with Model Mapping
+
+If your tool only supports OpenAI settings, ccproxy automatically maps OpenAI models to Claude:
+
+```bash
+export OPENAI_API_KEY=dummy
+export OPENAI_BASE_URL=http://127.0.0.1:8000/api/v1
+aider --model o3-mini
+```
+
+### API Mode (Direct Proxy)
+
+For minimal interference and direct API access:
+
+```bash
+export OPENAI_API_KEY=dummy
+export OPENAI_BASE_URL=http://127.0.0.1:8000/api/v1
+aider --model o3-mini
+```
+
 ### `curl` Example
 
 ```bash

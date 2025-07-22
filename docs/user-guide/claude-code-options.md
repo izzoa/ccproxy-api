@@ -23,17 +23,6 @@ The CCProxy API supports passing all ClaudeCodeOptions parameters through API re
 - **Description**: List of tools that Claude is explicitly forbidden from using
 - **Example**: `["Bash", "Write"]`
 
-#### `permission_mode`
-- **Type**: `string`
-- **Options**: `"default"`, `"acceptEdits"`, `"bypassPermissions"`
-- **Description**: Controls how Claude handles tool permissions
-  - `default`: Normal permission checking
-  - `acceptEdits`: Auto-accept edit operations
-  - `bypassPermissions`: Skip permission checks entirely
-
-#### `permission_prompt_tool_name`
-- **Type**: `string`
-- **Description**: Specific tool name for permission prompts
 
 ### Thinking and Processing
 
@@ -106,7 +95,6 @@ The CCProxy API supports passing all ClaudeCodeOptions parameters through API re
   ],
   "max_tokens": 2000,
   "allowed_tools": ["Read", "Edit"],
-  "permission_mode": "acceptEdits",
   "cwd": "/home/user/project"
 }
 ```
@@ -169,7 +157,7 @@ The parameters are passed alongside standard API parameters and are processed by
 Some of these options can also be configured via command-line arguments when starting the API server:
 
 ```bash
-ccproxy api --allowed-tools Read,Write,Bash --permission-mode acceptEdits --max-thinking-tokens 10000
+ccproxy api --allowed-tools Read,Write,Bash --max-thinking-tokens 10000
 ```
 
 ## Best Practices
@@ -177,8 +165,7 @@ ccproxy api --allowed-tools Read,Write,Bash --permission-mode acceptEdits --max-
 ### Security Considerations
 
 1. **Tool Restrictions**: Use `allowed_tools` and `disallowed_tools` to limit Claude's capabilities based on your security requirements
-2. **Permission Modes**: Be cautious with `bypassPermissions` - only use in trusted environments
-3. **Working Directory**: Set `cwd` to restrict file operations to specific directories
+2. **Working Directory**: Set `cwd` to restrict file operations to specific directories
 
 ### Performance Optimization
 
@@ -197,13 +184,11 @@ ccproxy api --allowed-tools Read,Write,Bash --permission-mode acceptEdits --max-
 ### Common Issues
 
 1. **Unknown Tool Names**: Ensure tool names in `allowed_tools` match exactly with available tools
-2. **MCP Connection Failures**: Check MCP server configurations and network connectivity  
-3. **Permission Errors**: Verify `permission_mode` settings match your security requirements
+2. **MCP Connection Failures**: Check MCP server configurations and network connectivity
 
 ### Validation Errors
 
 The API will return validation errors for:
-- Invalid `permission_mode` values
 - Malformed `mcp_servers` configurations  
 - Non-existent tool names in `allowed_tools`/`disallowed_tools`
 

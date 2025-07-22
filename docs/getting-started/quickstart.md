@@ -406,7 +406,7 @@ API key users can use any mode:
 
 ```bash
 # SDK mode (with Claude Code features)
-curl -X POST http://localhost:8000/v1/messages \
+curl -X POST http://localhost:8000/sdk/v1/messages \
   -H "Content-Type: application/json" \
   -H "x-api-key: sk-ant-api03-..." \
   -d '{
@@ -489,15 +489,71 @@ curl http://localhost:8000/health
 Expected response:
 ```json
 {
-  "status": "healthy",
-  "claude_cli_available": true,
-  "timestamp": "2024-01-01T12:00:00Z"
+  "status": "pass",
+  "version": "0.1.1.dev2+gc2627a4.d19800101",
+  "serviceId": "claude-code-proxy",
+  "description": "CCProxy API Server",
+  "time": "2025-07-22T14:26:08.499699+00:00",
+  "checks": {
+    "oauth2_credentials": [
+      {
+        "componentId": "oauth2-credentials",
+        "componentType": "authentication",
+        "status": "pass",
+        "time": "2025-07-22T14:26:08.499699+00:00",
+        "output": "OAuth2 credentials: valid",
+        "auth_status": "valid",
+        "credentials_path": "/home/rick/.claude/.credentials.json",
+        "expiration": "2026-07-22T12:42:33.440000+00:00",
+        "subscription_type": null,
+        "expires_in_hours": "8758"
+      }
+    ],
+    "claude_cli": [
+      {
+        "componentId": "claude-cli",
+        "componentType": "external_dependency",
+        "status": "pass",
+        "time": "2025-07-22T14:26:08.499699+00:00",
+        "output": "Claude CLI: available",
+        "installation_status": "found",
+        "cli_status": "available",
+        "version": "1.0.56",
+        "binary_path": "/home/rick/.cache/.bun/bin/claude",
+        "version_output": "1.0.56 (Claude Code)"
+      }
+    ],
+    "claude_sdk": [
+      {
+        "componentId": "claude-sdk",
+        "componentType": "python_package",
+        "status": "pass",
+        "time": "2025-07-22T14:26:08.499699+00:00",
+        "output": "Claude SDK: available",
+        "installation_status": "found",
+        "sdk_status": "available",
+        "version": "0.0.14",
+        "import_successful": true
+      }
+    ],
+    "proxy_service": [
+      {
+        "componentId": "proxy-service",
+        "componentType": "service",
+        "status": "pass",
+        "time": "2025-07-22T14:26:08.499699+00:00",
+        "output": "Proxy service operational",
+        "version": "0.1.1.dev2+gc2627a4.d19800101"
+      }
+    ]
+  }
 }
+~/projects-caddy/claude-code-proxy-api %  
 ```
 
 ## Available Models
 
-Check available models:
+Check available models mostly used for tools that need it:
 
 ```bash
 curl http://localhost:8000/v1/models
@@ -509,7 +565,7 @@ The proxy supports two primary modes of operation:
 
 | Mode | URL Prefix | Authentication | Use Case |
 |------|------------|----------------|----------|
-| SDK | `/sdk/` or `/` or `/cc/` | OAuth, API Key | Claude Code features with local tools |
+| SDK | `/sdk/`  | OAuth, API Key | Claude Code features with local tools |
 | API | `/api/` | OAuth, API Key | Direct proxy with full API access |
 
 **Note**: The default endpoints (`/v1/messages`, `/v1/chat/completions`) use SDK mode, which provides access to Claude Code tools and features.
@@ -521,7 +577,7 @@ CCProxy works seamlessly with Aider and other AI coding assistants:
 ### Anthropic Mode
 ```bash
 export ANTHROPIC_API_KEY=dummy
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8000/
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8000/api
 aider --model claude-sonnet-4-20250514
 ```
 
@@ -530,18 +586,10 @@ If your tool only supports OpenAI settings, ccproxy automatically maps OpenAI mo
 
 ```bash
 export OPENAI_API_KEY=dummy
-export OPENAI_BASE_URL=http://127.0.0.1:8000/sdk/v1
+export OPENAI_BASE_URL=http://127.0.0.1:8000/api/v1
 aider --model o3-mini
 ```
 
-**Model Mapping:**
-```python
-OPENAI_TO_CLAUDE_MODEL_MAPPING = {
-    "gpt-4o-mini": "claude-3-5-haiku-latest",
-    "o3-mini": "claude-opus-4-20250514",
-    "o1-mini": "claude-sonnet-4-20250514",
-    "gpt-4o": "claude-3-7-sonnet-20250219",
-}
 ```
 
 ### API Mode (Direct Proxy)
