@@ -173,9 +173,3 @@ async def list_models(
         raise HTTPException(
             status_code=500, detail=f"Internal server error: {str(e)}"
         ) from e
-
-
-@router.get("/status")
-async def claude_sdk_status() -> dict[str, str]:
-    """Get Claude SDK status."""
-    return {"status": "claude sdk endpoint available", "service": "direct"}

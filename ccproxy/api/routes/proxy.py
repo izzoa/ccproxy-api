@@ -230,9 +230,3 @@ async def list_models(
         raise HTTPException(
             status_code=500, detail=f"Internal server error: {str(e)}"
         ) from e
-
-
-@router.get("/status")
-async def proxy_status() -> dict[str, str]:
-    """Get proxy status."""
-    return {"status": "proxy API available", "version": "1.0.0"}
