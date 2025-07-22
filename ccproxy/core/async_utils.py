@@ -319,7 +319,7 @@ def format_version(version: str, level: str) -> str:
         # Docker-compatible version (no + characters)
         if suffix:
             return f"{base_version}-{suffix}"
-        return base_version
+        return f"{major}.{minor}"
     elif level == "npm":
         # NPM-compatible version
         if suffix:

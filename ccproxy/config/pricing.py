@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ccproxy.core.system import get_xdg_cache_home
 
@@ -81,8 +81,7 @@ class PricingSettings(BaseSettings):
             raise ValueError("Source URL must start with http:// or https://")
         return v
 
-    class Config:
-        """Pydantic configuration."""
-
-        env_prefix = "PRICING__"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_prefix="PRICING__",
+        case_sensitive=False,
+    )

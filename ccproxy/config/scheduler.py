@@ -1,7 +1,7 @@
 """Scheduler configuration settings."""
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class SchedulerSettings(BaseSettings):
@@ -82,8 +82,7 @@ class SchedulerSettings(BaseSettings):
         description="Interval in seconds between stats printing",
     )
 
-    class Config:
-        """Pydantic configuration."""
-
-        env_prefix = "SCHEDULER__"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_prefix="SCHEDULER__",
+        case_sensitive=False,
+    )

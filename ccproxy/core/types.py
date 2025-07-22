@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProxyMethod(str, Enum):
@@ -106,10 +106,7 @@ class ProxyConfig(BaseModel):
         default=10, description="Maximum number of redirects to follow"
     )
 
-    class Config:
-        """Pydantic configuration."""
-
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class MiddlewareConfig(BaseModel):
@@ -123,7 +120,4 @@ class MiddlewareConfig(BaseModel):
         default_factory=dict, description="Additional middleware configuration"
     )
 
-    class Config:
-        """Pydantic configuration."""
-
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")

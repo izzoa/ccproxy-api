@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, Field, RootModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
 
 class ModelPricing(BaseModel):
@@ -32,11 +32,10 @@ class ModelPricing(BaseModel):
             return v
         raise TypeError(f"Cannot convert {type(v)} to Decimal")
 
-    class Config:
-        """Pydantic configuration."""
-
-        arbitrary_types_allowed = True
-        json_encoders = {Decimal: lambda v: float(v)}
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        json_encoders={Decimal: lambda v: float(v)},
+    )
 
 
 class PricingData(RootModel[dict[str, ModelPricing]]):

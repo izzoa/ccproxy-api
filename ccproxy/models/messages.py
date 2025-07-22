@@ -34,8 +34,7 @@ class MetadataParams(BaseModel):
         Field(description="External identifier for the user", max_length=256),
     ] = None
 
-    class Config:
-        extra = "allow"  # Allow additional fields in metadata
+    model_config = ConfigDict(extra="allow")  # Allow additional fields in metadata
 
 
 class ToolChoiceParams(BaseModel):
