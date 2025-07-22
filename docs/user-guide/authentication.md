@@ -82,20 +82,20 @@ The proxy accepts authentication tokens in these formats:
 - **Anthropic Format**: `x-api-key: <token>` (takes precedence)
 - **OpenAI/Bearer Format**: `Authorization: Bearer <token>`
 
-All formats use the same configured `AUTH_TOKEN` value.
+All formats use the same configured `SECURITY__AUTH_TOKEN` value.
 
 ## Configuration
 
-Set the `AUTH_TOKEN` environment variable:
+Set the `SECURITY__AUTH_TOKEN` environment variable:
 
 ```bash
-export AUTH_TOKEN="your-secret-token-here"
+export SECURITY__AUTH_TOKEN="your-secret-token-here"
 ```
 
 Or add to your `.env` file:
 
 ```bash
-echo "AUTH_TOKEN=your-secret-token-here" >> .env
+echo "SECURITY__AUTH_TOKEN=your-secret-token-here" >> .env
 ```
 
 ## Usage Examples
@@ -188,7 +188,7 @@ const response = await openai.chat.completions.create({
 
 ## No Authentication
 
-If no `AUTH_TOKEN` is set, the API will accept all requests without authentication.
+If no `SECURITY__AUTH_TOKEN` is set, the API will accept all requests without authentication.
 
 ## Security Considerations
 

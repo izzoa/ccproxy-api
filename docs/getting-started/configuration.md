@@ -22,7 +22,7 @@ The proxy supports both flat and nested environment variable syntax. For a compr
 PORT=8080
 HOST=0.0.0.0
 LOG_LEVEL=DEBUG
-AUTH_TOKEN=your-token
+SECURITY__AUTH_TOKEN=your-token
 ```
 
 #### Nested Syntax (Recommended)
@@ -50,13 +50,13 @@ SECURITY__AUTH_TOKEN=your-token
 
 | Variable | Nested Variable | Description | Default | Example |
 |----------|----------------|-------------|---------|---------|
-| `AUTH_TOKEN` | `SECURITY__AUTH_TOKEN` | Authentication token for API access | None | `AUTH_TOKEN=abc123xyz789...` |
+| `SECURITY__AUTH_TOKEN` | `SECURITY__AUTH_TOKEN` | Authentication token for API access | None | `SECURITY__AUTH_TOKEN=abc123xyz789...` |
 
 The proxy accepts authentication tokens in multiple header formats:
 - **Anthropic Format**: `x-api-key: <token>` (takes precedence)
 - **OpenAI/Bearer Format**: `Authorization: Bearer <token>`
 
-All formats use the same configured `AUTH_TOKEN` value.
+All formats use the same configured `SECURITY__AUTH_TOKEN` value.
 
 ### Claude CLI Configuration
 
@@ -83,7 +83,7 @@ All formats use the same configured `AUTH_TOKEN` value.
 PORT=8080
 HOST=0.0.0.0
 LOG_LEVEL=INFO
-AUTH_TOKEN=abc123xyz789abcdef...  # Optional authentication
+SECURITY__AUTH_TOKEN=abc123xyz789abcdef...  # Optional authentication
 CLAUDE_CLI_PATH=/opt/claude/bin/claude
 
 # Advanced settings using nested syntax
@@ -512,7 +512,7 @@ RELOAD=false
 CLAUDE_CLI_PATH=/usr/local/bin/claude
 
 # Security settings
-AUTH_TOKEN=your-secure-token-here
+SECURITY__AUTH_TOKEN=your-secure-token-here
 CORS_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
 
 # Advanced configuration using nested syntax

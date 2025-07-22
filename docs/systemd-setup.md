@@ -98,7 +98,7 @@ You can set environment variables directly in the service file using the `Enviro
 Environment="PORT=8080"
 Environment="HOST=0.0.0.0"
 Environment="LOG_LEVEL=DEBUG"
-Environment="AUTH_TOKEN=your-secure-token"
+Environment="SECURITY__AUTH_TOKEN=your-secure-token"
 
 # Using nested syntax
 Environment="SERVER__PORT=8080"

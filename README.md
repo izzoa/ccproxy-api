@@ -14,17 +14,17 @@ It includes a translation layer to support both Anthropic and OpenAI-compatible 
 # The official claude-code CLI is required for SDK mode
 npm install -g @anthropic-ai/claude-code
 
-# install with uv
-uv tool install ccproxy-api
-
 # run it with uv
 uvx ccproxy-api
 
-# Install ccproxy with pip
-pipx install ccproxy-api
-
 # run it with pipx
 pipx run ccproxy-api
+
+# install with uv
+uv tool install ccproxy-api
+
+# Install ccproxy with pip
+pipx install ccproxy-api
 
 # Optional: Enable shell completion
 eval "$(ccproxy --show-completion zsh)"  # For zsh
@@ -44,12 +44,23 @@ The proxy uses two different authentication mechanisms depending on the mode.
     claude /login
     ```
 
+    It's also possible now to get a long live token to avoid renewing issues
+    using
+    ```sh
+    ```bash
+    claude setup-token`
+
 2.  **ccproxy (`api` mode):**
     This mode uses its own OAuth2 flow to obtain credentials for direct API access.
     ```bash
     ccproxy auth login
     ```
-    You can check the status of these credentials with `ccproxy auth validate` and `ccproxy auth info`.
+
+    If you are already connected with Claude CLI the credentials should be found automatically
+
+You can check the status of these credentials with `ccproxy auth validate` and `ccproxy auth info`.
+
+Warning is show on start up if no credentials are setup.
 
 ## Usage
 
@@ -168,16 +179,16 @@ You can enable token authentication for the proxy. This supports multiple header
 **1. Generate a Token:**
 ```bash
 ccproxy generate-token
-# Output: AUTH_TOKEN=abc123xyz789...
+# Output: SECURITY__AUTH_TOKEN=abc123xyz789...
 ```
 
 **2. Configure the Token:**
 ```bash
 # Set environment variable
-export AUTH_TOKEN=abc123xyz789...
+export SECURITY__AUTH_TOKEN=abc123xyz789...
 
 # Or add to .env file
-echo "AUTH_TOKEN=abc123xyz789..." >> .env
+echo "SECURITY__AUTH_TOKEN=abc123xyz789..." >> .env
 ```
 
 **3. Use in Requests:**
