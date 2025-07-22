@@ -143,6 +143,42 @@ class APIError(BaseModel):
     )
 
 
+class PermissionToolAllowResponse(BaseModel):
+    """Response model for allowed permission tool requests."""
+
+    behavior: Annotated[Literal["allow"], Field(description="Permission behavior")] = (
+        "allow"
+    )
+    updated_input: Annotated[
+        dict[str, Any],
+        Field(
+            description="Updated input parameters for the tool, or original input if unchanged",
+            alias="updatedInput",
+        ),
+    ]
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class PermissionToolDenyResponse(BaseModel):
+    """Response model for denied permission tool requests."""
+
+    behavior: Annotated[Literal["deny"], Field(description="Permission behavior")] = (
+        "deny"
+    )
+    message: Annotated[
+        str,
+        Field(
+            description="Human-readable explanation of why the permission was denied"
+        ),
+    ]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+PermissionToolResponse = PermissionToolAllowResponse | PermissionToolDenyResponse
+
+
 class RateLimitError(APIError):
     """Rate limit error."""
 

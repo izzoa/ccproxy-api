@@ -109,7 +109,7 @@ class MessageConverter:
         for block in contents:
             text_parts.append(MessageConverter.extract_text_from_content(block))
 
-        return " ".join(text_parts)
+        return "\n".join(text_parts)
 
     @staticmethod
     def convert_to_anthropic_response(
