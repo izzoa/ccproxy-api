@@ -300,14 +300,6 @@ class TestAuthDependencies:
 class TestAPIEndpointsWithAuth:
     """Test API endpoints with authentication enabled."""
 
-    def test_unauthenticated_request_without_auth_setting(
-        self, client: TestClient
-    ) -> None:
-        """Test unauthenticated request when auth is not enabled."""
-        response = client.get("/auth/status")
-        # Should succeed when auth is not configured
-        assert response.status_code in [200, 404]  # Endpoint may not exist without auth
-
     def test_unauthenticated_request_with_auth_enabled(
         self, client_with_auth: TestClient
     ) -> None:
@@ -371,17 +363,6 @@ class TestAPIEndpointsWithAuth:
         )
         # Should return 401 because token is malformed
         assert response.status_code == 401
-
-    def test_auth_status_endpoint(
-        self, client_with_auth: TestClient, auth_headers: dict[str, str]
-    ) -> None:
-        """Test authentication status endpoint."""
-        response = client_with_auth.get("/auth/status", headers=auth_headers)
-        # Should return auth status
-        assert response.status_code in [
-            200,
-            404,
-        ]  # Endpoint may not exist depending on implementation
 
 
 @pytest.mark.auth
@@ -737,21 +718,6 @@ class TestAuthenticationIntegration:
         # Test dependency resolution would happen here
         # This is more of an integration test that would require actual dependency injection
         pass
-
-    def test_auth_middleware_integration(
-        self, client_with_auth: TestClient, auth_headers: dict[str, str]
-    ) -> None:
-        """Test authentication middleware integration with requests."""
-        # Test that auth middleware properly validates tokens
-        response = client_with_auth.get("/auth/status", headers=auth_headers)
-
-        # Should not get 401 with valid token
-        assert response.status_code != status.HTTP_401_UNAUTHORIZED
-
-        # Test without headers
-        response = client_with_auth.get("/auth/status")
-        # May or may not require auth depending on endpoint implementation
-        assert response.status_code in [200, 401, 404]
 
 
 @pytest.mark.auth

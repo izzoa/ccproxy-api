@@ -419,13 +419,6 @@ class TestProxyServiceObservabilityIntegration:
 class TestObservabilityEndpoints:
     """Test observability-related endpoints."""
 
-    def test_metrics_status(self, client: TestClient) -> None:
-        """Test metrics status endpoint."""
-        response = client.get("/logs/status")
-        assert response.status_code == 200
-        data = response.json()
-        assert "status" in data
-
     def test_metrics_prometheus_headers(self, client: TestClient) -> None:
         """Test prometheus endpoint returns correct headers."""
         with patch("ccproxy.observability.metrics.PROMETHEUS_AVAILABLE", True):

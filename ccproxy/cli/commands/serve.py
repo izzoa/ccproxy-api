@@ -35,7 +35,6 @@ from ..options.claude_options import (
     validate_cwd,
     validate_max_thinking_tokens,
     validate_max_turns,
-    validate_permission_mode,
 )
 from ..options.security_options import SecurityOptions, validate_auth_token
 from ..options.server_options import (
@@ -394,15 +393,6 @@ def api(
             rich_help_panel="Claude Settings",
         ),
     ] = None,
-    permission_mode: Annotated[
-        str | None,
-        typer.Option(
-            "--permission-mode",
-            help="Permission mode: default, acceptEdits, or bypassPermissions",
-            callback=validate_permission_mode,
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
     max_turns: Annotated[
         int | None,
         typer.Option(
@@ -418,14 +408,6 @@ def api(
             "--cwd",
             help="Working directory path",
             callback=validate_cwd,
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    permission_prompt_tool_name: Annotated[
-        str | None,
-        typer.Option(
-            "--permission-prompt-tool-name",
-            help="Permission prompt tool name",
             rich_help_panel="Claude Settings",
         ),
     ] = None,
@@ -554,10 +536,8 @@ def api(
             disallowed_tools=disallowed_tools,
             claude_cli_path=claude_cli_path,
             append_system_prompt=append_system_prompt,
-            permission_mode=permission_mode,
             max_turns=max_turns,
             cwd=cwd,
-            permission_prompt_tool_name=permission_prompt_tool_name,
         )
 
         security_options = SecurityOptions(auth_token=auth_token)
@@ -578,9 +558,7 @@ def api(
             allowed_tools=claude_options.allowed_tools,
             disallowed_tools=claude_options.disallowed_tools,
             append_system_prompt=claude_options.append_system_prompt,
-            permission_mode=claude_options.permission_mode,
             max_turns=claude_options.max_turns,
-            permission_prompt_tool_name=claude_options.permission_prompt_tool_name,
             cwd=claude_options.cwd,
         )
 

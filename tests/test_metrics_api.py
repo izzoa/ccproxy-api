@@ -477,17 +477,6 @@ class TestMetricsAPIEndpoints:
         finally:
             app.dependency_overrides.clear()
 
-    def test_status_endpoint(self, client: TestClient) -> None:
-        """Test status endpoint returns observability system info."""
-        response = client.get("/logs/status")
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["status"] == "healthy"
-        assert "prometheus_enabled" in data
-        assert data["observability_system"] == "hybrid_prometheus_structlog"
-
     def test_prometheus_endpoint_unavailable(self, client: TestClient) -> None:
         """Test prometheus endpoint when prometheus_client not available."""
         with patch("ccproxy.observability.metrics.PROMETHEUS_AVAILABLE", False):

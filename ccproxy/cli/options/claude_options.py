@@ -32,22 +32,6 @@ def validate_max_turns(
     return value
 
 
-def validate_permission_mode(
-    ctx: typer.Context, param: typer.CallbackParam, value: str | None
-) -> str | None:
-    """Validate permission mode."""
-    if value is None:
-        return None
-
-    valid_modes = {"default", "acceptEdits", "bypassPermissions"}
-    if value not in valid_modes:
-        raise typer.BadParameter(
-            f"Permission mode must be one of: {', '.join(valid_modes)}"
-        )
-
-    return value
-
-
 def validate_claude_cli_path(
     ctx: typer.Context, param: typer.CallbackParam, value: str | None
 ) -> str | None:
@@ -95,10 +79,8 @@ class ClaudeOptions:
         disallowed_tools: str | None = None,
         claude_cli_path: str | None = None,
         append_system_prompt: str | None = None,
-        permission_mode: str | None = None,
         max_turns: int | None = None,
         cwd: str | None = None,
-        permission_prompt_tool_name: str | None = None,
     ):
         """Initialize Claude options.
 
@@ -108,17 +90,13 @@ class ClaudeOptions:
             disallowed_tools: List of disallowed tools (comma-separated)
             claude_cli_path: Path to Claude CLI executable
             append_system_prompt: Additional system prompt to append
-            permission_mode: Permission mode
             max_turns: Maximum conversation turns
             cwd: Working directory path
-            permission_prompt_tool_name: Permission prompt tool name
         """
         self.max_thinking_tokens = max_thinking_tokens
         self.allowed_tools = allowed_tools
         self.disallowed_tools = disallowed_tools
         self.claude_cli_path = claude_cli_path
         self.append_system_prompt = append_system_prompt
-        self.permission_mode = permission_mode
         self.max_turns = max_turns
         self.cwd = cwd
-        self.permission_prompt_tool_name = permission_prompt_tool_name

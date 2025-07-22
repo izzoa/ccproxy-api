@@ -11,6 +11,7 @@ from starlette.background import BackgroundTask
 from ccproxy.adapters.openai.adapter import OpenAIAdapter
 from ccproxy.api.dependencies import ProxyServiceDep
 from ccproxy.api.responses import ProxyResponse
+from ccproxy.auth.conditional import ConditionalAuthDep
 from ccproxy.core.errors import ProxyHTTPException
 
 
@@ -22,6 +23,7 @@ router = APIRouter(tags=["proxy"])
 async def create_openai_chat_completion(
     request: Request,
     proxy_service: ProxyServiceDep,
+    auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
     """Create a chat completion using Claude AI with OpenAI-compatible format.
 
@@ -98,6 +100,9 @@ async def create_openai_chat_completion(
                     media_type=response_headers.get("content-type", "application/json"),
                 )
 
+    except HTTPException:
+        # Re-raise HTTPException as-is (including 401 auth errors)
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Internal server error: {str(e)}"
@@ -108,6 +113,7 @@ async def create_openai_chat_completion(
 async def create_anthropic_message(
     request: Request,
     proxy_service: ProxyServiceDep,
+    auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
     """Create a message using Claude AI with Anthropic format.
 
@@ -180,6 +186,9 @@ async def create_anthropic_message(
                     media_type=response_headers.get("content-type", "application/json"),
                 )
 
+    except HTTPException:
+        # Re-raise HTTPException as-is (including 401 auth errors)
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Internal server error: {str(e)}"
@@ -190,6 +199,7 @@ async def create_anthropic_message(
 async def list_models(
     request: Request,
     proxy_service: ProxyServiceDep,
+    auth: ConditionalAuthDep,
 ) -> Response:
     """List available models using the proxy service.
 
@@ -226,6 +236,9 @@ async def list_models(
             media_type=response_headers.get("content-type", "application/json"),
         )
 
+    except HTTPException:
+        # Re-raise HTTPException as-is (including 401 auth errors)
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Internal server error: {str(e)}"

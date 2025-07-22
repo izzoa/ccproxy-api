@@ -467,11 +467,9 @@ class ConfigurationManager:
         claude_opts = {}
         for key in [
             "max_thinking_tokens",
-            "permission_mode",
             "cwd",
             "max_turns",
             "append_system_prompt",
-            "permission_prompt_tool_name",
             "continue_conversation",
         ]:
             if cli_args.get(key) is not None:
