@@ -361,7 +361,7 @@ def generate_token(
 
         # Show environment variable commands - server first, then clients
         console.print("[bold]Server Environment Variables:[/bold]")
-        console.print(f"[cyan]export AUTH_TOKEN={token}[/cyan]")
+        console.print(f"[cyan]export SECURITY__AUTH_TOKEN={token}[/cyan]")
         console.print()
 
         console.print("[bold]Client Environment Variables:[/bold]")
@@ -380,7 +380,7 @@ def generate_token(
         console.print()
 
         console.print("[bold]For .env file:[/bold]")
-        console.print(f"[cyan]AUTH_TOKEN={token}[/cyan]")
+        console.print(f"[cyan]SECURITY__AUTH_TOKEN={token}[/cyan]")
         console.print()
 
         console.print("[bold]Usage with curl (using environment variables):[/bold]")

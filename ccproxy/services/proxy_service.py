@@ -446,7 +446,10 @@ class ProxyService:
     async def _get_access_token(self) -> str:
         """Get access token for upstream authentication.
 
-        Tries configured auth_token first, then falls back to OAuth credentials.
+        Uses OAuth credentials from Claude CLI for upstream authentication.
+
+        NOTE: The SECURITY__AUTH_TOKEN is only for authenticating incoming requests,
+        not for upstream authentication.
 
         Returns:
             Valid access token
@@ -454,12 +457,8 @@ class ProxyService:
         Raises:
             HTTPException: If no valid token is available
         """
-        # First try to get configured auth_token from settings
-        if self.settings.security.auth_token:
-            logger.debug("using_configured_auth_token")
-            return self.settings.security.auth_token
-
-        # Fall back to OAuth credentials
+        # Always use OAuth credentials for upstream authentication
+        # The SECURITY__AUTH_TOKEN is only for client authentication, not upstream
         try:
             access_token = await self.credentials_manager.get_access_token()
             if not access_token:

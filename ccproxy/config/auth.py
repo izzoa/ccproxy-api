@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field, field_validator
 def _get_default_storage_paths() -> list[Path]:
     """Get default storage paths"""
     return [
-        Path("~/.config/claude/.credentials.json"),
-        Path("~/.claude/.credentials.json"),
         Path("~/.config/ccproxy/credentials.json"),
+        Path("~/.claude/.credentials.json"),
+        Path("~/.config/claude/.credentials.json"),
     ]
 
 
