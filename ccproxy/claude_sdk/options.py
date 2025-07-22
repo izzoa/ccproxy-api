@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from ccproxy.config.settings import Settings
 from ccproxy.core.async_utils import patched_typing
 
 
@@ -14,8 +15,17 @@ class OptionsHandler:
     Handles creation and management of Claude SDK options.
     """
 
-    @staticmethod
+    def __init__(self, settings: Settings | None = None) -> None:
+        """
+        Initialize options handler.
+
+        Args:
+            settings: Application settings containing default Claude options
+        """
+        self.settings = settings
+
     def create_options(
+        self,
         model: str,
         temperature: float | None = None,
         max_tokens: int | None = None,
@@ -37,6 +47,18 @@ class OptionsHandler:
         """
         options = ClaudeCodeOptions(model=model)
 
+        # First apply settings from configuration if available
+        if self.settings and self.settings.claude.code_options:
+            code_opts = self.settings.claude.code_options
+
+            # Apply settings from configuration
+            for attr_name in dir(code_opts):
+                if not attr_name.startswith("_"):
+                    value = getattr(code_opts, attr_name, None)
+                    if value is not None and hasattr(options, attr_name):
+                        setattr(options, attr_name, value)
+
+        # Then apply API parameters (these override settings)
         if temperature is not None:
             options.temperature = temperature  # type: ignore[attr-defined]
 

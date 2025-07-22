@@ -22,11 +22,13 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
 def get_claude_service(
+    settings: SettingsDep,
     auth_manager: AuthManagerDep,
 ) -> ClaudeSDKService:
     """Get Claude SDK service instance.
 
     Args:
+        settings: Application settings dependency
         auth_manager: Authentication manager dependency
 
     Returns:
@@ -39,6 +41,7 @@ def get_claude_service(
     return ClaudeSDKService(
         auth_manager=auth_manager,
         metrics=metrics,
+        settings=settings,
     )
 
 

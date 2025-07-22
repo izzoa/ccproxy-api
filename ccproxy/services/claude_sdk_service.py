@@ -18,6 +18,7 @@ from ccproxy.auth.manager import AuthManager
 from ccproxy.claude_sdk.client import ClaudeSDKClient
 from ccproxy.claude_sdk.converter import MessageConverter
 from ccproxy.claude_sdk.options import OptionsHandler
+from ccproxy.config.settings import Settings
 from ccproxy.core.errors import (
     ClaudeProxyError,
     ServiceUnavailableError,
@@ -44,6 +45,7 @@ class ClaudeSDKService:
         sdk_client: ClaudeSDKClient | None = None,
         auth_manager: AuthManager | None = None,
         metrics: PrometheusMetrics | None = None,
+        settings: Settings | None = None,
     ) -> None:
         """
         Initialize Claude SDK service.
@@ -52,12 +54,14 @@ class ClaudeSDKService:
             sdk_client: Claude SDK client instance
             auth_manager: Authentication manager (optional)
             metrics: Prometheus metrics instance (optional)
+            settings: Application settings (optional)
         """
         self.sdk_client = sdk_client or ClaudeSDKClient()
         self.auth_manager = auth_manager
         self.metrics = metrics
+        self.settings = settings
         self.message_converter = MessageConverter()
-        self.options_handler = OptionsHandler()
+        self.options_handler = OptionsHandler(settings=settings)
 
     async def create_completion(
         self,

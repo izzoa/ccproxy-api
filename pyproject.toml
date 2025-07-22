@@ -49,6 +49,7 @@ packages = ["ccproxy"]
 # ccproxy = "ccproxy.cli:app"
 ccproxy = "ccproxy.cli:main"
 ccproxy-api = "ccproxy.cli:main"
+ccproxy-perm = "ccproxy.cli.commands.permission:main"
 
 [dependency-groups]
 dev = [
