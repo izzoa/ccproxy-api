@@ -1,4 +1,4 @@
-"""Generic validation utilities for the Claude Code Proxy API."""
+"""Generic validation utilities for the CCProxy API."""
 
 import re
 from pathlib import Path

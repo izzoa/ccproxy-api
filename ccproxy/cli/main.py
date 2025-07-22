@@ -1,4 +1,4 @@
-"""Main entry point for Claude Proxy API Server."""
+"""Main entry point for CCProxy API Server."""
 
 import json
 import os
@@ -78,7 +78,7 @@ def app_main(
         readable=True,
     ),
 ) -> None:
-    """Claude Code Proxy API Server - Anthropic and OpenAI compatible interface for Claude."""
+    """CCProxy API Server - Anthropic and OpenAI compatible interface for Claude."""
     # Store config path for commands to use
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config

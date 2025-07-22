@@ -1,4 +1,4 @@
-"""FastAPI application factory for Claude Code Proxy API Server."""
+"""FastAPI application factory for CCProxy API Server."""
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -145,7 +145,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             setup_logging(json_logs=json_logs, log_level=settings.server.log_level)
 
     app = FastAPI(
-        title="Claude Code Proxy API Server",
+        title="CCProxy API Server",
         description="High-performance API server providing Anthropic and OpenAI-compatible interfaces for Claude AI models",
         version=__version__,
         lifespan=lifespan,

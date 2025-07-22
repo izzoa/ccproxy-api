@@ -17,14 +17,14 @@ python -m pip install --user pipx
 python -m pipx ensurepath
 
 # Install ccproxy
-pipx install git+https://github.com/CaddyGlow/claude-code-proxy-api.git
+pipx install git+https://github.com/CaddyGlow/ccproxy-api.git
 ```
 
 ### From Source (Development)
 
 ```bash
-git clone https://github.com/CaddyGlow/claude-code-proxy-api.git
-cd claude-code-proxy-api
+git clone https://github.com/CaddyGlow/ccproxy-api.git
+cd ccproxy-api
 
 # Using uv (recommended for development)
 uv sync
@@ -163,7 +163,7 @@ Executing: /path/to/claude /status
 Run the server:
 
 ```bash
-claude-code-proxy-api
+ccproxy-api
 ```
 
 The server will start on `http://localhost:8000` by default.

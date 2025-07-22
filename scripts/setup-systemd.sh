@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Claude Code Proxy API - Systemd Service Setup Script
+# CCProxy API - Systemd Service Setup Script
 
 # Colors for output
 RED='\033[0;31m'
@@ -44,7 +44,7 @@ detect_uv() {
 
 # Function to setup systemd service
 setup_service() {
-  print_info "Setting up systemd user service for Claude Code Proxy API"
+  print_info "Setting up systemd user service for CCProxy API"
 
   # Check if template exists
   if [ ! -f "$TEMPLATE_FILE" ]; then
@@ -179,8 +179,8 @@ remove_service() {
 
 # Main menu
 main() {
-  echo "Claude Code Proxy API - Systemd Service Setup"
-  echo "============================================="
+  echo "CCProxy API - Systemd Service Setup"
+  echo "==================================="
   echo
   echo "1) Setup systemd service"
   echo "2) Remove systemd service"

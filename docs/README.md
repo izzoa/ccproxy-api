@@ -1,6 +1,6 @@
 # Documentation
 
-This directory contains the source files for the Claude Code Proxy API documentation, built with [MkDocs](https://www.mkdocs.org/) and [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/).
+This directory contains the source files for the CCProxy API documentation, built with [MkDocs](https://www.mkdocs.org/) and [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/).
 
 ## Quick Start
 

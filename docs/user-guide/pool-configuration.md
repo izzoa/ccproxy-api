@@ -1,6 +1,6 @@
 # Connection Pool Configuration
 
-The Claude Code Proxy API Server includes a high-performance connection pool system to minimize latency and improve throughput when handling multiple requests.
+The CCProxy API Server includes a high-performance connection pool system to minimize latency and improve throughput when handling multiple requests.
 
 ## Overview
 

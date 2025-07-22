@@ -1,4 +1,4 @@
-"""API layer for Claude Code Proxy API Server."""
+"""API layer for CCProxy API Server."""
 
 from ccproxy.api.app import create_app, get_app
 from ccproxy.api.dependencies import (

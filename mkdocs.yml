@@ -1,8 +1,8 @@
-site_name: Claude Code Proxy API
+site_name: CCProxy API
 site_description: A reverse proxy to api.anthropic.com that leverages your Claude subscription through the official claude-code-sdk
-site_url: https://caddyglow.github.io/claude-code-proxy-api
-repo_url: https://github.com/CaddyGlow/claude-code-proxy-api
-repo_name: CaddyGlow/claude-code-proxy-api
+site_url: https://caddyglow.github.io/ccproxy-api
+repo_url: https://github.com/CaddyGlow/ccproxy-api
+repo_name: CaddyGlow/ccproxy-api
 edit_uri: edit/main/docs/
 
 # Theme configuration
@@ -156,7 +156,7 @@ markdown_extensions:
       normalize_issue_symbols: true
       repo_url_shorthand: true
       user: CaddyGlow
-      repo: claude-code-proxy-api
+      repo: ccproxy-api
   - pymdownx.mark
   - pymdownx.smartsymbols
   - pymdownx.snippets:
@@ -186,7 +186,7 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/CaddyGlow/claude-code-proxy-api
     - icon: fontawesome/brands/python
-      link: https://pypi.org/project/claude-code-proxy-api/
+      link: https://pypi.org/project/ccproxy-api/
 
 # Development server
 dev_addr: '127.0.0.1:8080'
@@ -214,4 +214,4 @@ validation:
   unrecognized_links: warn
 
 # Copyright
-copyright: Copyright &copy; 2024 Claude Code Proxy Contributors
+copyright: Copyright &copy; 2024 CCProxy Contributors

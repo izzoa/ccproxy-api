@@ -1,4 +1,4 @@
-"""Core constants used across the Claude Code Proxy API."""
+"""Core constants used across the CCProxy API."""
 
 # HTTP headers
 REQUEST_ID_HEADER = "X-Request-ID"

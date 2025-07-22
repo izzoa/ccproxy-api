@@ -1,4 +1,4 @@
-"""Docker settings configuration for Claude Code Proxy API."""
+"""Docker settings configuration for CCProxy API."""
 
 import os
 from typing import Any

@@ -1,6 +1,6 @@
-# Contributing to Claude Code Proxy API
+# Contributing to CCProxy API
 
-Thank you for your interest in contributing to Claude Code Proxy API! This guide will help you get started.
+Thank you for your interest in contributing to CCProxy API! This guide will help you get started.
 
 ## Development Setup
 
@@ -14,8 +14,8 @@ Thank you for your interest in contributing to Claude Code Proxy API! This guide
 
 1. **Clone and setup the repository:**
    ```bash
-   git clone https://github.com/CaddyGlow/claude-code-proxy-api.git
-   cd claude-code-proxy-api
+   git clone https://github.com/CaddyGlow/ccproxy-api.git
+   cd ccproxy-api
    make setup  # Installs dependencies and sets up dev environment
    ```
 
@@ -393,8 +393,8 @@ uv run pytest tests/test_specific.py::test_function -v
 
 ## Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/CaddyGlow/claude-code-proxy-api/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/CaddyGlow/claude-code-proxy-api/discussions)
+- **Issues**: [GitHub Issues](https://github.com/CaddyGlow/ccproxy-api/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/CaddyGlow/ccproxy-api/discussions)
 - **Documentation**: See `docs/` directory
 
 ## License

@@ -1,4 +1,4 @@
-"""Shared dependencies for Claude Code Proxy API Server."""
+"""Shared dependencies for CCProxy API Server."""
 
 from typing import Annotated
 

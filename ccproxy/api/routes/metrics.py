@@ -1,4 +1,4 @@
-"""Metrics endpoints for Claude Code Proxy API Server."""
+"""Metrics endpoints for CCProxy API Server."""
 
 import time
 from datetime import datetime as dt

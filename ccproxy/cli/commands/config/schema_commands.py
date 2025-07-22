@@ -1,4 +1,4 @@
-"""Schema-related config commands for Claude Code Proxy API."""
+"""Schema-related config commands for CCProxy API."""
 
 from pathlib import Path
 

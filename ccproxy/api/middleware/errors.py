@@ -1,4 +1,4 @@
-"""Error handling middleware for Claude Code Proxy API Server."""
+"""Error handling middleware for CCProxy API Server."""
 
 import logging
 from typing import Any

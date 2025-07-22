@@ -2,7 +2,7 @@
 
 # OpenAI JSON Object Response Format Example
 #
-# This example demonstrates using the Claude Code Proxy API with OpenAI format
+# This example demonstrates using the CCProxy API with OpenAI format
 # and simple JSON object response formatting.
 
 # Test JSON object format with programming content

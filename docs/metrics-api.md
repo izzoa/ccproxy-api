@@ -1,10 +1,10 @@
 # Metrics API Documentation
 
-This document provides comprehensive documentation for the Claude Code Proxy API's metrics endpoints and data models.
+This document provides comprehensive documentation for the CCProxy API's metrics endpoints and data models.
 
 ## Overview
 
-The metrics system provides comprehensive monitoring and analytics capabilities for the Claude Code Proxy API. It tracks request/response patterns, performance metrics, cost analytics, error monitoring, and usage statistics.
+The metrics system provides comprehensive monitoring and analytics capabilities for the CCProxy API. It tracks request/response patterns, performance metrics, cost analytics, error monitoring, and usage statistics.
 
 ## Base URL
 

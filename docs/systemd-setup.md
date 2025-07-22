@@ -1,6 +1,6 @@
 # Systemd Service Setup
 
-This guide explains how to set up Claude Code Proxy API as a systemd user service that starts automatically on user login.
+This guide explains how to set up CCProxy API as a systemd user service that starts automatically on user login.
 
 ## Quick Setup
 
@@ -33,7 +33,7 @@ cp systemd/ccproxy.service.template ~/.config/systemd/user/ccproxy.service
 Edit `~/.config/systemd/user/ccproxy.service` and replace the placeholders:
 - `{{WORKING_DIR}}` - Working directory where the service runs (can be any directory)
 - `{{UV_PATH}}` - Path to uv executable
-- `{{UV_PROJECT}}` - Path to the Claude Code Proxy API project directory
+- `{{UV_PROJECT}}` - Path to the CCProxy API project directory
 - `{{USER_PATH}}` - Your PATH environment variable (should include ~/.local/bin if it exists)
 - `{{USER_HOME}}` - Your home directory
 - `{{EXTRA_ENV}}` - Additional environment variables (optional)
@@ -158,7 +158,7 @@ CORS__ALLOW_ORIGINS=["https://yourdomain.com"]
 
 ```ini
 [Unit]
-Description=Claude Code Proxy API Server
+Description=CCProxy API Server
 After=network.target
 
 [Service]
@@ -169,7 +169,7 @@ ExecStart=/home/user/.local/bin/uv run ccproxy serve
 # Environment configuration
 Environment="PATH=/home/user/.local/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="HOME=/home/user"
-Environment="UV_PROJECT=/home/user/claude-code-proxy-api"
+Environment="UV_PROJECT=/home/user/ccproxy-api"
 
 # Load additional environment from file
 EnvironmentFile=-/etc/ccproxy/environment

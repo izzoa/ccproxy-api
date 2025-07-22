@@ -1,4 +1,4 @@
-"""Serve command for Claude Code Proxy API server - consolidates server-related commands."""
+"""Serve command for CCProxy API server - consolidates server-related commands."""
 
 import json
 import os
@@ -146,7 +146,7 @@ def _run_docker_server(
 
     # Display startup information
     # toolkit.print_title(
-    #     "Starting Claude Code Proxy API server with Docker", tag="docker"
+    #     "Starting CCProxy API server with Docker", tag="docker"
     # )
     # toolkit.print(
     #     f"Server will be available at: http://{settings.server.host}:{settings.server.port}",
@@ -252,7 +252,7 @@ def _run_local_server(settings: Settings, cli_overrides: dict[str, Any]) -> None
 
     if in_docker:
         toolkit.print_title(
-            f"Starting Claude Code Proxy API server in {warning('docker')}",
+            f"Starting CCProxy API server in {warning('docker')}",
             tag="docker",
         )
         toolkit.print(
@@ -260,7 +260,7 @@ def _run_local_server(settings: Settings, cli_overrides: dict[str, Any]) -> None
         )
         toolkit.print(f"HOME={os.environ['HOME']}")
     # else:
-    #     toolkit.print_title("Starting Claude Code Proxy API server", tag="local")
+    #     toolkit.print_title("Starting CCProxy API server", tag="local")
 
     # toolkit.print(
     #     f"Server will be available at: http://{settings.server.host}:{settings.server.port}",
@@ -344,7 +344,7 @@ def api(
     user_gid: int | None = user_gid_option(),
 ) -> None:
     """
-    Start the Claude Code Proxy API server.
+    Start the CCProxy API server.
 
     This command starts the API server either locally or in Docker.
     The server provides both Anthropic and OpenAI-compatible endpoints.

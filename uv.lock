@@ -231,7 +231,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ccproxy"
+name = "ccproxy-api"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

@@ -1,4 +1,4 @@
-"""Core abstractions for the Claude Code Proxy API."""
+"""Core abstractions for the CCProxy API."""
 
 from ccproxy.core.async_utils import (
     async_cache_result,

@@ -1,4 +1,4 @@
-"""Health check endpoints for Claude Code Proxy API Server.
+"""Health check endpoints for CCProxy API Server.
 
 Implements modern health check patterns following 2024 best practices:
 - /health/live: Liveness probe for Kubernetes (minimal, fast)
@@ -442,7 +442,7 @@ async def detailed_health_check(response: Response) -> dict[str, Any]:
         "status": overall_status,
         "version": __version__,
         "serviceId": "claude-code-proxy",
-        "description": "Claude Code Proxy API Server",
+        "description": "CCProxy API Server",
         "time": current_time,
         "checks": {
             "oauth2_credentials": [

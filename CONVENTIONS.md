@@ -2,7 +2,7 @@
 
 ## 1\. Guiding Principles
 
-Our primary goal is to build a robust, maintainable, scalable, and secure Claude Code Proxy API Server. These conventions are rooted in the following principles:
+Our primary goal is to build a robust, maintainable, scalable, and secure CCProxy API Server. These conventions are rooted in the following principles:
 
   * **Clarity over Cleverness:** Code should be easy to read and understand, even by someone new to the project.
   * **Explicit over Implicit:** Be clear about intentions and dependencies.

@@ -1,4 +1,4 @@
-"""Async utilities for the Claude Code Proxy API."""
+"""Async utilities for the CCProxy API."""
 
 import asyncio
 import re
@@ -610,7 +610,7 @@ def generate_json_schema() -> dict[str, Any]:
 
     # Add schema metadata
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
-    schema["title"] = "Claude Code Proxy API Configuration"
+    schema["title"] = "CCProxy API Configuration"
 
     # Add examples for common properties
     properties = schema.get("properties", {})

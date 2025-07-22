@@ -1,4 +1,4 @@
-"""CORS middleware for Claude Code Proxy API Server."""
+"""CORS middleware for CCProxy API Server."""
 
 from typing import Any
 

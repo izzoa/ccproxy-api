@@ -56,7 +56,7 @@ class TestConfigList:
         """Test basic config list command."""
         result = cli_runner.invoke(app, ["list"])
         assert result.exit_code == 0
-        assert "Claude Code Proxy API Configuration" in result.output
+        assert "CCProxy API Configuration" in result.output
         assert "Version:" in result.output
 
     def test_config_list_shows_sections(self, cli_runner: CliRunner) -> None:
@@ -95,7 +95,7 @@ class TestConfigInit:
             config_file = temp_config_dir / "config.toml"
             assert config_file.exists()
             content = config_file.read_text()
-            assert "Claude Code Proxy API Configuration" in content
+            assert "CCProxy API Configuration" in content
 
     def test_config_init_custom_output_dir(
         self, cli_runner: CliRunner, temp_config_dir: Path
@@ -167,7 +167,7 @@ class TestGenerateToken:
             content = config_file.read_text()
             # The token is saved using the TOML writer which creates commented structure
             # Check that it contains the basic TOML structure instead
-            assert "Claude Code Proxy API Configuration" in content
+            assert "CCProxy API Configuration" in content
 
     def test_generate_token_save_existing_file_with_force(
         self, cli_runner: CliRunner, sample_toml_config: Path

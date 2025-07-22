@@ -1,4 +1,4 @@
-"""CLI helper utilities for Claude Code Proxy API."""
+"""CLI helper utilities for CCProxy API."""
 
 import logging
 from pathlib import Path

@@ -1,4 +1,4 @@
-"""API routes for Claude Code Proxy API Server."""
+"""API routes for CCProxy API Server."""
 
 # from ccproxy.api.routes.auth import router as auth_router  # Module doesn't exist
 from ccproxy.api.routes.claude import router as claude_router

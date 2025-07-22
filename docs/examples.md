@@ -1,6 +1,6 @@
 # Examples
 
-Example code demonstrating how to use Claude Code Proxy API is available in the `examples/` directory.
+Example code demonstrating how to use CCProxy API is available in the `examples/` directory.
 
 ## Available Examples
 

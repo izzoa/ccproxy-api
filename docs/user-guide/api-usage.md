@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Claude Code Proxy API is a reverse proxy to api.anthropic.com that provides both Anthropic and OpenAI-compatible interfaces. It offers two main access modes:
+The CCProxy API is a reverse proxy to api.anthropic.com that provides both Anthropic and OpenAI-compatible interfaces. It offers two main access modes:
 
 ## Access Modes
 

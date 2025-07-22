@@ -1,5 +1,5 @@
 """
-Observability module for the Claude Code Proxy API.
+Observability module for the CCProxy API.
 
 This module provides comprehensive observability capabilities including metrics collection,
 structured logging, request context tracking, and observability pipeline management.

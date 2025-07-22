@@ -1,4 +1,4 @@
-"""Command modules for Claude Code Proxy API CLI."""
+"""Command modules for CCProxy API CLI."""
 
 from .auth import app as auth_app
 from .config import app as config_app

@@ -1,10 +1,10 @@
 # Debugging with HTTP Proxy
 
-This guide explains how to use HTTP proxies for debugging requests made by the Claude Code Proxy API server.
+This guide explains how to use HTTP proxies for debugging requests made by the CCProxy API server.
 
 ## Overview
 
-The Claude Code Proxy API server supports standard HTTP proxy environment variables, allowing you to intercept and debug HTTP/HTTPS traffic using tools like:
+The CCProxy API server supports standard HTTP proxy environment variables, allowing you to intercept and debug HTTP/HTTPS traffic using tools like:
 
 - [mitmproxy](https://mitmproxy.org/)
 - [Charles Proxy](https://www.charlesproxy.com/)

@@ -1,4 +1,4 @@
-# Claude Code Proxy API (CCProxy)
+# CCProxy API
 
 A local reverse proxy server that routes requests to api.anthropic.com/v1/messages, leveraging your existing Claude subscription without requiring separate API costs.
 
@@ -42,11 +42,11 @@ CCProxy is a lightweight server that runs on your computer and acts as a bridge 
 
 ```bash
 # Using pipx (recommended)
-pipx install git+https://github.com/CaddyGlow/claude-code-proxy-api.git
+pipx install git+https://github.com/CaddyGlow/ccproxy-api.git
 
 # Or from source for development
-git clone https://github.com/CaddyGlow/claude-code-proxy-api.git
-cd claude-code-proxy-api
+git clone https://github.com/CaddyGlow/ccproxy-api.git
+cd ccproxy-api
 uv sync
 ```
 
@@ -167,7 +167,7 @@ ccproxy auth info
 ## Need Help?
 
 - **[Troubleshooting](getting-started/quickstart.md#troubleshooting)** - Common issues and solutions
-- **[GitHub Issues](https://github.com/CaddyGlow/claude-code-proxy-api/issues)** - Report bugs or request features
+- **[GitHub Issues](https://github.com/CaddyGlow/ccproxy-api/issues)** - Report bugs or request features
 - **[API Reference](api-reference.md)** - Complete endpoint documentation
 
 ## License

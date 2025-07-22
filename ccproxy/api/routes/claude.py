@@ -1,4 +1,4 @@
-"""Claude SDK endpoints for Claude Code Proxy API Server."""
+"""Claude SDK endpoints for CCProxy API Server."""
 
 import json
 from collections.abc import AsyncIterator

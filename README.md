@@ -1,6 +1,6 @@
-# Claude Code Proxy API Server
+# CCProxy API Server
 
-`ccproxy` is a local reverse proxy server for `api.anthropic.com/v1/messages`. It allows you to use your existing Claude subscription to interact with the Anthropic API, bypassing the need for separate API key billing.
+`ccproxy` is a local reverse proxy server for Anthropic Claude LLM at `api.anthropic.com/v1/messages`. It allows you to use your existing Claude Max subscription to interact with the Anthropic API, bypassing the need for separate API key billing.
 
 The server provides two primary modes of operation:
 *   **SDK Mode (`/sdk`):** Routes requests through the local `claude-code-sdk`. This enables access to tools configured in your Claude environment.
@@ -15,7 +15,7 @@ It includes a translation layer to support both Anthropic and OpenAI-compatible 
 npm install -g @anthropic-ai/claude-code
 
 # Install ccproxy
-pipx install git+https://github.com/caddyglow/claude-code-proxy-api.git@dev
+pipx install git+https://github.com/caddyglow/ccproxy-api.git@dev
 
 # Optional: Enable shell completion
 eval "$(ccproxy --show-completion zsh)"  # For zsh
@@ -209,14 +209,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Documentation
 
-- **[Online Documentation](https://caddyglow.github.io/claude-code-proxy-api)**
-- **[API Reference](https://caddyglow.github.io/claude-code-proxy-api/api-reference/overview/)**
-- **[Developer Guide](https://caddyglow.github.io/claude-code-proxy-api/developer-guide/architecture/)**
+- **[Online Documentation](https://caddyglow.github.io/ccproxy-api)**
+- **[API Reference](https://caddyglow.github.io/ccproxy-api/api-reference/overview/)**
+- **[Developer Guide](https://caddyglow.github.io/ccproxy-api/developer-guide/architecture/)**
 
 ## Support
 
-- Issues: [GitHub Issues](https://github.com/CaddyGlow/claude-code-proxy-api/issues)
-- Documentation: [Project Documentation](https://caddyglow.github.io/claude-code-proxy-api)
+- Issues: [GitHub Issues](https://github.com/CaddyGlow/ccproxy-api/issues)
+- Documentation: [Project Documentation](https://caddyglow.github.io/ccproxy-api)
 
 ## Acknowledgments
 

@@ -2,7 +2,7 @@
 Scheduler system for periodic tasks.
 
 This module provides a generic, extensible scheduler for managing periodic tasks
-in the Claude Code Proxy API. It provides a centralized system that supports:
+in the CCProxy API. It provides a centralized system that supports:
 
 - Generic task scheduling with configurable intervals
 - Task registration and discovery via registry pattern

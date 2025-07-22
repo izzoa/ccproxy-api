@@ -1,6 +1,6 @@
 # Configuration
 
-Configure Claude Code Proxy API Server for your local setup and preferences.
+Configure CCProxy API Server for your local setup and preferences.
 
 ## Configuration Methods
 
@@ -328,8 +328,8 @@ export CLAUDE_CLI_PATH=/custom/path/to/claude
 ```yaml
 version: '3.8'
 services:
-  claude-code-proxy-api:
-    image: claude-code-proxy
+  ccproxy-api:
+    image: ccproxy
     ports:
       - "8000:8000"
     environment:
@@ -348,8 +348,8 @@ Mount your Claude configuration and local settings:
 ```yaml
 version: '3.8'
 services:
-  claude-code-proxy-api:
-    image: claude-code-proxy
+  ccproxy-api:
+    image: ccproxy
     ports:
       - "8000:8000"
     volumes:

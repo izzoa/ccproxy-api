@@ -2,7 +2,7 @@
 
 ## Overview
 
-MCP (Model Context Protocol) servers allow you to extend Claude's capabilities with custom tools and functions. While the Claude Code Proxy API doesn't directly support function calling, you can leverage MCP servers through Claude Code's built-in MCP support.
+MCP (Model Context Protocol) servers allow you to extend Claude's capabilities with custom tools and functions. While the CCProxy API doesn't directly support function calling, you can leverage MCP servers through Claude Code's built-in MCP support.
 
 ## Setup Requirements
 
@@ -71,7 +71,7 @@ RUN pip install uv
 
 ```bash
 # Mount Docker socket for container access
-docker run -v /var/run/docker.sock:/var/run/docker.sock claude-code-proxy
+docker run -v /var/run/docker.sock:/var/run/docker.sock ccproxy
 ```
 
 **Security Warning:** Mounting `/var/run/docker.sock` breaks container isolation and allows Docker escape. This creates significant security risks and should only be used in trusted environments with full understanding of the implications.
@@ -101,7 +101,7 @@ claude mcp add api-client '{"command": "./mcp-servers/api-client", "args": ["--c
 ## Usage Flow
 
 1. **Register MCP servers** using `claude mcp add` in the environment where Claude Code runs
-2. **Start the Claude Code Proxy API**
+2. **Start the CCProxy API**
 3. **Make API requests** - Claude automatically uses registered MCP servers for relevant requests
 4. **Function calls are handled internally** by Claude Code, not exposed through the API
 

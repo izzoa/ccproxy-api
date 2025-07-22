@@ -1,4 +1,4 @@
-"""Core interfaces and abstract base classes for the Claude Code Proxy API.
+"""Core interfaces and abstract base classes for the CCProxy API.
 
 This module consolidates all abstract interfaces used throughout the application,
 providing a single location for defining contracts and protocols.

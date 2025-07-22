@@ -2,7 +2,7 @@
 
 ## Overview
 
-Claude Code Proxy API handles authentication in two layers:
+CCProxy API handles authentication in two layers:
 1. **Claude Authentication**: Your Claude subscription credentials for accessing Claude AI
 2. **API Authentication**: Optional token authentication for securing access to the proxy endpoints
 

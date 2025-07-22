@@ -22,7 +22,7 @@ def test_fastapi_app_factory_basic(test_settings: Settings) -> None:
     app = factory.create_app()
 
     assert isinstance(app, FastAPI)
-    assert app.title == "Claude Code Proxy API Server"
+    assert app.title == "CCProxy API Server"
 
 
 @pytest.mark.unit

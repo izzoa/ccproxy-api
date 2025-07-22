@@ -1,10 +1,10 @@
 # Quick Start Guide
 
-Get up and running with Claude Code Proxy API on your local machine in minutes.
+Get up and running with CCProxy API on your local machine in minutes.
 
 ## The `ccproxy` Command
 
-The `ccproxy` command is your unified interface for Claude Code Proxy API:
+The `ccproxy` command is your unified interface for CCProxy API:
 
 ```bash
 # Run Claude commands locally
@@ -168,8 +168,8 @@ If you see authentication errors, refer to the [troubleshooting section](#claude
 
 ```bash
 # Clone the repository
-git clone https://github.com/CaddyGlow/claude-code-proxy-api.git
-cd claude-code-proxy-api
+git clone https://github.com/CaddyGlow/ccproxy-api.git
+cd ccproxy-api
 
 # Install dependencies using uv
 uv sync
@@ -182,8 +182,8 @@ uv sync --group docs
 
 ```bash
 # Clone the repository
-git clone https://github.com/CaddyGlow/claude-code-proxy-api.git
-cd claude-code-proxy-api
+git clone https://github.com/CaddyGlow/ccproxy-api.git
+cd ccproxy-api
 
 # Install dependencies
 pip install -e .
@@ -198,10 +198,10 @@ Docker provides isolation and security for Claude Code execution on your local m
 
 ```bash
 # Pull the Docker image
-docker pull claude-code-proxy-api
+docker pull ccproxy-api
 
 # Or build locally
-docker build -t claude-code-proxy-api .
+docker build -t ccproxy-api .
 ```
 
 ## Running the Server
@@ -226,21 +226,21 @@ Run Claude Code Proxy in a secure, isolated container with proper volume mapping
 ```bash
 # Run with Docker (for secure local execution)
 docker run -d \
-  --name claude-code-proxy-api \
+  --name ccproxy-api \
   -p 8000:8000 \
   -v ~/.config/cc-proxy/home:/data/home \
   -v $(pwd):/data/workspace \
-  claude-code-proxy-api
+  ccproxy-api
 
 # With custom settings and working directory
 docker run -d \
-  --name claude-code-proxy-api \
+  --name ccproxy-api \
   -p 8080:8000 \
   -e PORT=8000 \
   -e LOG_LEVEL=INFO \
   -v ~/.config/cc-proxy/home:/data/home \
   -v /path/to/your/workspace:/data/workspace \
-  claude-code-proxy-api
+  ccproxy-api
 ```
 
 ## Docker Configuration Summary
@@ -302,19 +302,19 @@ mkdir -p ~/.config/cc-proxy/home
 
 # Run with automatic volume setup
 docker run -d \
-  --name claude-code-proxy \
+  --name ccproxy \
   -p 8000:8000 \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -v ~/.config/cc-proxy/home:/data/home \
   -v $(pwd):/data/workspace \
-  ghcr.io/caddyglow/claude-code-proxy-api
+  ghcr.io/caddyglow/ccproxy-api
 
 # First-time authentication
-docker exec -it claude-code-proxy ccproxy claude -- auth login
+docker exec -it ccproxy ccproxy claude -- auth login
 
 # Verify setup
-docker exec -it claude-code-proxy ccproxy claude -- /status
+docker exec -it ccproxy ccproxy claude -- /status
 ```
 
 ### Docker Compose (Recommended)
@@ -324,9 +324,9 @@ Complete Docker Compose setup with proper configuration:
 ```yaml
 version: '3.8'
 services:
-  claude-code-proxy:
-    image: ghcr.io/caddyglow/claude-code-proxy-api:latest
-    container_name: claude-code-proxy
+  ccproxy:
+    image: ghcr.io/caddyglow/ccproxy-api:latest
+    container_name: ccproxy
     ports:
       - "8000:8000"
     environment:
@@ -367,13 +367,13 @@ export PGID=$(id -g)
 docker-compose up -d
 
 # First-time authentication
-docker-compose exec claude-code-proxy ccproxy claude -- auth login
+docker-compose exec ccproxy ccproxy claude -- auth login
 
 # Verify setup
-docker-compose exec claude-code-proxy ccproxy claude -- /status
+docker-compose exec ccproxy ccproxy claude -- /status
 
 # View logs
-docker-compose logs -f claude-code-proxy
+docker-compose logs -f ccproxy
 ```
 
 ## First API Call

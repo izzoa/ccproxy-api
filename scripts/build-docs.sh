@@ -3,7 +3,7 @@
 
 set -e
 
-echo "Building Claude Code Proxy API documentation..."
+echo "Building CCProxy API documentation..."
 
 # Check if docs dependencies are installed
 # if ! command -v mkdocs &>/dev/null; then

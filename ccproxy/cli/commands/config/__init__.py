@@ -1,4 +1,4 @@
-"""Config command module for Claude Code Proxy API."""
+"""Config command module for CCProxy API."""
 
 from ccproxy.cli.commands.config.commands import app, config_list
 from ccproxy.cli.commands.config.schema_commands import (

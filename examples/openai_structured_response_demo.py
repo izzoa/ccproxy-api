@@ -2,7 +2,7 @@
 """
 OpenAI SDK Structured Response Demo
 
-This example demonstrates using the OpenAI SDK with the Claude Code Proxy API
+This example demonstrates using the OpenAI SDK with the CCProxy API
 to show the full response JSON structure using structured logging and argparse.
 """
 

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0] - 2025-07-21
 
-This is the initial public release of the Claude Code Proxy API.
+This is the initial public release of the CCProxy API.
 
 ### Added
 

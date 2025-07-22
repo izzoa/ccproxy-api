@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Claude Code Proxy API - Optimized for low-volume traffic (2-3 requests/minute)",
+  "description": "CCProxy API - Optimized for low-volume traffic (2-3 requests/minute)",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -1713,7 +1713,7 @@
     ]
   },
   "timezone": "",
-  "title": "Claude Code Proxy API Dashboard",
+  "title": "CCProxy API Dashboard",
   "uid": "ccproxy-dashboard",
   "version": 1,
   "weekStart": ""

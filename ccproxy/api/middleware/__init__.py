@@ -1,4 +1,4 @@
-"""API middleware for Claude Code Proxy API Server."""
+"""API middleware for CCProxy API Server."""
 
 from ccproxy.api.middleware.cors import get_cors_config, setup_cors_middleware
 from ccproxy.api.middleware.errors import setup_error_handlers
