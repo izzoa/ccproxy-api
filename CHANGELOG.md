@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2025-07-22
+
+### Added
+- **Conditional Authentication**: API endpoints now support optional authentication - when `SECURITY__AUTH_TOKEN` is configured, authentication is enforced; when not configured, the proxy runs in open mode.
+- **Startup Validation**: Added comprehensive validation checks during application startup:
+  - Validates OAuth credentials and warns about expired tokens
+  - Checks for Claude CLI binary availability with installation instructions
+  - Logs token expiration time and subscription type when valid
+- **Default Command**: The `serve` command is now the default - running `ccproxy` without subcommands automatically starts the server.
+- **Alternative Entry Point**: Added `ccproxy-api` as an alternative command-line entry point.
+
+### Changed
+- **Authentication Variable**: Renamed environment variable from `AUTH_TOKEN` to `SECURITY__AUTH_TOKEN` for better namespace organization and clarity.
+- **Credential Priority**: Reordered credential search paths to prioritize ccproxy-specific credentials before Claude CLI paths.
+- **CLI Syntax**: Migrated all CLI parameters to modern Annotated syntax for better type safety and IDE support.
+- **Pydantic v2**: Updated all models to use Pydantic v2 configuration syntax (`model_config` instead of `Config` class).
+- **Documentation**: Improved Aider integration docs with correct API endpoint URLs and added installation options (uv, pipx).
+
+### Fixed
+- **Authentication Separation**: Fixed critical issue where auth token was incorrectly used for both client and upstream authentication - now client auth token is separate from OAuth credentials.
+- **URL Paths**: Fixed documentation to use `/api` endpoints for Aider compatibility instead of SDK mode paths.
+- **Default Values**: Fixed default values for list parameters in CLI (docker_env, docker_volume, docker_arg).
+
+### Removed
+- **Status Endpoints**: Removed redundant `/status` endpoints from both Claude SDK and proxy routes.
+- **Permission Tool**: Removed Claude permission tool functionality and related CLI options (`--permission-mode`, `--permission-prompt-tool-name`) that are no longer needed.
+- **Deprecated Options**: Removed references to deprecated permission_mode and permission_prompt_tool_name from documentation.
+
 ## [0.1.0] - 2025-07-21
 
 This is the initial public release of the CCProxy API.
