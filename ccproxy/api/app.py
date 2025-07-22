@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -23,11 +24,13 @@ from ccproxy.api.routes.metrics import (
     prometheus_router,
 )
 from ccproxy.api.routes.proxy import router as proxy_router
+from ccproxy.auth.exceptions import CredentialsNotFoundError
 from ccproxy.auth.oauth.routes import router as oauth_router
 from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.logging import setup_logging
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
 from ccproxy.scheduler.manager import start_scheduler, stop_scheduler
+from ccproxy.services.credentials import CredentialsManager
 
 
 logger = get_logger(__name__)
@@ -56,6 +59,73 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.debug("claude_cli_auto_detect")
         logger.debug(
             "claude_cli_search_paths", paths=settings.claude.get_searched_paths()
+        )
+
+    # Validate authentication token at startup
+    try:
+        credentials_manager = CredentialsManager()
+        validation = await credentials_manager.validate()
+
+        if validation.valid and not validation.expired:
+            credentials = validation.credentials
+            oauth_token = credentials.claude_ai_oauth if credentials else None
+
+            if oauth_token and oauth_token.expires_at_datetime:
+                hours_until_expiry = int(
+                    (
+                        oauth_token.expires_at_datetime - datetime.now(UTC)
+                    ).total_seconds()
+                    / 3600
+                )
+                logger.info(
+                    "auth_token_valid",
+                    expires_in_hours=hours_until_expiry,
+                    subscription_type=oauth_token.subscription_type,
+                    credentials_path=str(validation.path) if validation.path else None,
+                )
+            else:
+                logger.info("auth_token_valid", credentials_path=str(validation.path))
+        elif validation.expired:
+            logger.warning(
+                "auth_token_expired",
+                message="Authentication token has expired. Please run 'ccproxy auth login' to refresh.",
+                credentials_path=str(validation.path) if validation.path else None,
+            )
+        else:
+            logger.warning(
+                "auth_token_invalid",
+                message="Authentication token is invalid. Please run 'ccproxy auth login'.",
+                credentials_path=str(validation.path) if validation.path else None,
+            )
+    except CredentialsNotFoundError:
+        logger.warning(
+            "auth_token_not_found",
+            message="No authentication credentials found. Please run 'ccproxy auth login' to authenticate.",
+            searched_paths=settings.auth.storage.storage_paths,
+        )
+    except Exception as e:
+        logger.error(
+            "auth_token_validation_error",
+            error=str(e),
+            message="Failed to validate authentication token. The server will continue without authentication.",
+        )
+
+    # Validate Claude binary at startup
+    claude_path, found_in_path = settings.claude.find_claude_cli()
+    if claude_path:
+        logger.info(
+            "claude_binary_found",
+            path=claude_path,
+            found_in_path=found_in_path,
+            message=f"Claude CLI binary found at: {claude_path}",
+        )
+    else:
+        searched_paths = settings.claude.get_searched_paths()
+        logger.warning(
+            "claude_binary_not_found",
+            message="Claude CLI binary not found. Please install Claude CLI to use SDK features.",
+            searched_paths=searched_paths,
+            install_command="npm install -g @anthropic-ai/claude-code",
         )
 
     # Start scheduler system
