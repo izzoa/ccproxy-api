@@ -1,9 +1,8 @@
 """Docker output middleware for processing and logging container output."""
 
-import logging
 from typing import Any
 
-from ccproxy.utils.logging import get_logger
+from structlog import get_logger
 
 from .stream_process import OutputMiddleware, create_chained_middleware
 
@@ -18,9 +17,7 @@ class LoggerOutputMiddleware(OutputMiddleware[str]):
     prefixes for stdout and stderr streams.
     """
 
-    def __init__(
-        self, logger: logging.Logger, stdout_prefix: str = "", stderr_prefix: str = ""
-    ):
+    def __init__(self, logger: Any, stdout_prefix: str = "", stderr_prefix: str = ""):
         """Initialize middleware with custom prefixes.
 
         Args:
@@ -31,7 +28,7 @@ class LoggerOutputMiddleware(OutputMiddleware[str]):
         self.stderr_prefix = stderr_prefix
         self.stdout_prefix = stdout_prefix
 
-    def process(self, line: str, stream_type: str) -> str:
+    async def process(self, line: str, stream_type: str) -> str:
         """Process and print a line with the appropriate prefix.
 
         Args:
@@ -42,16 +39,18 @@ class LoggerOutputMiddleware(OutputMiddleware[str]):
             The original line (unmodified)
         """
         if stream_type == "stdout":
-            self.logger.info(f"{self.stdout_prefix}{line}")
-            # self.logger.debug(f"{self.stdout_prefix}{line}")
+            self.logger.info(
+                "docker_stdout", prefix=self.stdout_prefix, line=line, stream="stdout"
+            )
         else:
-            self.logger.info(f"{self.stderr_prefix}{line}")
-            # self.logger.info(f"{self.stderr_prefix}{line}")
+            self.logger.info(
+                "docker_stderr", prefix=self.stderr_prefix, line=line, stream="stderr"
+            )
         return line
 
 
 def create_logger_middleware(
-    logger_instance: logging.Logger | None = None,
+    logger_instance: Any | None = None,
     stdout_prefix: str = "",
     stderr_prefix: str = "",
 ) -> LoggerOutputMiddleware:
@@ -73,7 +72,7 @@ def create_logger_middleware(
 def create_chained_docker_middleware(
     middleware_chain: list[OutputMiddleware[Any]],
     include_logger: bool = True,
-    logger_instance: logging.Logger | None = None,
+    logger_instance: Any | None = None,
     stdout_prefix: str = "",
     stderr_prefix: str = "",
 ) -> OutputMiddleware[Any]:

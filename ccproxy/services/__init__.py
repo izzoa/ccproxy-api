@@ -1,8 +1,10 @@
 """Services module for Claude Proxy API Server."""
 
-from .claude_client import ClaudeClient
-
+# NOTE: Imports removed to avoid circular dependency issues.
+# Import services directly from their modules as needed.
 
 __all__ = [
-    "ClaudeClient",
+    "ClaudeSDKService",
+    "MetricsService",
+    "ProxyService",
 ]

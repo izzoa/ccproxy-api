@@ -4,127 +4,235 @@ This module provides reusable Typer Option definitions for Docker-related
 parameters that are used across multiple CLI commands, eliminating duplication.
 """
 
+from typing import Any
+
 import typer
 
-from ccproxy.utils.docker_params import (
-    parse_docker_env,
-    parse_docker_volume,
-    validate_docker_arg,
-    validate_docker_home,
-    validate_docker_image,
-    validate_docker_workspace,
-    validate_user_gid,
-    validate_user_uid,
-)
+
+# Docker parameter validation functions moved here to avoid utils dependency
 
 
-def docker_image_option(
-    value: str | None = typer.Option(
+def parse_docker_env(
+    ctx: typer.Context, param: typer.CallbackParam, value: list[str] | None
+) -> list[str]:
+    """Parse Docker environment variable string."""
+    if not value:
+        return []
+
+    parsed = []
+    for env_str in value:
+        if not env_str or env_str == "[]":
+            raise typer.BadParameter(
+                f"Invalid env format: {env_str}. Expected KEY=VALUE"
+            )
+        if "=" not in env_str:
+            raise typer.BadParameter(
+                f"Invalid env format: {env_str}. Expected KEY=VALUE"
+            )
+        parsed.append(env_str)
+
+    return parsed
+
+
+def parse_docker_volume(
+    ctx: typer.Context, param: typer.CallbackParam, value: list[str] | None
+) -> list[str]:
+    """Parse Docker volume string."""
+    if not value:
+        return []
+
+    # Import the validation function from config
+    from ccproxy.config.docker_settings import validate_volume_format
+
+    parsed = []
+    for volume_str in value:
+        if not volume_str:
+            continue
+        try:
+            validated_volume = validate_volume_format(volume_str)
+            parsed.append(validated_volume)
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from e
+
+    return parsed
+
+
+def validate_docker_arg(
+    ctx: typer.Context, param: typer.CallbackParam, value: list[str] | None
+) -> list[str]:
+    """Validate Docker argument."""
+    if not value:
+        return []
+
+    # Basic validation - ensure arguments don't contain dangerous patterns
+    validated = []
+    for arg in value:
+        if not arg:
+            continue
+        # Basic validation - just return the arg for now
+        validated.append(arg)
+
+    return validated
+
+
+def validate_docker_home(
+    ctx: typer.Context, param: typer.CallbackParam, value: str | None
+) -> str | None:
+    """Validate Docker home directory."""
+    if value is None:
+        return None
+
+    from pathlib import Path
+
+    from ccproxy.config.docker_settings import validate_host_path
+
+    try:
+        return validate_host_path(value)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from e
+
+
+def validate_docker_image(
+    ctx: typer.Context, param: typer.CallbackParam, value: str | None
+) -> str | None:
+    """Validate Docker image name."""
+    if value is None:
+        return None
+
+    if not value:
+        raise typer.BadParameter("Docker image cannot be empty")
+
+    # Basic validation - no spaces allowed in image names
+    if " " in value:
+        raise typer.BadParameter(f"Docker image name cannot contain spaces: {value}")
+
+    return value
+
+
+def validate_docker_workspace(
+    ctx: typer.Context, param: typer.CallbackParam, value: str | None
+) -> str | None:
+    """Validate Docker workspace directory."""
+    if value is None:
+        return None
+
+    from pathlib import Path
+
+    from ccproxy.config.docker_settings import validate_host_path
+
+    try:
+        return validate_host_path(value)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from e
+
+
+def validate_user_gid(
+    ctx: typer.Context, param: typer.CallbackParam, value: int | None
+) -> int | None:
+    """Validate user GID."""
+    if value is None:
+        return None
+
+    if value < 0:
+        raise typer.BadParameter("GID must be non-negative")
+
+    return value
+
+
+def validate_user_uid(
+    ctx: typer.Context, param: typer.CallbackParam, value: int | None
+) -> int | None:
+    """Validate user UID."""
+    if value is None:
+        return None
+
+    if value < 0:
+        raise typer.BadParameter("UID must be non-negative")
+
+    return value
+
+
+def docker_image_option() -> Any:
+    """Docker image parameter."""
+    return typer.Option(
         None,
         "--docker-image",
         help="Docker image to use (overrides config)",
-        callback=validate_docker_image,
-    ),
-) -> str | None:
-    """Docker image parameter."""
-    return value
+    )
 
 
-def docker_env_option(
-    value: list[str] = typer.Option(
+def docker_env_option() -> Any:
+    """Docker environment variables parameter."""
+    return typer.Option(
         [],
         "--docker-env",
         help="Environment variables to pass to Docker (KEY=VALUE format, can be used multiple times)",
-        callback=parse_docker_env,
-    ),
-) -> list[str]:
-    """Docker environment variables parameter."""
-    return value
+    )
 
 
-def docker_volume_option(
-    value: list[str] = typer.Option(
+def docker_volume_option() -> Any:
+    """Docker volume mounts parameter."""
+    return typer.Option(
         [],
         "--docker-volume",
         help="Volume mounts to add (host:container[:options] format, can be used multiple times)",
-        callback=parse_docker_volume,
-    ),
-) -> list[str]:
-    """Docker volume mounts parameter."""
-    return value
+    )
 
 
-def docker_arg_option(
-    value: list[str] = typer.Option(
+def docker_arg_option() -> Any:
+    """Docker arguments parameter."""
+    return typer.Option(
         [],
         "--docker-arg",
         help="Additional Docker run arguments (can be used multiple times)",
-        callback=validate_docker_arg,
-    ),
-) -> list[str]:
-    """Docker arguments parameter."""
-    return value
+    )
 
 
-def docker_home_option(
-    value: str | None = typer.Option(
+def docker_home_option() -> Any:
+    """Docker home directory parameter."""
+    return typer.Option(
         None,
         "--docker-home",
         help="Home directory inside Docker container (overrides config)",
-        callback=validate_docker_home,
-    ),
-) -> str | None:
-    """Docker home directory parameter."""
-    return value
+    )
 
 
-def docker_workspace_option(
-    value: str | None = typer.Option(
+def docker_workspace_option() -> Any:
+    """Docker workspace directory parameter."""
+    return typer.Option(
         None,
         "--docker-workspace",
         help="Workspace directory inside Docker container (overrides config)",
-        callback=validate_docker_workspace,
-    ),
-) -> str | None:
-    """Docker workspace directory parameter."""
-    return value
+    )
 
 
-def user_mapping_option(
-    value: bool | None = typer.Option(
+def user_mapping_option() -> Any:
+    """User mapping parameter."""
+    return typer.Option(
         None,
         "--user-mapping/--no-user-mapping",
         help="Enable/disable UID/GID mapping (overrides config)",
-    ),
-) -> bool | None:
-    """User mapping parameter."""
-    return value
+    )
 
 
-def user_uid_option(
-    value: int | None = typer.Option(
+def user_uid_option() -> Any:
+    """User UID parameter."""
+    return typer.Option(
         None,
         "--user-uid",
         help="User ID to run container as (overrides config)",
         min=0,
-        callback=validate_user_uid,
-    ),
-) -> int | None:
-    """User UID parameter."""
-    return value
+    )
 
 
-def user_gid_option(
-    value: int | None = typer.Option(
+def user_gid_option() -> Any:
+    """User GID parameter."""
+    return typer.Option(
         None,
         "--user-gid",
         help="Group ID to run container as (overrides config)",
         min=0,
-        callback=validate_user_gid,
-    ),
-) -> int | None:
-    """User GID parameter."""
-    return value
+    )
 
 
 class DockerOptions:

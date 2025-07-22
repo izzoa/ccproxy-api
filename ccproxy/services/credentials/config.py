@@ -11,21 +11,24 @@ def _get_default_storage_paths() -> list[str]:
     if os.getenv("CCPROXY_TEST_MODE") == "true":
         # Use a test-specific location that won't pollute real credentials
         return [
-            "/tmp/ccproxy-test/.claude/.credentials.json",
             "/tmp/ccproxy-test/.config/claude/.credentials.json",
+            "/tmp/ccproxy-test/.claude/.credentials.json",
         ]
 
     return [
-        "~/.config/ccproxy/credentials.json",  # Primary location in app config
-        # We stop sharing with Claude Code that create issue
-        # "~/.claude/.credentials.json",  # Legacy location
-        # "~/.config/claude/.credentials.json",  # Alternative legacy location
+        "~/.config/claude/.credentials.json",  # Alternative legacy location
+        "~/.claude/.credentials.json",  # Legacy location
+        "~/.config/ccproxy/credentials.json",  # location in app config
     ]
 
 
 class OAuthConfig(BaseModel):
     """OAuth configuration settings."""
 
+    base_url: str = Field(
+        default="https://console.anthropic.com",
+        description="Base URL for OAuth API endpoints",
+    )
     beta_version: str = Field(
         default="oauth-2025-04-20",
         description="OAuth beta version header",
@@ -37,6 +40,10 @@ class OAuthConfig(BaseModel):
     authorize_url: str = Field(
         default="https://claude.ai/oauth/authorize",
         description="OAuth authorization endpoint URL",
+    )
+    profile_url: str = Field(
+        default="https://api.anthropic.com/api/oauth/profile",
+        description="OAuth profile endpoint URL",
     )
     client_id: str = Field(
         default="9d1c250a-e61b-44d9-88ed-5944d1962f5e",
@@ -53,6 +60,10 @@ class OAuthConfig(BaseModel):
             "user:inference",
         ],
         description="OAuth scopes to request",
+    )
+    request_timeout: int = Field(
+        default=30,
+        description="Timeout in seconds for OAuth requests",
     )
     user_agent: str = Field(
         default="Claude-Code/1.0.43",

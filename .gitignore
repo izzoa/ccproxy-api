@@ -158,3 +158,8 @@ logs
 .pnpm-store/
 data/home
 coverage.xml
+
+ccproxy/static/dashboard/
+
+*.wal
+*.duckdb

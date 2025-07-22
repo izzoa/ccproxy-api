@@ -1,12 +1,12 @@
 """Docker adapter for container operations."""
 
+import asyncio
 import os
 import shlex
-import subprocess
 from pathlib import Path
 from typing import cast
 
-from ccproxy.utils.logging import get_logger
+from structlog import get_logger
 
 from .middleware import LoggerOutputMiddleware
 from .models import DockerUserContext
@@ -31,75 +31,85 @@ logger = get_logger(__name__)
 class DockerAdapter:
     """Implementation of Docker adapter."""
 
-    def _needs_sudo(self) -> bool:
+    async def _needs_sudo(self) -> bool:
         """Check if Docker requires sudo by testing docker info command."""
         try:
-            subprocess.run(
-                ["docker", "info"], check=True, capture_output=True, text=True
+            process = await asyncio.create_subprocess_exec(
+                "docker",
+                "info",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            return False
-        except subprocess.CalledProcessError as e:
+            _, stderr = await process.communicate()
+            if process.returncode == 0:
+                return False
             # Check if error suggests permission issues
-            return e.stderr and (
-                "permission denied" in e.stderr.lower()
-                or "dial unix" in e.stderr.lower()
-                or "connect: permission denied" in e.stderr.lower()
+            stderr_text = stderr.decode() if stderr else ""
+            return (
+                "permission denied" in stderr_text.lower()
+                or "dial unix" in stderr_text.lower()
+                or "connect: permission denied" in stderr_text.lower()
             )
         except Exception:
             return False
 
-    def is_available(self) -> bool:
+    async def is_available(self) -> bool:
         """Check if Docker is available on the system."""
         docker_cmd = ["docker", "--version"]
         cmd_str = " ".join(docker_cmd)
 
         try:
-            result = subprocess.run(
-                docker_cmd, check=True, capture_output=True, text=True
+            process = await asyncio.create_subprocess_exec(
+                *docker_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            docker_version = result.stdout.strip()
-            logger.debug("Docker is available: %s", docker_version)
-            return True
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                docker_version = stdout.decode().strip()
+                logger.debug("docker_available", version=docker_version)
+                return True
+            else:
+                stderr_text = stderr.decode() if stderr else "unknown error"
+                logger.warning(
+                    "docker_command_failed", command=cmd_str, error=stderr_text
+                )
+                return False
 
         except FileNotFoundError:
-            logger.warning("Docker executable not found in PATH")
-            return False
-
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr if hasattr(e, "stderr") and e.stderr else "unknown error"
-            logger.warning("Docker command failed: %s - error: %s", cmd_str, stderr)
+            logger.warning("docker_executable_not_found")
             return False
 
         except Exception as e:
-            logger.warning("Unexpected error checking Docker availability: %s", e)
+            logger.warning("docker_availability_check_error", error=str(e))
             return False
 
-    def _run_with_sudo_fallback(
+    async def _run_with_sudo_fallback(
         self, docker_cmd: list[str], middleware: OutputMiddleware[T]
     ) -> ProcessResult[T]:
         # Try without sudo first
         try:
-            result = run_command(docker_cmd, middleware)
+            result = await run_command(docker_cmd, middleware)
             return result
-        except subprocess.SubprocessError as e:
+        except Exception as e:
             # Check if this might be a permission error
-            if hasattr(e, "stderr") and e.stderr:
-                stderr_text = str(e.stderr).lower()
-                if any(
-                    phrase in stderr_text
-                    for phrase in [
-                        "permission denied",
-                        "dial unix",
-                        "connect: permission denied",
-                    ]
-                ):
-                    logger.info("Docker permission denied, trying with sudo...")
-                    sudo_cmd = ["sudo"] + docker_cmd
-                    return run_command(sudo_cmd, middleware)
+            error_text = str(e).lower()
+            if any(
+                phrase in error_text
+                for phrase in [
+                    "permission denied",
+                    "dial unix",
+                    "connect: permission denied",
+                ]
+            ):
+                logger.info("docker_permission_denied_using_sudo")
+                sudo_cmd = ["sudo"] + docker_cmd
+                return await run_command(sudo_cmd, middleware)
             # Re-raise if not a permission error
             raise
 
-    def run_container(
+    async def run_container(
         self,
         image: str,
         volumes: list[DockerVolume],
@@ -118,19 +128,19 @@ class DockerAdapter:
         if user_context and user_context.should_use_user_mapping():
             docker_user_flag = user_context.get_docker_user_flag()
             docker_cmd.extend(["--user", docker_user_flag])
-            logger.debug("Using Docker user mapping: %s", docker_user_flag)
+            logger.debug("docker_user_mapping", user_flag=docker_user_flag)
 
         # Add custom entrypoint if specified
         if entrypoint:
             docker_cmd.extend(["--entrypoint", entrypoint])
-            logger.debug("Using custom entrypoint: %s", entrypoint)
+            logger.debug("docker_custom_entrypoint", entrypoint=entrypoint)
 
         # Add port publishing if specified
         if ports:
             for port_spec in ports:
                 validated_port = validate_port_spec(port_spec)
                 docker_cmd.extend(["-p", validated_port])
-                logger.debug("Publishing port: %s", validated_port)
+                logger.debug("docker_port_mapping", port=validated_port)
 
         # Add volume mounts
         for host_path, container_path in volumes:
@@ -148,7 +158,7 @@ class DockerAdapter:
             docker_cmd.extend(command)
 
         cmd_str = " ".join(shlex.quote(arg) for arg in docker_cmd)
-        logger.debug("Docker command: %s", cmd_str)
+        logger.debug("docker_command", command=cmd_str)
 
         try:
             if middleware is None:
@@ -156,18 +166,13 @@ class DockerAdapter:
                 middleware = cast(OutputMiddleware[T], LoggerOutputMiddleware(logger))
 
             # Try with sudo fallback if needed
-            result = self._run_with_sudo_fallback(docker_cmd, middleware)
+            result = await self._run_with_sudo_fallback(docker_cmd, middleware)
 
             return result
 
         except FileNotFoundError as e:
             error = create_docker_error(f"Docker executable not found: {e}", cmd_str, e)
-            logger.error("Docker executable not found: %s", e)
-            raise error from e
-
-        except subprocess.SubprocessError as e:
-            error = create_docker_error(f"Docker subprocess error: {e}", cmd_str, e)
-            logger.error("Docker subprocess error: %s", e)
+            logger.error("docker_executable_not_found", error=str(e))
             raise error from e
 
         except Exception as e:
@@ -181,10 +186,10 @@ class DockerAdapter:
                     "env_vars_count": len(environment),
                 },
             )
-            logger.error("Unexpected error running Docker container: %s", e)
+            logger.error("docker_container_run_error", error=str(e))
             raise error from e
 
-    def run(
+    async def run(
         self,
         image: str,
         volumes: list[DockerVolume],
@@ -199,7 +204,7 @@ class DockerAdapter:
 
         This is an alias for run_container method.
         """
-        return self.run_container(
+        return await self.run_container(
             image=image,
             volumes=volumes,
             environment=environment,
@@ -244,19 +249,19 @@ class DockerAdapter:
         if user_context and user_context.should_use_user_mapping():
             docker_user_flag = user_context.get_docker_user_flag()
             docker_cmd.extend(["--user", docker_user_flag])
-            logger.debug("Using Docker user mapping: %s", docker_user_flag)
+            logger.debug("docker_user_mapping", user_flag=docker_user_flag)
 
         # Add custom entrypoint if specified
         if entrypoint:
             docker_cmd.extend(["--entrypoint", entrypoint])
-            logger.debug("Using custom entrypoint: %s", entrypoint)
+            logger.debug("docker_custom_entrypoint", entrypoint=entrypoint)
 
         # Add port publishing if specified
         if ports:
             for port_spec in ports:
                 validated_port = validate_port_spec(port_spec)
                 docker_cmd.extend(["-p", validated_port])
-                logger.debug("Publishing port: %s", validated_port)
+                logger.debug("docker_port_mapping", port=validated_port)
 
         # Add volume mounts
         for host_path, container_path in volumes:
@@ -274,12 +279,30 @@ class DockerAdapter:
             docker_cmd.extend(command)
 
         cmd_str = " ".join(shlex.quote(arg) for arg in docker_cmd)
-        logger.info("Executing Docker command with execvp: %s", cmd_str)
+        logger.info("docker_execvp", command=cmd_str)
 
         try:
             # Check if we need sudo (without running the actual command)
-            if self._needs_sudo():
-                logger.info("Docker requires sudo, using sudo for execution")
+            # Note: We can't use await here since this method replaces the process
+            # Use a simple check instead
+            try:
+                import subprocess
+
+                subprocess.run(
+                    ["docker", "info"], check=True, capture_output=True, text=True
+                )
+                needs_sudo = False
+            except subprocess.CalledProcessError as e:
+                needs_sudo = e.stderr and (
+                    "permission denied" in e.stderr.lower()
+                    or "dial unix" in e.stderr.lower()
+                    or "connect: permission denied" in e.stderr.lower()
+                )
+            except Exception:
+                needs_sudo = False
+
+            if needs_sudo:
+                logger.info("docker_using_sudo_for_execution")
                 docker_cmd = ["sudo"] + docker_cmd
 
             # Replace current process with Docker command
@@ -287,14 +310,14 @@ class DockerAdapter:
 
         except FileNotFoundError as e:
             error = create_docker_error(f"Docker executable not found: {e}", cmd_str, e)
-            logger.error("Docker executable not found for execvp: %s", e)
+            logger.error("docker_execvp_executable_not_found", error=str(e))
             raise error from e
 
         except OSError as e:
             error = create_docker_error(
                 f"Failed to execute Docker command: {e}", cmd_str, e
             )
-            logger.error("OSError during Docker execvp: %s", e)
+            logger.error("docker_execvp_os_error", error=str(e))
             raise error from e
 
         except Exception as e:
@@ -308,10 +331,10 @@ class DockerAdapter:
                     "env_vars_count": len(environment),
                 },
             )
-            logger.error("Unexpected error during Docker execvp: %s", e)
+            logger.error("docker_execvp_unexpected_error", error=str(e))
             raise error from e
 
-    def build_image(
+    async def build_image(
         self,
         dockerfile_dir: Path,
         image_name: str,
@@ -324,14 +347,14 @@ class DockerAdapter:
         image_full_name = f"{image_name}:{image_tag}"
 
         # Check Docker availability
-        if not self.is_available():
+        if not await self.is_available():
             error = create_docker_error(
                 "Docker is not available or not properly installed",
                 None,
                 None,
                 {"image": image_full_name},
             )
-            logger.error("Docker not available for image build: %s", image_full_name)
+            logger.error("docker_not_available_for_build", image=image_full_name)
             raise error
 
         # Validate dockerfile directory
@@ -344,7 +367,7 @@ class DockerAdapter:
                 {"dockerfile_dir": str(dockerfile_dir), "image": image_full_name},
             )
             logger.error(
-                "Invalid Dockerfile directory for image build: %s", dockerfile_dir
+                "dockerfile_directory_invalid", dockerfile_dir=str(dockerfile_dir)
             )
             raise error
 
@@ -357,7 +380,7 @@ class DockerAdapter:
                 None,
                 {"dockerfile_path": str(dockerfile_path), "image": image_full_name},
             )
-            logger.error("Dockerfile not found at %s for image build", dockerfile_path)
+            logger.error("dockerfile_not_found", dockerfile_path=str(dockerfile_path))
             raise error
 
         # Build the Docker command
@@ -375,26 +398,21 @@ class DockerAdapter:
 
         # Format command for logging
         cmd_str = " ".join(shlex.quote(arg) for arg in docker_cmd)
-        logger.info("Building Docker image: %s", image_full_name)
-        logger.debug("Docker command: %s", cmd_str)
+        logger.info("docker_build_starting", image=image_full_name)
+        logger.debug("docker_command", command=cmd_str)
 
         try:
             if middleware is None:
                 # Cast is needed because T is unbound at this point
                 middleware = cast(OutputMiddleware[T], LoggerOutputMiddleware(logger))
 
-            result = self._run_with_sudo_fallback(docker_cmd, middleware)
+            result = await self._run_with_sudo_fallback(docker_cmd, middleware)
 
             return result
 
         except FileNotFoundError as e:
             error = create_docker_error(f"Docker executable not found: {e}", cmd_str, e)
-            logger.error("Docker executable not found during image build: %s", e)
-            raise error from e
-
-        except subprocess.SubprocessError as e:
-            error = create_docker_error(f"Docker subprocess error: {e}", cmd_str, e)
-            logger.error("Docker subprocess error: %s", e)
+            logger.error("docker_build_executable_not_found", error=str(e))
             raise error from e
 
         except Exception as e:
@@ -405,18 +423,19 @@ class DockerAdapter:
                 {"image": image_full_name, "dockerfile_dir": str(dockerfile_dir)},
             )
 
-            logger.error("Unexpected Docker build error for %s: %s", image_full_name, e)
+            logger.error(
+                "docker_build_unexpected_error", image=image_full_name, error=str(e)
+            )
             raise error from e
 
-    def image_exists(self, image_name: str, image_tag: str = "latest") -> bool:
+    async def image_exists(self, image_name: str, image_tag: str = "latest") -> bool:
         """Check if a Docker image exists locally."""
         image_full_name = f"{image_name}:{image_tag}"
 
         # Check Docker availability
-        if not self.is_available():
+        if not await self.is_available():
             logger.warning(
-                "Docker not available, cannot check image existence: %s",
-                image_full_name,
+                "docker_not_available_for_image_check", image=image_full_name
             )
             return False
 
@@ -426,17 +445,21 @@ class DockerAdapter:
 
         try:
             # Run Docker inspect command
-            result = subprocess.run(
-                docker_cmd, check=True, capture_output=True, text=True
+            process = await asyncio.create_subprocess_exec(
+                *docker_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
+            _, stderr = await process.communicate()
 
-            logger.debug("Docker image exists: %s", image_full_name)
-            return True
+            if process.returncode == 0:
+                logger.debug("docker_image_exists", image=image_full_name)
+                return True
 
-        except subprocess.CalledProcessError as e:
             # Check if this is a permission error, try with sudo
-            if e.stderr and any(
-                phrase in e.stderr.lower()
+            stderr_text = stderr.decode() if stderr else ""
+            if any(
+                phrase in stderr_text.lower()
                 for phrase in [
                     "permission denied",
                     "dial unix",
@@ -444,14 +467,26 @@ class DockerAdapter:
                 ]
             ):
                 try:
-                    logger.debug(
-                        "Docker permission denied, trying with sudo for image check..."
-                    )
+                    logger.debug("docker_image_check_permission_denied_using_sudo")
                     sudo_cmd = ["sudo"] + docker_cmd
-                    subprocess.run(sudo_cmd, check=True, capture_output=True, text=True)
-                    logger.debug("Docker image exists (with sudo): %s", image_full_name)
-                    return True
-                except subprocess.CalledProcessError:
+                    sudo_process = await asyncio.create_subprocess_exec(
+                        *sudo_cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    await sudo_process.communicate()
+                    if sudo_process.returncode == 0:
+                        logger.debug(
+                            "docker_image_exists_with_sudo", image=image_full_name
+                        )
+                        return True
+                    else:
+                        # Image doesn't exist even with sudo
+                        logger.debug(
+                            "docker_image_does_not_exist", image=image_full_name
+                        )
+                        return False
+                except Exception:
                     # Image doesn't exist even with sudo
                     logger.debug("Docker image does not exist: %s", image_full_name)
                     return False
@@ -461,14 +496,14 @@ class DockerAdapter:
                 return False
 
         except FileNotFoundError:
-            logger.warning("Docker executable not found during image check")
+            logger.warning("docker_image_check_executable_not_found")
             return False
 
         except Exception as e:
-            logger.warning("Unexpected error checking Docker image existence: %s", e)
+            logger.warning("docker_image_check_unexpected_error", error=str(e))
             return False
 
-    def pull_image(
+    async def pull_image(
         self,
         image_name: str,
         image_tag: str = "latest",
@@ -479,14 +514,14 @@ class DockerAdapter:
         image_full_name = f"{image_name}:{image_tag}"
 
         # Check Docker availability
-        if not self.is_available():
+        if not await self.is_available():
             error = create_docker_error(
                 "Docker is not available or not properly installed",
                 None,
                 None,
                 {"image": image_full_name},
             )
-            logger.error("Docker not available for image pull: %s", image_full_name)
+            logger.error("docker_not_available_for_pull", image=image_full_name)
             raise error
 
         # Build the Docker command
@@ -494,26 +529,21 @@ class DockerAdapter:
 
         # Format command for logging
         cmd_str = " ".join(shlex.quote(arg) for arg in docker_cmd)
-        logger.info("Pulling Docker image: %s", image_full_name)
-        logger.debug("Docker command: %s", cmd_str)
+        logger.info("docker_pull_starting", image=image_full_name)
+        logger.debug("docker_command", command=cmd_str)
 
         try:
             if middleware is None:
                 # Cast is needed because T is unbound at this point
                 middleware = cast(OutputMiddleware[T], LoggerOutputMiddleware(logger))
 
-            result = self._run_with_sudo_fallback(docker_cmd, middleware)
+            result = await self._run_with_sudo_fallback(docker_cmd, middleware)
 
             return result
 
         except FileNotFoundError as e:
             error = create_docker_error(f"Docker executable not found: {e}", cmd_str, e)
-            logger.error("Docker executable not found during image pull: %s", e)
-            raise error from e
-
-        except subprocess.SubprocessError as e:
-            error = create_docker_error(f"Docker subprocess error: {e}", cmd_str, e)
-            logger.error("Docker subprocess error: %s", e)
+            logger.error("docker_pull_executable_not_found", error=str(e))
             raise error from e
 
         except Exception as e:
@@ -524,7 +554,9 @@ class DockerAdapter:
                 {"image": image_full_name},
             )
 
-            logger.error("Unexpected Docker pull error for %s: %s", image_full_name, e)
+            logger.error(
+                "docker_pull_unexpected_error", image=image_full_name, error=str(e)
+            )
             raise error from e
 
 
