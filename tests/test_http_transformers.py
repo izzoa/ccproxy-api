@@ -8,7 +8,7 @@ Tests follow the TESTING.md requirements with proper type hints and no internal 
 """
 
 import json
-from typing import Any, Union, cast
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -89,7 +89,7 @@ class TestHTTPRequestTransformer:
 
         # Check Claude CLI identity headers
         assert result["x-app"] == "cli"
-        assert result["User-Agent"] == "claude-cli/1.0.43 (external, cli)"
+        assert result["User-Agent"] == "claude-cli/1.0.60 (external, cli)"
 
         # Check Anthropic API headers
         assert "anthropic-beta" in result

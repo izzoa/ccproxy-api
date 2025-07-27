@@ -1,6 +1,6 @@
 """Core error types for the proxy system."""
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -234,6 +234,45 @@ class DockerError(ClaudeProxyError):
         )
 
 
+class PermissionRequestError(ClaudeProxyError):
+    """Base exception for permission request-related errors."""
+
+    pass
+
+
+class PermissionNotFoundError(PermissionRequestError):
+    """Raised when permission request is not found."""
+
+    def __init__(self, confirmation_id: str) -> None:
+        super().__init__(
+            message=f"Permission request '{confirmation_id}' not found",
+            error_type="not_found_error",
+            status_code=404,
+        )
+
+
+class PermissionExpiredError(PermissionRequestError):
+    """Raised when permission request has expired."""
+
+    def __init__(self, confirmation_id: str) -> None:
+        super().__init__(
+            message=f"Permission request '{confirmation_id}' has expired",
+            error_type="expired_error",
+            status_code=410,
+        )
+
+
+class PermissionAlreadyResolvedError(PermissionRequestError):
+    """Raised when trying to resolve an already resolved request."""
+
+    def __init__(self, confirmation_id: str, status: str) -> None:
+        super().__init__(
+            message=f"Permission request '{confirmation_id}' already resolved with status: {status}",
+            error_type="conflict_error",
+            status_code=409,
+        )
+
+
 __all__ = [
     # Core proxy errors
     "ProxyError",
@@ -253,4 +292,9 @@ __all__ = [
     "TimeoutError",
     "ServiceUnavailableError",
     "DockerError",
+    # Permission errors
+    "PermissionRequestError",
+    "PermissionNotFoundError",
+    "PermissionExpiredError",
+    "PermissionAlreadyResolvedError",
 ]

@@ -6,6 +6,7 @@ description = "API server that provides an Anthropic and OpenAI compatible inter
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "aiofiles>=24.1.0",
   "aiosqlite>=0.21.0",
   "jsonschema>=0.33.2",
   "fastapi[standard]>=0.115.14",
@@ -27,6 +28,8 @@ dependencies = [
   "sqlmodel>=0.0.24",
   "duckdb-engine>=0.17.0",
   "claude-code-sdk>=0.0.14",
+  "fastapi-mcp",
+  "textual>=3.7.1",
 ]
 
 [build-system]
@@ -70,6 +73,7 @@ dev = [
   "textual-dev>=1.7.0",
   "pytest-httpx>=0.35.0",
   "types-pyyaml>=6.0.12.20250516",
+  "types-aiofiles>=24.0.0",
 ]
 security = [
   "keyring>=25.0.0", # Optional keyring support for secure credential storage
@@ -176,6 +180,7 @@ exclude = [
 quote-style = "double"
 indent-style = "space"
 
+
 [tool.ruff.lint.isort]
 known-first-party = ["ccproxy"]
 force-single-line = false
@@ -229,6 +234,7 @@ disable_error_code = ["call-arg"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
+timeout = 30
 addopts = [
   "-ra",
   "--strict-markers",
@@ -338,3 +344,4 @@ package = true
 
 [tool.uv.sources]
 claude-code-sdk = { git = "https://github.com/anthropics/claude-code-sdk-python.git" }
+fastapi-mcp = { git = "https://github.com/tadata-org/fastapi_mcp.git", rev = "refs/pull/203/head" }

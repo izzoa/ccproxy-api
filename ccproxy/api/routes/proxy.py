@@ -2,17 +2,14 @@
 
 import json
 from collections.abc import AsyncIterator
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
-from starlette.background import BackgroundTask
 
 from ccproxy.adapters.openai.adapter import OpenAIAdapter
 from ccproxy.api.dependencies import ProxyServiceDep
 from ccproxy.api.responses import ProxyResponse
 from ccproxy.auth.conditional import ConditionalAuthDep
-from ccproxy.core.errors import ProxyHTTPException
 
 
 # Create the router for proxy endpoints
@@ -185,56 +182,6 @@ async def create_anthropic_message(
                     headers=response_headers,
                     media_type=response_headers.get("content-type", "application/json"),
                 )
-
-    except HTTPException:
-        # Re-raise HTTPException as-is (including 401 auth errors)
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Internal server error: {str(e)}"
-        ) from e
-
-
-@router.get("/v1/models", response_model=None)
-async def list_models(
-    request: Request,
-    proxy_service: ProxyServiceDep,
-    auth: ConditionalAuthDep,
-) -> Response:
-    """List available models using the proxy service.
-
-    Returns a combined list of Anthropic models and recent OpenAI models.
-    """
-    try:
-        # Get headers
-        headers = dict(request.headers)
-
-        # Handle the request using proxy service
-        response = await proxy_service.handle_request(
-            method="GET",
-            path="/v1/models",
-            headers=headers,
-            body=None,
-            request=request,
-        )
-
-        # Since /v1/models never streams, we know it returns a tuple
-        if isinstance(response, tuple):
-            status_code, response_headers, response_body = response
-        else:
-            # This shouldn't happen for /v1/models, but handle it gracefully
-            raise HTTPException(
-                status_code=500,
-                detail="Unexpected streaming response for /v1/models endpoint",
-            )
-
-        # Return response with headers
-        return ProxyResponse(
-            content=response_body,
-            status_code=status_code,
-            headers=response_headers,
-            media_type=response_headers.get("content-type", "application/json"),
-        )
 
     except HTTPException:
         # Re-raise HTTPException as-is (including 401 auth errors)

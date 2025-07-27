@@ -5,11 +5,10 @@ in FastAPI test fixtures by allowing flexible composition of different
 configurations and dependency overrides.
 """
 
-from collections.abc import AsyncGenerator, Awaitable, Callable
-from typing import Any, Protocol, TypeAlias
+from collections.abc import Callable
+from typing import Any, TypeAlias
 from unittest.mock import AsyncMock
 
-import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
@@ -152,9 +151,17 @@ class FastAPIAppFactory:
         overrides: DependencyOverrides = {}
 
         # Always override settings
+        from fastapi import Request
+
+        from ccproxy.api.dependencies import get_cached_settings
         from ccproxy.config.settings import get_settings as original_get_settings
 
         overrides[original_get_settings] = lambda: settings
+
+        def mock_get_cached_settings_for_factory(request: Request):
+            return settings
+
+        overrides[get_cached_settings] = mock_get_cached_settings_for_factory
 
         # Override Claude service if mock provided
         if claude_service_mock is not None:

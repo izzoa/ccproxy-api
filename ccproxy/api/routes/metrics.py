@@ -2,16 +2,15 @@
 
 import time
 from datetime import datetime as dt
-from typing import Any, Optional, cast
+from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from sqlmodel import Session, col, desc, func, select
 from typing_extensions import TypedDict
 
 from ccproxy.api.dependencies import (
     DuckDBStorageDep,
-    LogStorageDep,
     ObservabilityMetricsDep,
     SettingsDep,
 )
@@ -84,11 +83,8 @@ class AnalyticsResult(TypedDict):
 
 # Create separate routers for different concerns
 prometheus_router = APIRouter(tags=["metrics"])
-logs_router = APIRouter(prefix="/logs", tags=["logs"])
+logs_router = APIRouter(tags=["logs"])
 dashboard_router = APIRouter(tags=["dashboard"])
-
-# Backward compatibility - keep the old router name pointing to logs for now
-router = logs_router
 
 
 @logs_router.get("/status")
@@ -200,7 +196,7 @@ async def get_prometheus_metrics(metrics: ObservabilityMetricsDep) -> Response:
             )
 
         # Generate prometheus format using the registry
-        from prometheus_client import REGISTRY, CollectorRegistry
+        from prometheus_client import REGISTRY
 
         # Use the global registry if metrics.registry is None (default behavior)
         registry = metrics.registry if metrics.registry is not None else REGISTRY

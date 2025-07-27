@@ -3,17 +3,15 @@
 import contextlib
 import json
 import os
-import shutil
 import tomllib
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+import structlog
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from ccproxy import __version__
-from ccproxy.config.discovery import find_toml_config_file, get_claude_cli_config_dir
-from ccproxy.core.async_utils import format_version, get_package_dir, patched_typing
+from ccproxy.config.discovery import find_toml_config_file
 
 from .auth import AuthSettings
 from .claude import ClaudeSettings
@@ -463,6 +461,11 @@ class ConfigurationManager:
         if cli_args.get("claude_cli_path") is not None:
             claude_settings["cli_path"] = cli_args["claude_cli_path"]
 
+        # Direct Claude settings (not nested in code_options)
+        for key in ["sdk_message_mode"]:
+            if cli_args.get(key) is not None:
+                claude_settings[key] = cli_args[key]
+
         # Claude Code options
         claude_opts = {}
         for key in [
@@ -508,6 +511,8 @@ class ConfigurationManager:
 # Global configuration manager instance
 config_manager = ConfigurationManager()
 
+logger = structlog.get_logger(__name__)
+
 
 def get_settings(config_path: Path | str | None = None) -> Settings:
     """Get the global settings instance with configuration file support.
@@ -527,7 +532,8 @@ def get_settings(config_path: Path | str | None = None) -> Settings:
             with contextlib.suppress(json.JSONDecodeError):
                 cli_overrides = json.loads(cli_overrides_json)
 
-        return Settings.from_config(config_path=config_path, **cli_overrides)
+        settings = Settings.from_config(config_path=config_path, **cli_overrides)
+        return settings
     except Exception as e:
         # If settings can't be loaded (e.g., missing API key),
         # this will be handled by the caller

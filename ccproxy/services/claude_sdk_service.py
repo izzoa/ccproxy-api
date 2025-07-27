@@ -1,31 +1,30 @@
 """Claude SDK service orchestration for business logic."""
 
-import json
 from collections.abc import AsyncIterator
-from dataclasses import asdict, is_dataclass
 from typing import Any
 
 import structlog
-from claude_code_sdk import (
-    AssistantMessage,
-    ClaudeCodeOptions,
-    ResultMessage,
-    SystemMessage,
-)
+from claude_code_sdk import ClaudeCodeOptions
 
-from ccproxy.adapters.openai import adapter
 from ccproxy.auth.manager import AuthManager
 from ccproxy.claude_sdk.client import ClaudeSDKClient
 from ccproxy.claude_sdk.converter import MessageConverter
 from ccproxy.claude_sdk.options import OptionsHandler
+from ccproxy.claude_sdk.streaming import ClaudeStreamProcessor
+from ccproxy.config.claude import SDKMessageMode
 from ccproxy.config.settings import Settings
 from ccproxy.core.errors import (
+    AuthenticationError,
     ClaudeProxyError,
     ServiceUnavailableError,
 )
+from ccproxy.models import claude_sdk as sdk_models
+from ccproxy.models.messages import MessageResponse
 from ccproxy.observability.access_logger import log_request_access
 from ccproxy.observability.context import RequestContext, request_context
 from ccproxy.observability.metrics import PrometheusMetrics
+from ccproxy.utils.model_mapping import map_model_to_claude
+from ccproxy.utils.simple_request_logger import write_request_log
 
 
 logger = structlog.get_logger(__name__)
@@ -62,6 +61,10 @@ class ClaudeSDKService:
         self.settings = settings
         self.message_converter = MessageConverter()
         self.options_handler = OptionsHandler(settings=settings)
+        self.stream_processor = ClaudeStreamProcessor(
+            message_converter=self.message_converter,
+            metrics=self.metrics,
+        )
 
     async def create_completion(
         self,
@@ -72,7 +75,7 @@ class ClaudeSDKService:
         stream: bool = False,
         user_id: str | None = None,
         **kwargs: Any,
-    ) -> dict[str, Any] | AsyncIterator[dict[str, Any]]:
+    ) -> MessageResponse | AsyncIterator[dict[str, Any]]:
         """
         Create a completion using Claude SDK with business logic orchestration.
 
@@ -92,6 +95,7 @@ class ClaudeSDKService:
             ClaudeProxyError: If request fails
             ServiceUnavailableError: If service is unavailable
         """
+
         # Validate authentication if auth manager is configured
         if self.auth_manager and user_id:
             try:
@@ -110,7 +114,7 @@ class ClaudeSDKService:
         system_message = self.options_handler.extract_system_message(messages)
 
         # Map model to Claude model
-        model = adapter.map_openai_model_to_claude(model)
+        model = map_model_to_claude(model)
 
         options = self.options_handler.create_options(
             model=model,
@@ -140,19 +144,34 @@ class ClaudeSDKService:
             metrics=self.metrics,  # Pass metrics for active request tracking
         ) as ctx:
             try:
+                # Log SDK request parameters
+                timestamp = ctx.get_log_timestamp_prefix() if ctx else None
+                await self._log_sdk_request(
+                    request_id, prompt, options, model, stream, timestamp
+                )
+
                 if stream:
                     # For streaming, return the async iterator directly
                     # Pass context to streaming method
                     return self._stream_completion(
-                        prompt, options, model, request_id, ctx
+                        prompt, options, model, request_id, ctx, timestamp
                     )
                 else:
                     result = await self._complete_non_streaming(
-                        prompt, options, model, request_id, ctx
+                        prompt, options, model, request_id, ctx, timestamp
                     )
                     return result
 
-            except Exception as e:
+            except AuthenticationError as e:
+                logger.error(
+                    "authentication_failed",
+                    user_id=user_id,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    exc_info=True,
+                )
+                raise
+            except (ClaudeProxyError, ServiceUnavailableError) as e:
                 # Log error via access logger (includes metrics)
                 await log_request_access(
                     context=ctx,
@@ -166,11 +185,12 @@ class ClaudeSDKService:
     async def _complete_non_streaming(
         self,
         prompt: str,
-        options: ClaudeCodeOptions,
+        options: "ClaudeCodeOptions",
         model: str,
         request_id: str | None = None,
         ctx: RequestContext | None = None,
-    ) -> dict[str, Any]:
+        timestamp: str | None = None,
+    ) -> MessageResponse:
         """
         Complete a non-streaming request with business logic.
 
@@ -186,21 +206,19 @@ class ClaudeSDKService:
         Raises:
             ClaudeProxyError: If completion fails
         """
-        messages = []
-        result_message = None
-        assistant_message = None
+        # SDK request already logged in create_completion
 
-        async for message in self.sdk_client.query_completion(
-            prompt, options, request_id
-        ):
-            messages.append(message)
-            if isinstance(message, AssistantMessage):
-                assistant_message = message
-            elif isinstance(message, ResultMessage):
-                result_message = message
+        messages = [
+            m
+            async for m in self.sdk_client.query_completion(prompt, options, request_id)
+        ]
 
-        # Get Claude API call timing
-        claude_api_call_ms = self.sdk_client.get_last_api_call_time_ms()
+        result_message = next(
+            (m for m in messages if isinstance(m, sdk_models.ResultMessage)), None
+        )
+        assistant_message = next(
+            (m for m in messages if isinstance(m, sdk_models.AssistantMessage)), None
+        )
 
         if result_message is None:
             raise ClaudeProxyError(
@@ -217,65 +235,104 @@ class ClaudeSDKService:
             )
 
         logger.debug("claude_sdk_completion_received")
-        # Convert to Anthropic format
+        mode = (
+            self.settings.claude.sdk_message_mode
+            if self.settings
+            else SDKMessageMode.FORWARD
+        )
+        pretty_format = self.settings.claude.pretty_format if self.settings else True
+
         response = self.message_converter.convert_to_anthropic_response(
-            assistant_message, result_message, model
+            assistant_message, result_message, model, mode, pretty_format
         )
 
-        # Extract token usage and cost from result message using direct access
+        # Add other message types to the content block
+        all_messages = [
+            m
+            for m in messages
+            if not isinstance(m, sdk_models.AssistantMessage | sdk_models.ResultMessage)
+        ]
+
+        if mode != SDKMessageMode.IGNORE and response.content:
+            for message in all_messages:
+                if isinstance(message, sdk_models.SystemMessage):
+                    content_block = self.message_converter._create_sdk_content_block(
+                        sdk_object=message,
+                        mode=mode,
+                        pretty_format=pretty_format,
+                        xml_tag="system_message",
+                        forward_converter=lambda obj: {
+                            "type": "system_message",
+                            "text": obj.model_dump_json(separators=(",", ":")),
+                        },
+                    )
+                    if content_block:
+                        # Only validate as SDKMessageMode if it's a system_message type
+                        if content_block.get("type") == "system_message":
+                            response.content.append(
+                                sdk_models.SDKMessageMode.model_validate(content_block)
+                            )
+                        else:
+                            # For other types (like text blocks in FORMATTED mode), create appropriate content block
+                            if content_block.get("type") == "text":
+                                response.content.append(
+                                    sdk_models.TextBlock.model_validate(content_block)
+                                )
+                            else:
+                                # Fallback for other content block types
+                                logger.warning(
+                                    "unknown_content_block_type",
+                                    content_block_type=content_block.get("type"),
+                                )
+                elif isinstance(message, sdk_models.UserMessage):
+                    for block in message.content:
+                        if isinstance(block, sdk_models.ToolResultBlock):
+                            response.content.append(block)
+
         cost_usd = result_message.total_cost_usd
-        if result_message.usage:
-            tokens_input = result_message.usage.get("input_tokens")
-            tokens_output = result_message.usage.get("output_tokens")
-            cache_read_tokens = result_message.usage.get("cache_read_input_tokens")
-            cache_write_tokens = result_message.usage.get("cache_creation_input_tokens")
-        else:
-            tokens_input = tokens_output = cache_read_tokens = cache_write_tokens = None
+        usage = result_message.usage_model
 
-        # Add cost to response usage section if available
-        if cost_usd is not None and "usage" in response:
-            response["usage"]["cost_usd"] = cost_usd
+        # if cost_usd is not None and response.usage:
+        #     response.usage.cost_usd = cost_usd
 
-        # Log metrics for observability
         logger.debug(
             "claude_sdk_completion_completed",
             model=model,
-            tokens_input=tokens_input,
-            tokens_output=tokens_output,
-            cache_read_tokens=cache_read_tokens,
-            cache_write_tokens=cache_write_tokens,
+            tokens_input=usage.input_tokens,
+            tokens_output=usage.output_tokens,
+            cache_read_tokens=usage.cache_read_input_tokens,
+            cache_write_tokens=usage.cache_creation_input_tokens,
             cost_usd=cost_usd,
             request_id=request_id,
         )
 
-        # Update context with metrics if available
         if ctx:
             ctx.add_metadata(
                 status_code=200,
-                tokens_input=tokens_input,
-                tokens_output=tokens_output,
-                cache_read_tokens=cache_read_tokens,
-                cache_write_tokens=cache_write_tokens,
+                tokens_input=usage.input_tokens,
+                tokens_output=usage.output_tokens,
+                cache_read_tokens=usage.cache_read_input_tokens,
+                cache_write_tokens=usage.cache_creation_input_tokens,
                 cost_usd=cost_usd,
             )
-
-            # Log comprehensive access log (includes Prometheus metrics)
             await log_request_access(
-                context=ctx,
-                status_code=200,
-                method="POST",
-                metrics=self.metrics,
+                context=ctx, status_code=200, method="POST", metrics=self.metrics
             )
+
+        # Log SDK response
+        if request_id:
+            await self._log_sdk_response(request_id, response, timestamp)
 
         return response
 
     async def _stream_completion(
         self,
         prompt: str,
-        options: ClaudeCodeOptions,
+        options: "ClaudeCodeOptions",
         model: str,
         request_id: str | None = None,
         ctx: RequestContext | None = None,
+        timestamp: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """
         Stream completion responses with business logic.
@@ -284,143 +341,33 @@ class ClaudeSDKService:
             prompt: The formatted prompt
             options: Claude SDK options
             model: The model being used
+            request_id: Optional request ID for logging
+            ctx: Optional request context for metrics
 
         Yields:
             Response chunks in Anthropic format
         """
-        import asyncio
+        sdk_message_mode = (
+            self.settings.claude.sdk_message_mode
+            if self.settings
+            else SDKMessageMode.FORWARD
+        )
+        pretty_format = self.settings.claude.pretty_format if self.settings else True
 
-        first_chunk = True
-        message_count = 0
-        assistant_messages = []
+        sdk_stream = self.sdk_client.query_completion(prompt, options, request_id)
 
-        try:
-            async for message in self.sdk_client.query_completion(
-                prompt, options, request_id
-            ):
-                message_count += 1
-                logger.debug(
-                    "streaming_message_received",
-                    message_count=message_count,
-                    message_type=type(message).__name__,
-                    request_id=request_id,
-                )
-
-                if first_chunk:
-                    # Send initial chunk
-                    yield self.message_converter.create_streaming_start_chunk(
-                        f"msg_{id(message)}", model
-                    )
-                    first_chunk = False
-
-                # TODO: instead of creating one message we should create a list of messages
-                # and this will be serialized back in one messsage by the adapter.
-                # to do that we have to create the different type of messsages
-                # in anthropic models
-                if isinstance(message, SystemMessage):
-                    # Serialize dataclass to JSON
-                    text_content = f"<system>{json.dumps(asdict(message))}</system>"
-                    yield self.message_converter.create_streaming_delta_chunk(
-                        text_content
-                    )
-                elif isinstance(message, AssistantMessage):
-                    assistant_messages.append(message)
-
-                    # Send content delta
-                    text_content = self.message_converter.extract_contents(
-                        message.content
-                    )
-
-                    if text_content:
-                        text_content = f"<assistant>{text_content}</assistant>"
-                        yield self.message_converter.create_streaming_delta_chunk(
-                            text_content
-                        )
-
-                elif isinstance(message, ResultMessage):
-                    # Get Claude API call timing
-                    claude_api_call_ms = self.sdk_client.get_last_api_call_time_ms()
-
-                    # Extract cost and tokens from result message using direct access
-                    cost_usd = message.total_cost_usd
-                    if message.usage:
-                        tokens_input = message.usage.get("input_tokens")
-                        tokens_output = message.usage.get("output_tokens")
-                        cache_read_tokens = message.usage.get("cache_read_input_tokens")
-                        cache_write_tokens = message.usage.get(
-                            "cache_creation_input_tokens"
-                        )
-                    else:
-                        tokens_input = tokens_output = cache_read_tokens = (
-                            cache_write_tokens
-                        ) = None
-
-                    # Log streaming completion metrics
-                    logger.debug(
-                        "streaming_completion_completed",
-                        model=model,
-                        tokens_input=tokens_input,
-                        tokens_output=tokens_output,
-                        cache_read_tokens=cache_read_tokens,
-                        cache_write_tokens=cache_write_tokens,
-                        cost_usd=cost_usd,
-                        message_count=message_count,
-                        request_id=request_id,
-                    )
-
-                    # Update context with metrics if available
-                    if ctx:
-                        ctx.add_metadata(
-                            status_code=200,
-                            tokens_input=tokens_input,
-                            tokens_output=tokens_output,
-                            cache_read_tokens=cache_read_tokens,
-                            cache_write_tokens=cache_write_tokens,
-                            cost_usd=cost_usd,
-                        )
-
-                        # Log comprehensive access log for streaming completion
-                        await log_request_access(
-                            context=ctx,
-                            status_code=200,
-                            method="POST",
-                            metrics=self.metrics,
-                            event_type="streaming_complete",
-                        )
-
-                    # Send final chunk with usage and cost information
-                    final_chunk = self.message_converter.create_streaming_end_chunk()
-
-                    # Add usage information to final chunk
-                    if tokens_input or tokens_output or cost_usd:
-                        usage_info = {}
-                        if tokens_input:
-                            usage_info["input_tokens"] = tokens_input
-                        if tokens_output:
-                            usage_info["output_tokens"] = tokens_output
-                        if cost_usd is not None:
-                            usage_info["cost_usd"] = cost_usd
-
-                        # Update the usage in the final chunk
-                        final_chunk["usage"].update(usage_info)
-
-                    yield final_chunk
-
-                    break
-
-        except asyncio.CancelledError:
-            logger.debug("streaming_completion_cancelled", request_id=request_id)
-            raise
-        except Exception as e:
-            logger.error(
-                "streaming_completion_failed",
-                error=str(e),
-                error_type=type(e).__name__,
-                request_id=request_id,
-                exc_info=True,
-            )
-            # Don't yield error chunk - let exception propagate for proper HTTP error response
-            raise
+        async for chunk in self.stream_processor.process_stream(
+            sdk_stream=sdk_stream,
+            model=model,
+            request_id=request_id,
+            ctx=ctx,
+            sdk_message_mode=sdk_message_mode,
+            pretty_format=pretty_format,
+        ):
+            # Log streaming chunk
+            if request_id:
+                await self._log_sdk_streaming_chunk(request_id, chunk, timestamp)
+            yield chunk
 
     async def _validate_user_auth(self, user_id: str) -> None:
         """
@@ -434,158 +381,103 @@ class ClaudeSDKService:
         """
         if not self.auth_manager:
             return
-
-        # Implement authentication validation logic
-        # This is a placeholder for future auth integration
         logger.debug("user_auth_validation_start", user_id=user_id)
 
-    def _calculate_cost(
+    async def _log_sdk_request(
         self,
-        tokens_input: int | None,
-        tokens_output: int | None,
-        model: str | None,
-        cache_read_tokens: int | None = None,
-        cache_write_tokens: int | None = None,
-    ) -> float | None:
-        """
-        Calculate cost in USD for the given token usage including cache tokens.
-
-        Note: This method is provided for consistency, but the Claude SDK already
-        provides accurate cost calculation in ResultMessage.total_cost_usd which
-        should be preferred when available.
+        request_id: str,
+        prompt: str,
+        options: "ClaudeCodeOptions",
+        model: str,
+        stream: bool,
+        timestamp: str | None = None,
+    ) -> None:
+        """Log SDK input parameters as JSON dump.
 
         Args:
-            tokens_input: Number of input tokens
-            tokens_output: Number of output tokens
-            model: Model name for pricing lookup
-            cache_read_tokens: Number of cache read tokens
-            cache_write_tokens: Number of cache write tokens
-
-        Returns:
-            Cost in USD or None if calculation not possible
+            request_id: Request identifier
+            prompt: The formatted prompt
+            options: Claude SDK options
+            model: The model being used
+            stream: Whether streaming is enabled
+            timestamp: Optional timestamp prefix
         """
-        from ccproxy.utils.cost_calculator import calculate_token_cost
+        # timestamp is already provided from context, no need for fallback
 
-        return calculate_token_cost(
-            tokens_input, tokens_output, model, cache_read_tokens, cache_write_tokens
+        # JSON dump of the parameters passed to SDK completion
+        sdk_request_data = {
+            "prompt": prompt,
+            "options": options.model_dump()
+            if hasattr(options, "model_dump")
+            else str(options),
+            "model": model,
+            "stream": stream,
+            "request_id": request_id,
+        }
+
+        await write_request_log(
+            request_id=request_id,
+            log_type="sdk_request",
+            data=sdk_request_data,
+            timestamp=timestamp,
         )
 
-    async def list_models(self) -> dict[str, Any]:
+    async def _log_sdk_response(
+        self,
+        request_id: str,
+        result: Any,
+        timestamp: str | None = None,
+    ) -> None:
+        """Log SDK response result as JSON dump.
+
+        Args:
+            request_id: Request identifier
+            result: The result from _complete_non_streaming
+            timestamp: Optional timestamp prefix
         """
-        List available Claude models and recent OpenAI models.
+        # timestamp is already provided from context, no need for fallback
 
-        Returns:
-            Dictionary with combined list of models in mixed format
+        # JSON dump of the result from _complete_non_streaming
+        sdk_response_data = {
+            "result": result.model_dump()
+            if hasattr(result, "model_dump")
+            else str(result),
+        }
+
+        await write_request_log(
+            request_id=request_id,
+            log_type="sdk_response",
+            data=sdk_response_data,
+            timestamp=timestamp,
+        )
+
+    async def _log_sdk_streaming_chunk(
+        self,
+        request_id: str,
+        chunk: dict[str, Any],
+        timestamp: str | None = None,
+    ) -> None:
+        """Log streaming chunk as JSON dump.
+
+        Args:
+            request_id: Request identifier
+            chunk: The streaming chunk from process_stream
+            timestamp: Optional timestamp prefix
         """
-        # Get Claude models
-        supported_models = self.options_handler.get_supported_models()
+        # timestamp is already provided from context, no need for fallback
 
-        # Create Anthropic-style model entries
-        anthropic_models = []
-        for model_id in supported_models:
-            anthropic_models.append(
-                {
-                    "type": "model",
-                    "id": model_id,
-                    "display_name": self._get_display_name(model_id),
-                    "created_at": self._get_created_timestamp(model_id),
-                }
-            )
+        # Append streaming chunk as JSON to raw file
+        import json
 
-        # Add recent OpenAI models (GPT-4 variants and O1 models)
-        openai_models = [
-            {
-                "id": "gpt-4o",
-                "object": "model",
-                "created": 1715367049,
-                "owned_by": "openai",
-            },
-            {
-                "id": "gpt-4o-mini",
-                "object": "model",
-                "created": 1721172741,
-                "owned_by": "openai",
-            },
-            {
-                "id": "gpt-4-turbo",
-                "object": "model",
-                "created": 1712361441,
-                "owned_by": "openai",
-            },
-            {
-                "id": "gpt-4-turbo-preview",
-                "object": "model",
-                "created": 1706037777,
-                "owned_by": "openai",
-            },
-            {
-                "id": "o1",
-                "object": "model",
-                "created": 1734375816,
-                "owned_by": "openai",
-            },
-            {
-                "id": "o1-mini",
-                "object": "model",
-                "created": 1725649008,
-                "owned_by": "openai",
-            },
-            {
-                "id": "o1-preview",
-                "object": "model",
-                "created": 1725648897,
-                "owned_by": "openai",
-            },
-            {
-                "id": "o3",
-                "object": "model",
-                "created": 1744225308,
-                "owned_by": "openai",
-            },
-            {
-                "id": "o3-mini",
-                "object": "model",
-                "created": 1737146383,
-                "owned_by": "openai",
-            },
-        ]
+        from ccproxy.utils.simple_request_logger import append_streaming_log
 
-        # Return combined response in mixed format
-        return {
-            "data": anthropic_models + openai_models,
-            "has_more": False,
-            "object": "list",
-        }
-
-    def _get_display_name(self, model_id: str) -> str:
-        """Get display name for a model ID."""
-        display_names = {
-            "claude-opus-4-20250514": "Claude Opus 4",
-            "claude-sonnet-4-20250514": "Claude Sonnet 4",
-            "claude-3-7-sonnet-20250219": "Claude Sonnet 3.7",
-            "claude-3-5-sonnet-20241022": "Claude Sonnet 3.5 (New)",
-            "claude-3-5-haiku-20241022": "Claude Haiku 3.5",
-            "claude-3-5-haiku-latest": "Claude Haiku 3.5",
-            "claude-3-5-sonnet-20240620": "Claude Sonnet 3.5 (Old)",
-            "claude-3-haiku-20240307": "Claude Haiku 3",
-            "claude-3-opus-20240229": "Claude Opus 3",
-        }
-        return display_names.get(model_id, model_id)
-
-    def _get_created_timestamp(self, model_id: str) -> int:
-        """Get created timestamp for a model ID."""
-        timestamps = {
-            "claude-opus-4-20250514": 1747526400,  # 2025-05-22
-            "claude-sonnet-4-20250514": 1747526400,  # 2025-05-22
-            "claude-3-7-sonnet-20250219": 1740268800,  # 2025-02-24
-            "claude-3-5-sonnet-20241022": 1729555200,  # 2024-10-22
-            "claude-3-5-haiku-20241022": 1729555200,  # 2024-10-22
-            "claude-3-5-haiku-latest": 1729555200,  # 2024-10-22
-            "claude-3-5-sonnet-20240620": 1718841600,  # 2024-06-20
-            "claude-3-haiku-20240307": 1709769600,  # 2024-03-07
-            "claude-3-opus-20240229": 1709164800,  # 2024-02-29
-        }
-        return timestamps.get(model_id, 1677610602)  # Default timestamp
+        chunk_data = json.dumps(chunk, default=str) + "\n"
+        await append_streaming_log(
+            request_id=request_id,
+            log_type="sdk_streaming",
+            data=chunk_data.encode("utf-8"),
+            timestamp=timestamp,
+        )
 
     async def validate_health(self) -> bool:
         """
