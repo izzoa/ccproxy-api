@@ -1,11 +1,16 @@
 """Message models for Anthropic Messages API endpoint."""
 
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .claude_sdk import SDKContentBlock
 from .requests import Message, ToolDefinition, Usage
-from .types import ContentBlockType, ServiceTier, StopReason, ToolChoiceType
+
+
+if TYPE_CHECKING:
+    pass
+from .types import ServiceTier, StopReason, ToolChoiceType
 
 
 class SystemMessage(BaseModel):
@@ -111,6 +116,13 @@ class MessageCreateParams(BaseModel):
             max_length=4,
         ),
     ] = None
+    stop_reason: Annotated[
+        list[str] | None,
+        Field(
+            description="Custom sequences where the model should stop generating",
+            max_length=4,
+        ),
+    ] = None
     stream: Annotated[
         bool | None,
         Field(description="Whether to stream the response"),
@@ -195,22 +207,37 @@ class MessageCreateParams(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
 
-class MessageContentBlock(BaseModel):
-    """Content block in a message response."""
+class TextContentBlock(BaseModel):
+    """Text content block."""
 
-    type: Annotated[ContentBlockType, Field(description="Type of content block")]
-    text: Annotated[
-        str | None, Field(description="Text content (for text/thinking blocks)")
-    ] = None
-    id: Annotated[str | None, Field(description="Unique ID (for tool_use blocks)")] = (
-        None
-    )
-    name: Annotated[
-        str | None, Field(description="Tool name (for tool_use blocks)")
-    ] = None
-    input: Annotated[
-        dict[str, Any] | None, Field(description="Tool input (for tool_use blocks)")
-    ] = None
+    type: Literal["text"]
+    text: str
+
+
+class ToolUseContentBlock(BaseModel):
+    """Tool use content block."""
+
+    type: Literal["tool_use"]
+    id: str
+    name: str
+    input: dict[str, Any]
+
+
+class ThinkingContentBlock(BaseModel):
+    """Thinking content block."""
+
+    type: Literal["thinking"]
+    thinking: str
+    signature: str | None = None
+
+
+MessageContentBlock = Annotated[
+    TextContentBlock | ToolUseContentBlock | ThinkingContentBlock,
+    Field(discriminator="type"),
+]
+
+
+CCProxyContentBlock = MessageContentBlock | SDKContentBlock
 
 
 class MessageResponse(BaseModel):
@@ -222,7 +249,7 @@ class MessageResponse(BaseModel):
         "assistant"
     )
     content: Annotated[
-        list[MessageContentBlock],
+        list[CCProxyContentBlock],
         Field(description="Array of content blocks in the response"),
     ]
     model: Annotated[str, Field(description="The model used for the response")]

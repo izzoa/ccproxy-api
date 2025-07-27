@@ -60,6 +60,11 @@ class ServerSettings(BaseModel):
         description="Path to JSON log file. If specified, logs will be written to this file in JSON format",
     )
 
+    use_terminal_permission_handler: bool = Field(
+        default=False,
+        description="Enable terminal UI for permission prompts. Set to False to use external handler via SSE (not implemented)",
+    )
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v: str) -> str:

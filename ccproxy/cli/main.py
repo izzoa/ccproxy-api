@@ -1,33 +1,19 @@
 """Main entry point for CCProxy API Server."""
 
-import os
-import secrets
 from pathlib import Path
-from typing import Annotated, Any, Optional, cast
+from typing import Annotated
 
 import typer
-from click import get_current_context
 from structlog import get_logger
-from typer import Typer
 
 from ccproxy._version import __version__
-from ccproxy.api.middleware.cors import setup_cors_middleware
 from ccproxy.cli.helpers import (
     get_rich_toolkit,
-    is_running_in_docker,
-    warning,
 )
-from ccproxy.config.settings import (
-    ConfigurationError,
-    Settings,
-    config_manager,
-    get_settings,
-)
-from ccproxy.core.async_utils import get_package_dir, get_root_package_name
-from ccproxy.core.logging import setup_logging
 
 from .commands.auth import app as auth_app
 from .commands.config import app as config_app
+from .commands.permission_handler import app as permission_handler_app
 from .commands.serve import api
 
 
@@ -97,6 +83,9 @@ app.add_typer(config_app)
 
 # Register auth command
 app.add_typer(auth_app)
+
+# Register permission handler command
+app.add_typer(permission_handler_app)
 
 
 # Register imported commands

@@ -1,9 +1,5 @@
 """Error handling middleware for CCProxy API Server."""
 
-import logging
-from typing import Any
-
-import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -582,10 +578,10 @@ def setup_error_handlers(app: FastAPI) -> None:
         else:
             # Log with basic stack trace (no local variables)
             stack_trace = None
-            if logger.isEnabledFor(logging.DEBUG):
-                import traceback
+            # For structlog, we can always include traceback since structlog handles filtering
+            import traceback
 
-                stack_trace = traceback.format_exc()
+            stack_trace = traceback.format_exc()
 
             logger.error(
                 "HTTP exception",

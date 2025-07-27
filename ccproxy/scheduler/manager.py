@@ -1,15 +1,17 @@
 """Scheduler management for FastAPI integration."""
 
-import asyncio
-from typing import Any
-
 import structlog
 
 from ccproxy.config.settings import Settings
 
-from .core import Scheduler, get_scheduler
+from .core import Scheduler
 from .registry import register_task
-from .tasks import PricingCacheUpdateTask, PushgatewayTask, StatsPrintingTask
+from .tasks import (
+    PricingCacheUpdateTask,
+    PushgatewayTask,
+    StatsPrintingTask,
+    VersionUpdateCheckTask,
+)
 
 
 logger = structlog.get_logger(__name__)
@@ -83,7 +85,7 @@ async def setup_scheduler_tasks(scheduler: Scheduler, settings: Settings) -> Non
                 enabled=True,
                 force_refresh_on_startup=scheduler_config.pricing_force_refresh_on_startup,
             )
-            logger.info(
+            logger.debug(
                 "pricing_update_task_added",
                 interval_hours=scheduler_config.pricing_update_interval_hours,
                 force_refresh_on_startup=scheduler_config.pricing_force_refresh_on_startup,
@@ -91,6 +93,31 @@ async def setup_scheduler_tasks(scheduler: Scheduler, settings: Settings) -> Non
         except Exception as e:
             logger.error(
                 "pricing_update_task_add_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+
+    # Add version update check task if enabled
+    if scheduler_config.version_check_enabled:
+        try:
+            # Convert hours to seconds
+            interval_seconds = scheduler_config.version_check_interval_hours * 3600
+
+            await scheduler.add_task(
+                task_name="version_update_check",
+                task_type="version_update_check",
+                interval_seconds=interval_seconds,
+                enabled=True,
+                startup_max_age_hours=scheduler_config.version_check_startup_max_age_hours,
+            )
+            logger.debug(
+                "version_check_task_added",
+                interval_hours=scheduler_config.version_check_interval_hours,
+                startup_max_age_hours=scheduler_config.version_check_startup_max_age_hours,
+            )
+        except Exception as e:
+            logger.error(
+                "version_check_task_add_failed",
                 error=str(e),
                 error_type=type(e).__name__,
             )
@@ -109,6 +136,8 @@ def _register_default_tasks() -> None:
         register_task("stats_printing", StatsPrintingTask)
     if not registry.is_registered("pricing_cache_update"):
         register_task("pricing_cache_update", PricingCacheUpdateTask)
+    if not registry.is_registered("version_update_check"):
+        register_task("version_update_check", VersionUpdateCheckTask)
 
 
 async def start_scheduler(settings: Settings) -> Scheduler | None:
@@ -177,7 +206,6 @@ async def stop_scheduler(scheduler: Scheduler | None) -> None:
 
     try:
         await scheduler.stop()
-        logger.info("scheduler_stopped")
     except Exception as e:
         logger.error(
             "scheduler_stop_failed",

@@ -8,6 +8,7 @@ from .client import (
 )
 from .converter import MessageConverter
 from .options import OptionsHandler
+from .parser import parse_formatted_sdk_content
 
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "ClaudeSDKProcessError",
     "MessageConverter",
     "OptionsHandler",
+    "parse_formatted_sdk_content",
 ]

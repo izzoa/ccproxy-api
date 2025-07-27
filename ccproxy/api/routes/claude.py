@@ -2,10 +2,9 @@
 
 import json
 from collections.abc import AsyncIterator
-from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ccproxy.adapters.openai.adapter import (
@@ -13,9 +12,8 @@ from ccproxy.adapters.openai.adapter import (
     OpenAIChatCompletionRequest,
     OpenAIChatCompletionResponse,
 )
-from ccproxy.api.dependencies import get_claude_service
+from ccproxy.api.dependencies import ClaudeServiceDep
 from ccproxy.models.messages import MessageCreateParams, MessageResponse
-from ccproxy.services.claude_sdk_service import ClaudeSDKService
 
 
 # Create the router for Claude SDK endpoints
@@ -28,7 +26,7 @@ logger = structlog.get_logger(__name__)
 async def create_openai_chat_completion(
     request: Request,
     openai_request: OpenAIChatCompletionRequest,
-    claude_service: ClaudeSDKService = Depends(get_claude_service),
+    claude_service: ClaudeServiceDep,
 ) -> StreamingResponse | OpenAIChatCompletionResponse:
     """Create a chat completion using Claude SDK with OpenAI-compatible format.
 
@@ -80,7 +78,13 @@ async def create_openai_chat_completion(
             )
         else:
             # Convert non-streaming response to OpenAI format using adapter
-            openai_response = adapter.adapt_response(response)  # type: ignore[arg-type]
+            # Convert MessageResponse model to dict for adapter
+            # In non-streaming mode, response should always be MessageResponse
+            assert isinstance(response, MessageResponse), (
+                "Non-streaming response must be MessageResponse"
+            )
+            response_dict = response.model_dump()
+            openai_response = adapter.adapt_response(response_dict)
             return OpenAIChatCompletionResponse.model_validate(openai_response)
 
     except Exception as e:
@@ -97,7 +101,7 @@ async def create_openai_chat_completion(
 @router.post("/v1/messages", response_model=None)
 async def create_anthropic_message(
     request: MessageCreateParams,
-    claude_service: ClaudeSDKService = Depends(get_claude_service),
+    claude_service: ClaudeServiceDep,
 ) -> StreamingResponse | MessageResponse:
     """Create a message using Claude SDK with Anthropic format.
 
@@ -127,9 +131,17 @@ async def create_anthropic_message(
             async def anthropic_stream_generator() -> AsyncIterator[bytes]:
                 async for chunk in response:  # type: ignore[union-attr]
                     if chunk:
-                        yield f"data: {json.dumps(chunk)}\n\n".encode()
-                # Send final chunk
-                yield b"data: [DONE]\n\n"
+                        # All chunks from Claude SDK streaming should be dict format
+                        # and need proper SSE event formatting
+                        if isinstance(chunk, dict):
+                            # Determine event type from chunk type
+                            event_type = chunk.get("type", "message_delta")
+                            yield f"event: {event_type}\n".encode()
+                            yield f"data: {json.dumps(chunk)}\n\n".encode()
+                        else:
+                            # Fallback for unexpected format
+                            yield f"data: {json.dumps(chunk)}\n\n".encode()
+                # No final [DONE] chunk for Anthropic format
 
             return StreamingResponse(
                 anthropic_stream_generator(),
@@ -143,27 +155,6 @@ async def create_anthropic_message(
             # Return Anthropic format response directly
             return MessageResponse.model_validate(response)
 
-    except Exception as e:
-        # Re-raise specific proxy errors to be handled by the error handler
-        from ccproxy.core.errors import ClaudeProxyError
-
-        if isinstance(e, ClaudeProxyError):
-            raise
-        raise HTTPException(
-            status_code=500, detail=f"Internal server error: {str(e)}"
-        ) from e
-
-
-@router.get("/v1/models", response_model=None)
-async def list_models(
-    claude_service: ClaudeSDKService = Depends(get_claude_service),
-) -> dict[str, Any]:
-    """List available models using Claude SDK service.
-
-    Returns a combined list of Anthropic models and recent OpenAI models.
-    """
-    try:
-        return await claude_service.list_models()
     except Exception as e:
         # Re-raise specific proxy errors to be handled by the error handler
         from ccproxy.core.errors import ClaudeProxyError

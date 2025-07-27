@@ -2,7 +2,6 @@
 
 import asyncio
 from collections.abc import Generator
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,15 +11,13 @@ from fastapi.testclient import TestClient
 from ccproxy.config.scheduler import SchedulerSettings
 from ccproxy.config.settings import Settings
 from ccproxy.scheduler.core import Scheduler
-from ccproxy.scheduler.exceptions import (
-    SchedulerError,
+from ccproxy.scheduler.errors import (
     TaskNotFoundError,
     TaskRegistrationError,
 )
 from ccproxy.scheduler.manager import start_scheduler, stop_scheduler
 from ccproxy.scheduler.registry import TaskRegistry, get_task_registry
 from ccproxy.scheduler.tasks import (
-    BaseScheduledTask,
     PricingCacheUpdateTask,
     PushgatewayTask,
     StatsPrintingTask,
@@ -507,7 +504,7 @@ class TestSchedulerManagerIntegration:
             assert "pushgateway" in task_names
             assert "stats_printing" in task_names
             assert "pricing_cache_update" in task_names
-            assert scheduler.task_count == 3
+            assert scheduler.task_count == 4
 
             await stop_scheduler(scheduler)
 

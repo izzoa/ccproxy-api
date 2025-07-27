@@ -10,7 +10,6 @@ import uvicorn
 from click import get_current_context
 from structlog import get_logger
 
-from ccproxy._version import __version__
 from ccproxy.cli.helpers import (
     get_rich_toolkit,
     is_running_in_docker,
@@ -36,6 +35,7 @@ from ..options.claude_options import (
     validate_max_thinking_tokens,
     validate_max_turns,
     validate_permission_mode,
+    validate_sdk_message_mode,
 )
 from ..options.security_options import SecurityOptions, validate_auth_token
 from ..options.server_options import (
@@ -43,10 +43,6 @@ from ..options.server_options import (
     validate_log_level,
     validate_port,
 )
-
-
-# Logger will be configured by configuration manager
-logger = get_logger(__name__)
 
 
 def get_config_path_from_context() -> Path | None:
@@ -328,7 +324,7 @@ def api(
         str | None,
         typer.Option(
             "--log-level",
-            help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+            help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Use WARNING for minimal output.",
             callback=validate_log_level,
             rich_help_panel="Server Settings",
         ),
@@ -341,6 +337,14 @@ def api(
             rich_help_panel="Server Settings",
         ),
     ] = None,
+    use_terminal_permission_handler: Annotated[
+        bool,
+        typer.Option(
+            "--terminal-permission-handler",
+            help="Enable terminal permission terminal handler",
+            rich_help_panel="Server Settings",
+        ),
+    ] = False,
     # Security options
     auth_token: Annotated[
         str | None,
@@ -426,6 +430,15 @@ def api(
         typer.Option(
             "--permission-prompt-tool-name",
             help="Permission prompt tool name",
+            rich_help_panel="Claude Settings",
+        ),
+    ] = None,
+    sdk_message_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--sdk-message-mode",
+            help="SDK message handling mode: forward (direct SDK blocks), ignore (skip blocks), formatted (XML tags with JSON data)",
+            callback=validate_sdk_message_mode,
             rich_help_panel="Claude Settings",
         ),
     ] = None,
@@ -546,6 +559,7 @@ def api(
             reload=reload,
             log_level=log_level,
             log_file=log_file,
+            use_terminal_confirmation_handler=use_terminal_permission_handler,
         )
 
         claude_options = ClaudeOptions(
@@ -558,6 +572,7 @@ def api(
             max_turns=max_turns,
             cwd=cwd,
             permission_prompt_tool_name=permission_prompt_tool_name,
+            sdk_message_mode=sdk_message_mode,
         )
 
         security_options = SecurityOptions(auth_token=auth_token)
@@ -570,6 +585,7 @@ def api(
             reload=server_options.reload,
             log_level=server_options.log_level,
             log_file=server_options.log_file,
+            use_terminal_confirmation_handler=server_options.use_terminal_confirmation_handler,
             # Security options
             auth_token=security_options.auth_token,
             # Claude options
@@ -582,6 +598,7 @@ def api(
             max_turns=claude_options.max_turns,
             permission_prompt_tool_name=claude_options.permission_prompt_tool_name,
             cwd=claude_options.cwd,
+            sdk_message_mode=claude_options.sdk_message_mode,
         )
 
         # Load settings with CLI overrides
@@ -591,17 +608,16 @@ def api(
 
         # Set up logging once with the effective log level
         # Import here to avoid circular import
-        import structlog
 
         from ccproxy.core.logging import setup_logging
 
         # Always reconfigure logging to ensure log level changes are picked up
         # Use JSON logs if explicitly requested via env var
-        json_logs = os.environ.get("CCPROXY_JSON_LOGS", "").lower() == "true"
+        print(f"{settings.server.log_level} {settings.server.log_file}")
         setup_logging(
-            json_logs=json_logs,
-            log_level=server_options.log_level or settings.server.log_level,
-            log_file=server_options.log_file or settings.server.log_file,
+            json_logs=settings.server.log_format == "json",
+            log_level_name=settings.server.log_level,
+            log_file=settings.server.log_file,
         )
 
         # Re-get logger after logging is configured
@@ -624,7 +640,7 @@ def api(
         )
 
         # Log effective configuration
-        logger.info(
+        logger.debug(
             "configuration_loaded",
             host=settings.server.host,
             port=settings.server.port,
@@ -778,6 +794,8 @@ def claude(
     toolkit = get_rich_toolkit()
 
     try:
+        # Logger will be configured by configuration manager
+        logger = get_logger(__name__)
         # Log CLI command execution start
         logger.info(
             "cli_command_starting",
