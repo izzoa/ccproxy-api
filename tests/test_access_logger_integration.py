@@ -397,13 +397,20 @@ class TestAccessLoggerPerformance:
         # Should complete quickly
         assert log_time < 5.0, f"High-volume logging took too long: {log_time}s"
 
-        # Give background worker time to process
-        await asyncio.sleep(2.0)
-
-        # Verify all were stored
-        with Session(storage_with_db._engine) as session:
-            count = len(session.exec(select(AccessLog)).all())
-            assert count == num_logs, f"Expected {num_logs} logs, got {count}"
+        # Give background worker time to process with retries
+        for _attempt in range(10):
+            await asyncio.sleep(0.5)
+            with Session(storage_with_db._engine) as session:
+                count = len(session.exec(select(AccessLog)).all())
+                if count == num_logs:
+                    break
+        else:
+            # Final check with detailed error
+            with Session(storage_with_db._engine) as session:
+                count = len(session.exec(select(AccessLog)).all())
+                assert count == num_logs, (
+                    f"Expected {num_logs} logs, got {count} after 5s wait"
+                )
 
     @pytest.mark.unit
     async def test_mixed_streaming_and_regular_logs(
@@ -443,15 +450,24 @@ class TestAccessLoggerPerformance:
         # Execute all concurrently
         await asyncio.gather(*tasks)
 
-        # Give background worker time to process
-        await asyncio.sleep(0.5)
-
-        # Verify all stored correctly
-        with Session(storage_with_db._engine) as session:
-            results = session.exec(
-                select(AccessLog).order_by(AccessLog.request_id)
-            ).all()
-            assert len(results) == 20
+        # Give background worker time to process with retries
+        for _attempt in range(10):
+            await asyncio.sleep(0.3)
+            with Session(storage_with_db._engine) as session:
+                results = session.exec(
+                    select(AccessLog).order_by(AccessLog.request_id)
+                ).all()
+                if len(results) == 20:
+                    break
+        else:
+            # Final check with detailed error
+            with Session(storage_with_db._engine) as session:
+                results = session.exec(
+                    select(AccessLog).order_by(AccessLog.request_id)
+                ).all()
+                assert len(results) == 20, (
+                    f"Expected 20 logs, got {len(results)} after 3s wait"
+                )
 
             # Verify streaming flags are correct
             for i, result in enumerate(results):

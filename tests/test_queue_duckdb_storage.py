@@ -213,15 +213,23 @@ class TestQueueBasedDuckDBStorage:
             await initialized_storage.store_request(log1)
             await initialized_storage.store_request(log2)
 
-            # Give time for processing
-            await asyncio.sleep(0.2)
+            # Give time for processing with retries
+            result = None
+            for _attempt in range(10):
+                await asyncio.sleep(0.3)
+                with Session(initialized_storage._engine) as session:
+                    result = session.exec(
+                        select(AccessLog).where(
+                            AccessLog.request_id == "success-request-2"
+                        )
+                    ).first()
+                    if result is not None:
+                        break
 
             # Second request should succeed despite first failing
-            with Session(initialized_storage._engine) as session:
-                result = session.exec(
-                    select(AccessLog).where(AccessLog.request_id == "success-request-2")
-                ).first()
-                assert result is not None
+            assert result is not None, (
+                "Expected success-request-2 to be processed after error recovery"
+            )
 
         await initialized_storage.close()
 

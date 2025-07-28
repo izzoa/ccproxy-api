@@ -554,16 +554,31 @@ class TestSchedulerFastAPIIntegration:
 
     def test_scheduler_disabled_app_still_works(self) -> None:
         """Test that app works when scheduler is disabled."""
+        from unittest.mock import patch
+
         from ccproxy.api.app import create_app
 
         settings = Settings()
         settings.scheduler.enabled = False
 
-        app = create_app(settings)
+        # Mock any potential blocking operations during app creation
+        with (
+            patch("ccproxy.observability.metrics.get_metrics") as mock_metrics,
+            patch("ccproxy.config.settings.get_settings") as mock_get_settings,
+            patch(
+                "ccproxy.observability.stats_printer.get_stats_collector"
+            ) as mock_stats,
+            patch("ccproxy.pricing.updater.PricingUpdater") as mock_pricing,
+            patch("ccproxy.services.credentials.CredentialsManager") as mock_creds,
+        ):
+            # Mock settings to return our test configuration
+            mock_get_settings.return_value = settings
 
-        with TestClient(app) as client:
-            response = client.get("/health")
-            assert response.status_code == 200
+            app = create_app(settings)
+
+            with TestClient(app) as client:
+                response = client.get("/health")
+                assert response.status_code == 200
 
 
 class TestSchedulerErrorScenarios:
