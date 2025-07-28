@@ -18,6 +18,8 @@ from claude_code_sdk import (
 )
 
 from ccproxy.core.errors import ClaudeProxyError
+from ccproxy.models.messages import MessageResponse, TextContentBlock
+from ccproxy.models.requests import Usage
 
 
 @pytest.fixture
@@ -31,7 +33,7 @@ def mock_internal_claude_sdk_service() -> AsyncMock:
         "claude-3-haiku-20240307",
     ]
 
-    async def mock_create_completion(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def mock_create_completion(*args: Any, **kwargs: Any) -> MessageResponse:
         model = kwargs.get("model", "")
         if model not in SUPPORTED_MODELS:
             raise ClaudeProxyError(
@@ -39,16 +41,23 @@ def mock_internal_claude_sdk_service() -> AsyncMock:
                 error_type="invalid_request_error",
                 status_code=400,
             )
-        return {
-            "id": "msg_01234567890",
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "text", "text": "Hello! How can I help you?"}],
-            "model": model,
-            "stop_reason": "end_turn",
-            "stop_sequence": None,
-            "usage": {"input_tokens": 10, "output_tokens": 8},
-        }
+
+        # Create content block
+        content_block = TextContentBlock(type="text", text="Hello! How can I help you?")
+
+        # Create usage object
+        usage = Usage(input_tokens=10, output_tokens=8)
+
+        return MessageResponse(
+            id="msg_01234567890",
+            type="message",
+            role="assistant",
+            content=[content_block],
+            model=model,
+            stop_reason="end_turn",
+            stop_sequence=None,
+            usage=usage,
+        )
 
     mock_service.create_completion = mock_create_completion
     mock_service.list_models.return_value = [
@@ -149,16 +158,23 @@ def mock_internal_claude_sdk_service_streaming() -> AsyncMock:
         if kwargs.get("stream", False):
             return mock_streaming_response()
         else:
-            return {
-                "id": "msg_01234567890",
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "text", "text": "Hello! How can I help you?"}],
-                "model": model,
-                "stop_reason": "end_turn",
-                "stop_sequence": None,
-                "usage": {"input_tokens": 10, "output_tokens": 8},
-            }
+            # Return proper MessageResponse object for non-streaming
+            content_block = TextContentBlock(
+                type="text", text="Hello! How can I help you?"
+            )
+
+            usage = Usage(input_tokens=10, output_tokens=8)
+
+            return MessageResponse(
+                id="msg_01234567890",
+                type="message",
+                role="assistant",
+                content=[content_block],
+                model=model,
+                stop_reason="end_turn",
+                stop_sequence=None,
+                usage=usage,
+            )
 
     mock_service.create_completion = mock_create_completion
     mock_service.list_models.return_value = [
