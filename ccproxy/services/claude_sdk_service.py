@@ -263,7 +263,7 @@ class ClaudeSDKService:
                         xml_tag="system_message",
                         forward_converter=lambda obj: {
                             "type": "system_message",
-                            "text": obj.model_dump_json(separators=(",", ":")),
+                            "text": obj.model_dump_json(),
                         },
                     )
                     if content_block:
