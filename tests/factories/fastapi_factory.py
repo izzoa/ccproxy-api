@@ -150,7 +150,7 @@ class FastAPIAppFactory:
         """
         overrides: DependencyOverrides = {}
 
-        # Always override settings
+        # Always override settings - both original and cached versions
         from fastapi import Request
 
         from ccproxy.api.dependencies import get_cached_settings
@@ -165,14 +165,21 @@ class FastAPIAppFactory:
 
         # Override Claude service if mock provided
         if claude_service_mock is not None:
-            from ccproxy.api.dependencies import get_claude_service
+            from ccproxy.api.dependencies import (
+                get_cached_claude_service,
+                get_claude_service,
+            )
 
             def mock_get_claude_service(
                 auth_manager: Any = None, metrics_collector: Any = None
             ) -> MockService:
                 return claude_service_mock
 
+            def mock_get_cached_claude_service(request: Any) -> MockService:
+                return claude_service_mock
+
             overrides[get_claude_service] = mock_get_claude_service
+            overrides[get_cached_claude_service] = mock_get_cached_claude_service
 
         # Override auth manager if auth is enabled
         if auth_enabled and settings.security.auth_token:

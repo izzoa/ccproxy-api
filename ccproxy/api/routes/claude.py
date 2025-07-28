@@ -160,7 +160,7 @@ async def create_anthropic_message(
         from ccproxy.core.errors import ClaudeProxyError
 
         if isinstance(e, ClaudeProxyError):
-            raise
+            raise e
         raise HTTPException(
             status_code=500, detail=f"Internal server error: {str(e)}"
         ) from e
