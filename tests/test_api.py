@@ -5,7 +5,6 @@ and error handling using factory patterns and organized fixtures.
 """
 
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -35,8 +34,6 @@ from tests.helpers.test_data import (
     STANDARD_OPENAI_REQUEST,
     STREAMING_ANTHROPIC_REQUEST,
     STREAMING_OPENAI_REQUEST,
-    create_anthropic_request,
-    create_openai_request,
 )
 
 

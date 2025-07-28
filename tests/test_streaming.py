@@ -15,7 +15,6 @@ The tests cover:
 
 import json
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
