@@ -1,5 +1,7 @@
 """Shared dependencies for CCProxy API Server."""
 
+from __future__ import annotations
+
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -98,21 +100,24 @@ def get_claude_service(
     metrics = get_metrics()
 
     # Check if pooling should be enabled from configuration
-    use_pool = settings.claude.use_client_pool
+    use_pool = settings.claude.sdk_session_pool.enabled
+    session_manager = None
 
     if use_pool:
         logger.info(
             "claude_sdk_pool_enabled",
             message="Using Claude SDK client pooling for improved performance",
-            pool_size=settings.claude.pool_settings.pool_size,
-            max_pool_size=settings.claude.pool_settings.max_pool_size,
+            pool_size=settings.claude.sdk_session_pool.max_sessions,
+            max_pool_size=settings.claude.sdk_session_pool.max_sessions,
         )
+        # Note: Session manager should be created in the lifespan function, not here
+        # This dependency function should not create stateful resources
 
     return ClaudeSDKService(
         auth_manager=auth_manager,
         metrics=metrics,
         settings=settings,
-        use_pool=use_pool,
+        session_manager=session_manager,
     )
 
 

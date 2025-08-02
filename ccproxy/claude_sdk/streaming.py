@@ -139,6 +139,15 @@ class ClaudeStreamProcessor:
                             mode=sdk_message_mode.value,
                             request_id=request_id,
                         )
+                        logger.info(
+                            "sdk_tool_use_block",
+                            tool_id=block.id,
+                            tool_name=block.name,
+                            input_keys=list(block.input.keys()) if block.input else [],
+                            block_index=content_block_index,
+                            mode=sdk_message_mode.value,
+                            request_id=request_id,
+                        )
                         chunks = (
                             self.message_converter._create_sdk_content_block_chunks(
                                 sdk_object=block,
@@ -155,6 +164,20 @@ class ClaudeStreamProcessor:
                     elif isinstance(block, sdk_models.ToolResultBlock):
                         logger.debug(
                             "sdk_tool_result_block_processing",
+                            tool_use_id=block.tool_use_id,
+                            is_error=block.is_error,
+                            content_type=type(block.content).__name__
+                            if block.content
+                            else "None",
+                            content_preview=str(block.content)[:100]
+                            if block.content
+                            else None,
+                            block_index=content_block_index,
+                            mode=sdk_message_mode.value,
+                            request_id=request_id,
+                        )
+                        logger.info(
+                            "sdk_tool_result_block",
                             tool_use_id=block.tool_use_id,
                             is_error=block.is_error,
                             content_type=type(block.content).__name__
@@ -260,6 +283,8 @@ class ClaudeStreamProcessor:
                             cache_read_tokens=usage_model.cache_read_input_tokens,
                             cache_write_tokens=usage_model.cache_creation_input_tokens,
                             cost_usd=message.total_cost_usd,
+                            session_id=message.session_id,
+                            num_turns=message.num_turns,
                         )
 
                 end_chunks = self.message_converter.create_streaming_end_chunks(
@@ -281,6 +306,21 @@ class ClaudeStreamProcessor:
                     message_content=str(message)[:200],
                     request_id=request_id,
                 )
+        else:
+            # Stream ended without a ResultMessage - this indicates an error/interruption
+            if ctx and "status_code" not in ctx.metadata:
+                # Set error status if not already set (e.g., by StreamTimeoutError handler)
+                logger.warning(
+                    "stream_ended_without_result_message",
+                    request_id=request_id,
+                    message="Stream ended without ResultMessage, likely interrupted",
+                )
+                ctx.add_metadata(
+                    status_code=499,  # Client Closed Request
+                    error_type="stream_interrupted",
+                    error_message="Stream ended without completion",
+                )
+
         # Final message, contains metrics
         # NOTE: Access logging is now handled by StreamingResponseWithLogging
         # No need for manual access logging here anymore

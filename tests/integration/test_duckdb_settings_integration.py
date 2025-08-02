@@ -111,7 +111,7 @@ class TestDuckDBSettingsIntegration:
         # Don't try to clean up the data directory as it may contain other files
 
     @patch("ccproxy.api.app.get_settings")
-    @patch("ccproxy.api.app.SimpleDuckDBStorage")
+    @patch("ccproxy.utils.startup_helpers.SimpleDuckDBStorage")
     async def test_app_lifespan_uses_settings_path(
         self, mock_storage_class: AsyncMock, mock_get_settings: AsyncMock
     ) -> None:

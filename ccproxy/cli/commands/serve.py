@@ -444,11 +444,11 @@ def api(
             rich_help_panel="Claude Settings",
         ),
     ] = None,
-    sdk_enable_pool: Annotated[
+    sdk_pool: Annotated[
         bool,
         typer.Option(
-            "--sdk-enable-pool",
-            help="Enable Claude SDK client connection pooling for improved performance",
+            "--sdk-pool/--no-sdk-pool",
+            help="Enable/disable general Claude SDK client connection pooling",
             rich_help_panel="Claude Settings",
         ),
     ] = False,
@@ -456,11 +456,19 @@ def api(
         int | None,
         typer.Option(
             "--sdk-pool-size",
-            help="Number of clients to maintain in the pool (1-20)",
+            help="Number of clients to maintain in the general pool (1-20)",
             callback=validate_pool_size,
             rich_help_panel="Claude Settings",
         ),
     ] = None,
+    sdk_session_pool: Annotated[
+        bool,
+        typer.Option(
+            "--sdk-session-pool/--no-sdk-session-pool",
+            help="Enable/disable session-aware Claude SDK client pooling",
+            rich_help_panel="Claude Settings",
+        ),
+    ] = False,
     system_prompt_injection_mode: Annotated[
         str | None,
         typer.Option(
@@ -562,6 +570,31 @@ def api(
             rich_help_panel="Docker Settings",
         ),
     ] = None,
+    # Network control flags
+    no_network_calls: Annotated[
+        bool,
+        typer.Option(
+            "--no-network-calls",
+            help="Disable all network calls (version checks and pricing updates)",
+            rich_help_panel="Privacy Settings",
+        ),
+    ] = False,
+    disable_version_check: Annotated[
+        bool,
+        typer.Option(
+            "--disable-version-check",
+            help="Disable version update checks (prevents calls to GitHub API)",
+            rich_help_panel="Privacy Settings",
+        ),
+    ] = False,
+    disable_pricing_updates: Annotated[
+        bool,
+        typer.Option(
+            "--disable-pricing-updates",
+            help="Disable pricing data updates (prevents downloads from GitHub)",
+            rich_help_panel="Privacy Settings",
+        ),
+    ] = False,
 ) -> None:
     """
     Start the CCProxy API server.
@@ -609,13 +642,27 @@ def api(
             cwd=cwd,
             permission_prompt_tool_name=permission_prompt_tool_name,
             sdk_message_mode=sdk_message_mode,
-            sdk_enable_pool=sdk_enable_pool,
+            sdk_pool=sdk_pool,
             sdk_pool_size=sdk_pool_size,
+            sdk_session_pool=sdk_session_pool,
             system_prompt_injection_mode=system_prompt_injection_mode,
             builtin_permissions=builtin_permissions,
         )
 
         security_options = SecurityOptions(auth_token=auth_token)
+
+        # Handle network control flags
+        scheduler_overrides = {}
+        if no_network_calls:
+            # Disable both network features
+            scheduler_overrides["pricing_update_enabled"] = False
+            scheduler_overrides["version_check_enabled"] = False
+        else:
+            # Handle individual flags
+            if disable_pricing_updates:
+                scheduler_overrides["pricing_update_enabled"] = False
+            if disable_version_check:
+                scheduler_overrides["version_check_enabled"] = False
 
         # Extract CLI overrides from structured option containers
         cli_overrides = config_manager.get_cli_overrides_from_args(
@@ -639,11 +686,16 @@ def api(
             permission_prompt_tool_name=claude_options.permission_prompt_tool_name,
             cwd=claude_options.cwd,
             sdk_message_mode=claude_options.sdk_message_mode,
-            sdk_enable_pool=claude_options.sdk_enable_pool,
+            sdk_pool=claude_options.sdk_pool,
             sdk_pool_size=claude_options.sdk_pool_size,
+            sdk_session_pool=claude_options.sdk_session_pool,
             system_prompt_injection_mode=claude_options.system_prompt_injection_mode,
             builtin_permissions=claude_options.builtin_permissions,
         )
+
+        # Add scheduler overrides if any
+        if scheduler_overrides:
+            cli_overrides["scheduler"] = scheduler_overrides
 
         # Load settings with CLI overrides
         settings = config_manager.load_settings(

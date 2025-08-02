@@ -203,7 +203,7 @@ class TestDuckDBDependencyInjection:
 class TestDuckDBStorageLifecycle:
     """Test DuckDB storage lifecycle management."""
 
-    @patch("ccproxy.api.app.SimpleDuckDBStorage")
+    @patch("ccproxy.utils.startup_helpers.SimpleDuckDBStorage")
     def test_storage_initialized_on_startup(
         self, mock_storage_class: MagicMock
     ) -> None:

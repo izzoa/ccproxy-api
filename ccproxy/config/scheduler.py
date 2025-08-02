@@ -34,8 +34,8 @@ class SchedulerSettings(BaseSettings):
 
     # Pricing updater task settings
     pricing_update_enabled: bool = Field(
-        default=True,
-        description="Whether pricing cache update task is enabled",
+        default=False,
+        description="Whether pricing cache update task is enabled. Disabled by default for privacy - downloads from GitHub when enabled",
     )
 
     pricing_update_interval_hours: int = Field(
@@ -84,8 +84,8 @@ class SchedulerSettings(BaseSettings):
 
     # Version checking task settings
     version_check_enabled: bool = Field(
-        default=True,
-        description="Whether version update checking is enabled",
+        default=False,
+        description="Whether version update checking is enabled. Disabled by default for privacy - checks GitHub API when enabled",
     )
 
     version_check_interval_hours: int = Field(

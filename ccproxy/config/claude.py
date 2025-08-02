@@ -21,6 +21,7 @@ logger = structlog.get_logger(__name__)
 
 def _create_default_claude_code_options(
     builtin_permissions: bool = True,
+    continue_conversation: bool = False,
 ) -> ClaudeCodeOptions:
     """Create ClaudeCodeOptions with default values.
 
@@ -29,6 +30,7 @@ def _create_default_claude_code_options(
     """
     if builtin_permissions:
         return ClaudeCodeOptions(
+            continue_conversation=continue_conversation,
             mcp_servers={
                 "confirmation": {"type": "sse", "url": "http://127.0.0.1:8000/mcp"}
             },
@@ -38,6 +40,7 @@ def _create_default_claude_code_options(
         return ClaudeCodeOptions(
             mcp_servers={},
             permission_prompt_tool_name=None,
+            continue_conversation=continue_conversation,
         )
 
 
@@ -65,60 +68,81 @@ class SystemPromptInjectionMode(str, Enum):
     FULL = "full"
 
 
-class ClaudePoolSettings(BaseModel):
-    """Configuration settings for Claude SDK client connection pooling."""
+class SessionPoolSettings(BaseModel):
+    """Session pool configuration settings."""
 
-    pool_size: int = Field(
+    enabled: bool = Field(
+        default=True, description="Enable session-aware persistent pooling"
+    )
+
+    session_ttl: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description="Session time-to-live in seconds (1 minute to 24 hours)",
+    )
+
+    max_sessions: int = Field(
+        default=1000,
+        ge=1,
+        le=10000,
+        description="Maximum number of concurrent sessions",
+    )
+
+    cleanup_interval: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        description="Session cleanup interval in seconds (30 seconds to 1 hour)",
+    )
+
+    idle_threshold: int = Field(
+        default=600,
+        ge=60,
+        le=7200,
+        description="Session idle threshold in seconds (1 minute to 2 hours)",
+    )
+
+    connection_recovery: bool = Field(
+        default=True,
+        description="Enable automatic connection recovery for unhealthy sessions",
+    )
+
+    stream_first_chunk_timeout: int = Field(
         default=3,
         ge=1,
-        le=20,
-        description="Number of standby clients to maintain in the pool",
+        le=30,
+        description="Stream first chunk timeout in seconds (1-30 seconds)",
     )
 
-    max_pool_size: int = Field(
+    stream_ongoing_timeout: int = Field(
+        default=60,
+        ge=10,
+        le=600,
+        description="Stream ongoing timeout in seconds after first chunk (10 seconds to 10 minutes)",
+    )
+
+    stream_interrupt_timeout: int = Field(
         default=10,
-        ge=1,
-        le=50,
-        description="Maximum number of clients that can be created (pool + on-demand)",
+        ge=2,
+        le=60,
+        description="Stream interrupt timeout in seconds for SDK and worker operations (2-60 seconds)",
     )
 
-    connection_timeout: float = Field(
-        default=30.0,
-        ge=1.0,
-        le=300.0,
-        description="Timeout in seconds when acquiring a client from the pool",
-    )
+    @model_validator(mode="after")
+    def validate_timeout_hierarchy(self) -> "SessionPoolSettings":
+        """Ensure stream timeouts are less than session TTL."""
+        if self.stream_ongoing_timeout >= self.session_ttl:
+            raise ValueError(
+                f"stream_ongoing_timeout ({self.stream_ongoing_timeout}s) must be less than session_ttl ({self.session_ttl}s)"
+            )
 
-    idle_timeout: float = Field(
-        default=300.0,
-        ge=60.0,
-        le=3600.0,
-        description="Time in seconds before idle clients are removed from the pool",
-    )
+        if self.stream_first_chunk_timeout >= self.stream_ongoing_timeout:
+            raise ValueError(
+                f"stream_first_chunk_timeout ({self.stream_first_chunk_timeout}s) must be less than stream_ongoing_timeout ({self.stream_ongoing_timeout}s)"
+            )
 
-    health_check_interval: float = Field(
-        default=60.0,
-        ge=10.0,
-        le=600.0,
-        description="Interval in seconds between health checks of pooled clients",
-    )
-
-    enable_health_checks: bool = Field(
-        default=True,
-        description="Whether to enable background health checks for pooled clients",
-    )
-
-    @field_validator("max_pool_size")
-    @classmethod
-    def validate_max_pool_size(cls, v: int, info: Any) -> int:
-        """Ensure max_pool_size is at least as large as pool_size."""
-        if info.data and "pool_size" in info.data:
-            pool_size = info.data["pool_size"]
-            if v < pool_size:
-                raise ValueError(
-                    f"max_pool_size ({v}) must be >= pool_size ({pool_size})"
-                )
-        return v
+        return self
 
 
 class ClaudeSettings(BaseModel):
@@ -154,14 +178,9 @@ class ClaudeSettings(BaseModel):
         description="Whether to use pretty formatting (indented JSON, newlines after XML tags, unescaped content). When false: compact JSON, no newlines, escaped content between XML tags",
     )
 
-    use_client_pool: bool = Field(
-        default=False,
-        description="Whether to enable Claude SDK client connection pooling for improved performance. When enabled, maintains a pool of pre-connected clients to reduce subprocess startup overhead.",
-    )
-
-    pool_settings: ClaudePoolSettings = Field(
-        default_factory=ClaudePoolSettings,
-        description="Configuration settings for Claude SDK client connection pooling. Only used when use_client_pool=True.",
+    sdk_session_pool: SessionPoolSettings = Field(
+        default_factory=SessionPoolSettings,
+        description="Configuration settings for session-aware SDK client pooling",
     )
 
     @field_validator("cli_path")

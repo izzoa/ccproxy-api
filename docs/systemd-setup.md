@@ -115,6 +115,11 @@ Environment="CCPROXY_JSON_LOGS=true"
 Environment="SCHEDULER__ENABLED=true"
 Environment="SCHEDULER__PRICING_UPDATE_INTERVAL_HOURS=24"
 Environment="PRICING__UPDATE_ON_STARTUP=true"
+
+# Network features (disabled by default for privacy)
+# Uncomment to enable specific features
+# Environment="SCHEDULER__VERSION_CHECK_ENABLED=true"
+# Environment="SCHEDULER__PRICING_UPDATE_ENABLED=true"
 ```
 
 #### Using an Environment File
@@ -145,6 +150,10 @@ CLAUDE__CLI_PATH=/usr/local/bin/claude
 SCHEDULER__ENABLED=true
 SCHEDULER__MAX_CONCURRENT_TASKS=10
 SCHEDULER__PRICING_UPDATE_INTERVAL_HOURS=24
+
+# Network features (disabled by default for privacy)
+SCHEDULER__VERSION_CHECK_ENABLED=false
+SCHEDULER__PRICING_UPDATE_ENABLED=false
 
 # Pricing settings
 PRICING__UPDATE_ON_STARTUP=true

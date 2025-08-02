@@ -48,14 +48,19 @@ class ProxyResponse(Response):
         """
         # Ensure we include all original headers, including 'server'
         headers_list = []
+        seen_headers = set()
 
         # Add all headers from the response, but skip content-length
         # as we'll recalculate it based on actual body
         for name, value in self._preserve_headers.items():
             lower_name = name.lower()
             # Skip content-length and transfer-encoding as we'll set them correctly
-            if lower_name not in ["content-length", "transfer-encoding"]:
+            if (
+                lower_name not in ["content-length", "transfer-encoding"]
+                and lower_name not in seen_headers
+            ):
                 headers_list.append((lower_name.encode(), value.encode()))
+                seen_headers.add(lower_name)
 
         # Always set correct content-length based on actual body
         if self.body:

@@ -1,14 +1,22 @@
 import logging
 import shutil
 import sys
+from collections.abc import MutableMapping
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 import structlog
 from rich.console import Console
 from rich.traceback import Traceback
 from structlog.stdlib import BoundLogger
 from structlog.typing import ExcInfo, Processor
+
+
+suppress_debug = [
+    "ccproxy.scheduler",
+    "ccproxy.observability.context",
+    "ccproxy.utils.simple_request_logger",
+]
 
 
 def configure_structlog(log_level: int = logging.INFO) -> None:
@@ -34,12 +42,28 @@ def configure_structlog(log_level: int = logging.INFO) -> None:
         )
 
     # Common processors for all log levels
+    # First add timestamp with microseconds
+    processors.append(
+        structlog.processors.TimeStamper(
+            fmt="%H:%M:%S.%f" if log_level < logging.INFO else "%Y-%m-%d %H:%M:%S.%f",
+            key="timestamp_raw",
+        )
+    )
+
+    # Then add processor to convert microseconds to milliseconds
+    def format_timestamp_ms(
+        logger: Any, log_method: str, event_dict: MutableMapping[str, Any]
+    ) -> MutableMapping[str, Any]:
+        """Format timestamp with milliseconds instead of microseconds."""
+        if "timestamp_raw" in event_dict:
+            # Truncate microseconds to milliseconds (6 digits to 3)
+            timestamp_raw = event_dict.pop("timestamp_raw")
+            event_dict["timestamp"] = timestamp_raw[:-3]
+        return event_dict
+
     processors.extend(
         [
-            # Use human-readable timestamp for structlog logs in debug mode, normal otherwise
-            structlog.processors.TimeStamper(
-                fmt="%H:%M:%S" if log_level < logging.INFO else "%Y-%m-%d %H:%M:%S"
-            ),
+            format_timestamp_ms,
             structlog.processors.StackInfoRenderer(),
             structlog.dev.set_exc_info,  # Handle exceptions properly
             # This MUST be the last processor - allows different renderers per handler
@@ -140,11 +164,25 @@ def setup_logging(
         )
 
     # Add appropriate timestamper for console vs file
+    # Using custom lambda to truncate microseconds to milliseconds
     console_timestamper = (
-        structlog.processors.TimeStamper(fmt="%H:%M:%S")
+        structlog.processors.TimeStamper(fmt="%H:%M:%S.%f", key="timestamp_raw")
         if log_level < logging.INFO
-        else structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S")
+        else structlog.processors.TimeStamper(
+            fmt="%Y-%m-%d %H:%M:%S.%f", key="timestamp_raw"
+        )
     )
+
+    # Processor to convert microseconds to milliseconds
+    def format_timestamp_ms(
+        logger: Any, log_method: str, event_dict: MutableMapping[str, Any]
+    ) -> MutableMapping[str, Any]:
+        """Format timestamp with milliseconds instead of microseconds."""
+        if "timestamp_raw" in event_dict:
+            # Truncate microseconds to milliseconds (6 digits to 3)
+            timestamp_raw = event_dict.pop("timestamp_raw")
+            event_dict["timestamp"] = timestamp_raw[:-3]
+        return event_dict
 
     file_timestamper = structlog.processors.TimeStamper(fmt="iso")
 
@@ -160,10 +198,10 @@ def setup_logging(
     )
 
     # Console gets human-readable timestamps for both structlog and stdlib logs
-    console_processors = shared_processors + [console_timestamper]
+    console_processors = shared_processors + [console_timestamper, format_timestamp_ms]
     console_handler.setFormatter(
         structlog.stdlib.ProcessorFormatter(
-            foreign_pre_chain=console_processors,
+            foreign_pre_chain=console_processors,  # type: ignore[arg-type]
             processor=console_renderer,
         )
     )
@@ -232,6 +270,13 @@ def setup_logging(
         noisy_logger.handlers = []
         noisy_logger.propagate = True
         noisy_logger.setLevel(noisy_log_level)
+
+    [
+        logging.getLogger(logger_name).setLevel(
+            logging.INFO if log_level <= logging.DEBUG else log_level
+        )  # type: ignore[func-returns-value]
+        for logger_name in suppress_debug
+    ]
 
     return structlog.get_logger()  # type: ignore[no-any-return]
 

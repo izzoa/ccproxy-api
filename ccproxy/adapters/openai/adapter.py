@@ -432,7 +432,7 @@ class OpenAIAdapter(APIAdapter):
                     thinking_text = block.get("thinking", "")
                     signature = block.get("signature")
                     if thinking_text:
-                        content += f'<thinking signature="{signature}">{thinking_text}</thinking>'
+                        content += f'<thinking signature="{signature}">{thinking_text}</thinking>\n'
                 elif block.get("type") == "tool_use":
                     # Handle legacy tool_use content blocks
                     tool_calls.append(format_openai_tool_call(block))

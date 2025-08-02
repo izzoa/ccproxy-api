@@ -387,7 +387,7 @@ class TestSchedulerConfiguration:
         assert settings.enabled is True
         assert settings.max_concurrent_tasks == 10
         assert settings.graceful_shutdown_timeout == 30.0
-        assert settings.pricing_update_enabled is True
+        assert settings.pricing_update_enabled is False
         assert settings.pricing_update_interval_hours == 24
         assert settings.pushgateway_enabled is False
         assert settings.stats_printing_enabled is False  # Default is False
@@ -504,7 +504,7 @@ class TestSchedulerManagerIntegration:
             assert "pushgateway" in task_names
             assert "stats_printing" in task_names
             assert "pricing_cache_update" in task_names
-            assert scheduler.task_count == 4
+            assert scheduler.task_count == 3
 
             await stop_scheduler(scheduler)
 

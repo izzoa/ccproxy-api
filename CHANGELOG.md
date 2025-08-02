@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Advanced Session and Pool Management**:
+    - Implemented a robust session-aware pool for persistent Claude SDK connections, significantly improving performance and maintaining conversation continuity.
+    - Introduced a hybrid pooling system that automatically transfers clients from a general pool to the session pool upon receiving a session ID.
+    - Developed a queue-based streaming architecture to efficiently handle and broadcast messages to multiple listeners, improving session management and disconnection handling.
+- **Enhanced Observability and Logging**:
+    - Upgraded logging capabilities to include detailed session metadata, providing deeper insights into session lifecycle and reuse.
+    - Implemented a pool monitoring system to track the health and performance of both general and session-based connection pools.
+    - Reduced logging noise by adjusting log levels for operational SDK messages, focusing on essential access logs, warnings, and errors.
+- **Improved Configuration and Control**:
+    - Introduced a `builtin_permissions` flag to provide granular control over the built-in permission handling infrastructure (MCP and SSE).
+    - Implemented configurable system prompt injection modes (`minimal` and `full`) to customize how the Claude Code identity is presented in requests.
+- **Robust Streaming and Header Management**:
+    - Implemented `StreamingResponseWithLogging` for unified and consistent access logging across all streaming endpoints.
+    - Ensured critical upstream headers (e.g., `cf-ray`, `anthropic-ratelimit-*`) are correctly forwarded in SSE streaming responses.
+
+### Changed
+
+- **Default Behavior**:
+    - The Claude SDK connection pool is now disabled by default, requiring an explicit opt-in for safer and more predictable behavior.
+- **Architectural Improvements**:
+    - Refactored the application's startup and shutdown logic into a modular, component-based architecture for better maintainability and testability.
+    - Renamed `SessionContext` to `SessionClient` for improved clarity and consistency in the session pooling implementation.
+- **Testing Infrastructure**:
+    - Reorganized the entire test suite into a hierarchical structure (`unit` and `integration`) to improve navigation and maintainability.
+    - Migrated from legacy test fixtures to a more flexible and maintainable factory pattern for creating test clients and application instances.
+
+### Fixed
+
+- **Session and Streaming Stability**:
+    - Eliminated critical race conditions and `AttributeError` exceptions in the session pool and stream handling logic.
+    - Replaced fragile `asyncio.sleep` calls with a robust, event-based synchronization mechanism to prevent timing-related failures.
+    - Implemented a more accurate message-based stale detection mechanism to prevent the incorrect termination of active sessions.
+- **Resource Management**:
+    - Corrected several resource leak issues by improving stream interruption handling, ensuring that hanging sessions are properly cleaned up.
+- **Header and Content Formatting**:
+    - Resolved an issue that prevented the forwarding of upstream headers in SSE streaming responses.
+    - Fixed a formatting bug in the OpenAI adapter that caused message content to be improperly concatenated.
+
+
+### Added
+
 - **Configurable Permission Infrastructure**: Added `builtin_permissions` configuration flag to control built-in permission handling infrastructure:
   - New `builtin_permissions` flag (default: true) in ClaudeSettings for granular control
   - CLI support with `--builtin-permissions/--no-builtin-permissions` options
@@ -22,6 +63,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pool mode is disabled by default and can be enabled via configuration
   - **Limitations**: Pool mode does not support dynamic Claude options (max_tokens, model changes, etc.)
   - Pool instances are shared across requests with identical configurations
+- **Session-Aware Connection Pooling**: Added advanced session-based pooling for persistent conversation context:
+  - Session pools maintain dedicated Claude SDK clients per session ID for conversation continuity
+  - Configurable session TTL (time-to-live) with automatic cleanup of idle sessions
+  - Session pool settings include max sessions, idle threshold, and cleanup intervals
+  - Automatic connection recovery for unhealthy sessions when enabled
+  - Session interruption support for graceful handling of canceled requests
+  - Separate from the general connection pool - can be used independently or together
+  - Configuration via `claude.session_pool` settings with sensible defaults
 - **Claude Detection Service**: Implemented automatic Claude CLI header and system prompt detection at startup:
   - Automatically detects current Claude CLI version and extracts real headers/system prompt
   - Caches detection results per version to avoid repeated startup delays
@@ -33,6 +82,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Configuration Updates**: Enhanced Claude settings with new pool configuration options:
+  - Added `use_client_pool` boolean flag to enable general connection pooling
+  - Added `pool_settings` for configuring general pool behavior (size, timeouts, health checks)
+  - Added `session_pool` settings for session-aware pooling configuration
+  - Session pool enabled by default with 1-hour TTL and automatic cleanup
 - **HTTP Request Transformation**: Enhanced request transformers to use detected Claude CLI headers and system prompt:
   - Dynamically uses detected headers when available, falls back to hardcoded when not
   - System prompt injection now uses detected Claude Code system prompt
@@ -62,6 +116,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Test Structure**: Added `.gitignore` for test artifacts and coverage reports
 - **Documentation**: Updated `TESTING.md` with new test organization and examples
 - **Cache Directory**: Added automatic creation of `~/.cache/ccproxy/` for detection data persistence
+- **Session Pool Components**: Added new modules for session management:
+  - `ccproxy/claude_sdk/session_pool.py` - Core session pool implementation
+  - `ccproxy/claude_sdk/session_client.py` - Session-aware client wrapper
+  - `ccproxy/claude_sdk/manager.py` - Unified pool management with metrics integration
+- **Test Coverage**: Added comprehensive tests for session pool functionality:
+  - Unit tests for session lifecycle, cleanup, and recovery
+  - Integration tests for end-to-end session pooling behavior
 
 ## [0.1.4] - 2025-05-28
 

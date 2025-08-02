@@ -60,6 +60,18 @@ class AccessLogPayload(TypedDict, total=False):
     cache_write_tokens: int
     cost_usd: float
     cost_sdk_usd: float
+    num_turns: int  # number of conversation turns
+
+    # Session context metadata
+    session_type: str  # "session_pool" or "direct"
+    session_status: str  # active, idle, connecting, etc.
+    session_age_seconds: float  # how long session has been alive
+    session_message_count: int  # number of messages in session
+    session_client_id: str  # unique session client identifier
+    session_pool_enabled: bool  # whether session pooling is enabled
+    session_idle_seconds: float  # how long since last activity
+    session_error_count: int  # number of errors in this session
+    session_is_new: bool  # whether this is a newly created session
 
 
 class SimpleDuckDBStorage:

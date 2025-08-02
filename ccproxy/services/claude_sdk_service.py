@@ -9,7 +9,8 @@ from claude_code_sdk import ClaudeCodeOptions
 from ccproxy.auth.manager import AuthManager
 from ccproxy.claude_sdk.client import ClaudeSDKClient
 from ccproxy.claude_sdk.converter import MessageConverter
-from ccproxy.claude_sdk.manager import PoolManager
+from ccproxy.claude_sdk.exceptions import StreamTimeoutError
+from ccproxy.claude_sdk.manager import SessionManager
 from ccproxy.claude_sdk.options import OptionsHandler
 from ccproxy.claude_sdk.streaming import ClaudeStreamProcessor
 from ccproxy.config.claude import SDKMessageMode
@@ -19,6 +20,7 @@ from ccproxy.core.errors import (
     ServiceUnavailableError,
 )
 from ccproxy.models import claude_sdk as sdk_models
+from ccproxy.models.claude_sdk import SDKMessage, create_sdk_message
 from ccproxy.models.messages import MessageResponse
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
@@ -44,8 +46,7 @@ class ClaudeSDKService:
         auth_manager: AuthManager | None = None,
         metrics: PrometheusMetrics | None = None,
         settings: Settings | None = None,
-        use_pool: bool = False,
-        pool_manager: PoolManager | None = None,
+        session_manager: SessionManager | None = None,
     ) -> None:
         """
         Initialize Claude SDK service.
@@ -55,11 +56,10 @@ class ClaudeSDKService:
             auth_manager: Authentication manager (optional)
             metrics: Prometheus metrics instance (optional)
             settings: Application settings (optional)
-            use_pool: Whether to use connection pooling for improved performance
-            pool_manager: Pool manager for dependency injection (optional)
+            session_manager: Session manager for dependency injection (optional)
         """
         self.sdk_client = sdk_client or ClaudeSDKClient(
-            use_pool=use_pool, settings=settings, pool_manager=pool_manager
+            settings=settings, session_manager=session_manager
         )
         self.auth_manager = auth_manager
         self.metrics = metrics
@@ -71,6 +71,111 @@ class ClaudeSDKService:
             metrics=self.metrics,
         )
 
+    def _convert_messages_to_sdk_message(
+        self, messages: list[dict[str, Any]], session_id: str | None = None
+    ) -> "SDKMessage":
+        """Convert list of Anthropic messages to single SDKMessage.
+
+        Takes the last user message from the list and converts it to SDKMessage format.
+
+        Args:
+            messages: List of Anthropic API messages
+            session_id: Optional session ID for conversation continuity
+
+        Returns:
+            SDKMessage ready to send to Claude SDK
+        """
+        # Find the last user message
+        last_user_message = None
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                last_user_message = msg
+                break
+
+        if not last_user_message:
+            raise ClaudeProxyError(
+                message="No user message found in messages list",
+                error_type="invalid_request_error",
+                status_code=400,
+            )
+
+        # Extract text content from the message
+        content = last_user_message.get("content", "")
+        if isinstance(content, list):
+            # Extract text from content blocks
+            text_parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            content = "\n".join(text_parts)
+        elif not isinstance(content, str):
+            content = str(content)
+
+        return create_sdk_message(content=content, session_id=session_id)
+
+    async def _capture_session_metadata(
+        self,
+        ctx: RequestContext,
+        session_id: str | None,
+        options: "ClaudeCodeOptions",
+    ) -> None:
+        """Capture session metadata for access logging.
+
+        Args:
+            ctx: Request context to add metadata to
+            session_id: Optional session ID
+            options: Claude Code options
+        """
+        if (
+            session_id
+            and hasattr(self.sdk_client, "_session_manager")
+            and self.sdk_client._session_manager
+        ):
+            try:
+                session_client = (
+                    await self.sdk_client._session_manager.get_session_client(
+                        session_id, options
+                    )
+                )
+                if session_client:
+                    # Determine if session pool is enabled
+                    session_pool_enabled = (
+                        hasattr(self.sdk_client._session_manager, "session_pool")
+                        and self.sdk_client._session_manager.session_pool is not None
+                        and hasattr(
+                            self.sdk_client._session_manager.session_pool, "config"
+                        )
+                        and self.sdk_client._session_manager.session_pool.config.enabled
+                    )
+
+                    # Add session metadata to context
+                    ctx.add_metadata(
+                        session_type="session_pool"
+                        if session_pool_enabled
+                        else "direct",
+                        session_status=session_client.status.value,
+                        session_age_seconds=session_client.metrics.age_seconds,
+                        session_message_count=session_client.metrics.message_count,
+                        session_client_id=session_client.client_id,
+                        session_pool_enabled=session_pool_enabled,
+                        session_idle_seconds=session_client.metrics.idle_seconds,
+                        session_error_count=session_client.metrics.error_count,
+                        session_is_new=session_client.is_newly_created,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "failed_to_capture_session_metadata",
+                    session_id=session_id,
+                    error=str(e),
+                )
+        else:
+            # Add basic session metadata for direct connections (no session pool)
+            ctx.add_metadata(
+                session_type="direct",
+                session_pool_enabled=False,
+                session_is_new=True,  # Direct connections are always new
+            )
+
     async def create_completion(
         self,
         request_context: RequestContext,
@@ -79,6 +184,7 @@ class ClaudeSDKService:
         temperature: float | None = None,
         max_tokens: int | None = None,
         stream: bool = False,
+        session_id: str | None = None,
         **kwargs: Any,
     ) -> MessageResponse | AsyncIterator[dict[str, Any]]:
         """
@@ -90,6 +196,7 @@ class ClaudeSDKService:
             temperature: Temperature for response generation
             max_tokens: Maximum tokens in response
             stream: Whether to stream responses
+            session_id: Optional session ID for Claude SDK integration
             request_context: Existing request context to use instead of creating new one
             **kwargs: Additional arguments
 
@@ -112,19 +219,22 @@ class ClaudeSDKService:
             temperature=temperature,
             max_tokens=max_tokens,
             system_message=system_message,
+            session_id=session_id,
             **kwargs,
         )
 
-        # Convert messages to prompt format
-        prompt = self.message_converter.format_messages_to_prompt(messages)
+        # Messages will be converted to SDK format in the client layer
 
         # Use existing context, but update metadata for this service (preserve original service_type)
         ctx = request_context
-        ctx.add_metadata(
-            endpoint="messages",
-            model=model,
-            streaming=stream,
-        )
+        metadata = {
+            "endpoint": "messages",
+            "model": model,
+            "streaming": stream,
+        }
+        if session_id:
+            metadata["session_id"] = session_id
+        ctx.add_metadata(**metadata)
         # Use existing request ID from context
         request_id = ctx.request_id
 
@@ -132,16 +242,18 @@ class ClaudeSDKService:
             # Log SDK request parameters
             timestamp = ctx.get_log_timestamp_prefix() if ctx else None
             await self._log_sdk_request(
-                request_id, prompt, options, model, stream, timestamp
+                request_id, messages, options, model, stream, session_id, timestamp
             )
 
             if stream:
                 # For streaming, return the async iterator directly
                 # Access logging will be handled by the stream processor when ResultMessage is received
-                return self._stream_completion(ctx, prompt, options, model, timestamp)
+                return self._stream_completion(
+                    ctx, messages, options, model, session_id, timestamp
+                )
             else:
                 result = await self._complete_non_streaming(
-                    ctx, prompt, options, model, timestamp
+                    ctx, messages, options, model, session_id, timestamp
                 )
                 return result
         except (ClaudeProxyError, ServiceUnavailableError) as e:
@@ -152,9 +264,10 @@ class ClaudeSDKService:
     async def _complete_non_streaming(
         self,
         ctx: RequestContext,
-        prompt: str,
+        messages: list[dict[str, Any]],
         options: "ClaudeCodeOptions",
         model: str,
+        session_id: str | None = None,
         timestamp: str | None = None,
     ) -> MessageResponse:
         """
@@ -174,16 +287,28 @@ class ClaudeSDKService:
         request_id = ctx.request_id
         logger.debug("claude_sdk_completion_start", request_id=request_id)
 
-        messages = [
-            m
-            async for m in self.sdk_client.query_completion(prompt, options, request_id)
-        ]
+        # Convert messages to single SDKMessage
+        sdk_message = self._convert_messages_to_sdk_message(messages, session_id)
+
+        # Get stream handle
+        stream_handle = await self.sdk_client.query_completion(
+            sdk_message, options, request_id, session_id
+        )
+
+        # Capture session metadata for access logging
+        await self._capture_session_metadata(ctx, session_id, options)
+
+        # Create a listener and collect all messages
+        sdk_messages = []
+        async for m in stream_handle.create_listener():
+            sdk_messages.append(m)
 
         result_message = next(
-            (m for m in messages if isinstance(m, sdk_models.ResultMessage)), None
+            (m for m in sdk_messages if isinstance(m, sdk_models.ResultMessage)), None
         )
         assistant_message = next(
-            (m for m in messages if isinstance(m, sdk_models.AssistantMessage)), None
+            (m for m in sdk_messages if isinstance(m, sdk_models.AssistantMessage)),
+            None,
         )
 
         if result_message is None:
@@ -215,7 +340,7 @@ class ClaudeSDKService:
         # Add other message types to the content block
         all_messages = [
             m
-            for m in messages
+            for m in sdk_messages
             if not isinstance(m, sdk_models.AssistantMessage | sdk_models.ResultMessage)
         ]
 
@@ -279,6 +404,8 @@ class ClaudeSDKService:
             cache_read_tokens=usage.cache_read_input_tokens,
             cache_write_tokens=usage.cache_creation_input_tokens,
             cost_usd=cost_usd,
+            session_id=result_message.session_id,
+            num_turns=result_message.num_turns,
         )
         # Add success status to context for automatic access logging
         ctx.add_metadata(status_code=200)
@@ -292,9 +419,10 @@ class ClaudeSDKService:
     async def _stream_completion(
         self,
         ctx: RequestContext,
-        prompt: str,
+        messages: list[dict[str, Any]],
         options: "ClaudeCodeOptions",
         model: str,
+        session_id: str | None = None,
         timestamp: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """
@@ -317,52 +445,167 @@ class ClaudeSDKService:
         )
         pretty_format = self.settings.claude.pretty_format if self.settings else True
 
-        sdk_stream = self.sdk_client.query_completion(prompt, options, request_id)
+        # Convert messages to single SDKMessage
+        sdk_message = self._convert_messages_to_sdk_message(messages, session_id)
 
-        async for chunk in self.stream_processor.process_stream(
-            sdk_stream=sdk_stream,
-            model=model,
-            request_id=request_id,
-            ctx=ctx,
-            sdk_message_mode=sdk_message_mode,
-            pretty_format=pretty_format,
+        # Get stream handle instead of direct iterator
+        stream_handle = await self.sdk_client.query_completion(
+            sdk_message, options, request_id, session_id
+        )
+
+        # Store handle in session client if available for cleanup
+        if (
+            session_id
+            and hasattr(self.sdk_client, "_session_manager")
+            and self.sdk_client._session_manager
         ):
-            # Log streaming chunk
-            if request_id:
-                await self._log_sdk_streaming_chunk(request_id, chunk, timestamp)
-            yield chunk
+            try:
+                session_client = (
+                    await self.sdk_client._session_manager.get_session_client(
+                        session_id, options
+                    )
+                )
+                if session_client:
+                    session_client.active_stream_handle = stream_handle
+            except Exception as e:
+                logger.warning(
+                    "failed_to_store_stream_handle",
+                    session_id=session_id,
+                    error=str(e),
+                )
+
+        # Capture session metadata for access logging
+        await self._capture_session_metadata(ctx, session_id, options)
+
+        # Create a listener for this stream
+        sdk_stream = stream_handle.create_listener()
+
+        try:
+            async for chunk in self.stream_processor.process_stream(
+                sdk_stream=sdk_stream,
+                model=model,
+                request_id=request_id,
+                ctx=ctx,
+                sdk_message_mode=sdk_message_mode,
+                pretty_format=pretty_format,
+            ):
+                # Log streaming chunk
+                if request_id:
+                    await self._log_sdk_streaming_chunk(request_id, chunk, timestamp)
+                yield chunk
+        except GeneratorExit:
+            # Client disconnected - log and re-raise to propagate to create_listener()
+            logger.info(
+                "claude_sdk_service_client_disconnected",
+                request_id=request_id,
+                session_id=session_id,
+                message="Client disconnected from SDK service stream, propagating to stream handle",
+            )
+            # CRITICAL: Re-raise GeneratorExit to trigger interrupt in create_listener()
+            raise
+        except StreamTimeoutError as e:
+            # Send error events to the client
+            logger.error(
+                "stream_timeout_error",
+                message=str(e),
+                session_id=e.session_id,
+                timeout_seconds=e.timeout_seconds,
+                request_id=request_id,
+            )
+
+            # Create a unique message ID for the error response
+            from uuid import uuid4
+
+            error_message_id = f"msg_error_{uuid4()}"
+
+            # Yield message_start event
+            yield {
+                "type": "message_start",
+                "message": {
+                    "id": error_message_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "model": model,
+                    "content": [],
+                    "stop_reason": "error",
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
+            }
+
+            # Yield content_block_start for error message
+            yield {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            }
+
+            # Yield error text delta
+            error_text = f"Error: {e}"
+            yield {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": error_text},
+            }
+
+            # Yield content_block_stop
+            yield {
+                "type": "content_block_stop",
+                "index": 0,
+            }
+
+            # Yield message_delta with stop reason
+            yield {
+                "type": "message_delta",
+                "delta": {"stop_reason": "error", "stop_sequence": None},
+                "usage": {"output_tokens": len(error_text.split())},
+            }
+
+            # Yield message_stop
+            yield {
+                "type": "message_stop",
+            }
+
+            # Update context with error status
+            ctx.add_metadata(
+                status_code=504,  # Gateway Timeout
+                error_message=str(e),
+                error_type="stream_timeout",
+                session_id=e.session_id,
+            )
 
     async def _log_sdk_request(
         self,
         request_id: str,
-        prompt: str,
+        messages: list[dict[str, Any]],
         options: "ClaudeCodeOptions",
         model: str,
         stream: bool,
+        session_id: str | None = None,
         timestamp: str | None = None,
     ) -> None:
         """Log SDK input parameters as JSON dump.
 
         Args:
             request_id: Request identifier
-            prompt: The formatted prompt
+            messages: List of Anthropic API messages
             options: Claude SDK options
             model: The model being used
             stream: Whether streaming is enabled
+            session_id: Optional session ID for Claude SDK integration
             timestamp: Optional timestamp prefix
         """
         # timestamp is already provided from context, no need for fallback
 
         # JSON dump of the parameters passed to SDK completion
         sdk_request_data = {
-            "prompt": prompt,
-            "options": options.model_dump()
-            if hasattr(options, "model_dump")
-            else str(options),
-            "model": model,
+            "messages": messages,
+            "options": options,
             "stream": stream,
             "request_id": request_id,
         }
+        if session_id:
+            sdk_request_data["session_id"] = session_id
 
         await write_request_log(
             request_id=request_id,
@@ -445,6 +688,17 @@ class ClaudeSDKService:
                 exc_info=True,
             )
             return False
+
+    async def interrupt_session(self, session_id: str) -> bool:
+        """Interrupt a Claude session due to client disconnection.
+
+        Args:
+            session_id: The session ID to interrupt
+
+        Returns:
+            True if session was found and interrupted, False otherwise
+        """
+        return await self.sdk_client.interrupt_session(session_id)
 
     async def close(self) -> None:
         """Close the service and cleanup resources."""

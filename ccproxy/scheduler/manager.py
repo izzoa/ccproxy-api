@@ -7,6 +7,7 @@ from ccproxy.config.settings import Settings
 from .core import Scheduler
 from .registry import register_task
 from .tasks import (
+    PoolStatsTask,
     PricingCacheUpdateTask,
     PushgatewayTask,
     StatsPrintingTask,
@@ -30,6 +31,19 @@ async def setup_scheduler_tasks(scheduler: Scheduler, settings: Settings) -> Non
     if not scheduler_config.enabled:
         logger.info("scheduler_disabled")
         return
+
+    # Log network features status
+    logger.info(
+        "network_features_status",
+        pricing_updates_enabled=scheduler_config.pricing_update_enabled,
+        version_check_enabled=scheduler_config.version_check_enabled,
+        message=(
+            "Network features disabled by default for privacy"
+            if not scheduler_config.pricing_update_enabled
+            and not scheduler_config.version_check_enabled
+            else "Some network features are enabled"
+        ),
+    )
 
     # Add pushgateway task if enabled
     if scheduler_config.pushgateway_enabled:
@@ -123,21 +137,32 @@ async def setup_scheduler_tasks(scheduler: Scheduler, settings: Settings) -> Non
             )
 
 
-def _register_default_tasks() -> None:
-    """Register default task types in the global registry."""
+def _register_default_tasks(settings: Settings) -> None:
+    """Register default task types in the global registry based on configuration."""
     from .registry import get_task_registry
 
     registry = get_task_registry()
+    scheduler_config = settings.scheduler
 
-    # Only register if not already registered
-    if not registry.is_registered("pushgateway"):
+    # Only register pushgateway task if enabled
+    if scheduler_config.pushgateway_enabled and not registry.is_registered(
+        "pushgateway"
+    ):
         register_task("pushgateway", PushgatewayTask)
-    if not registry.is_registered("stats_printing"):
+
+    # Only register stats printing task if enabled
+    if scheduler_config.stats_printing_enabled and not registry.is_registered(
+        "stats_printing"
+    ):
         register_task("stats_printing", StatsPrintingTask)
+
+    # Always register core tasks (not metrics-related)
     if not registry.is_registered("pricing_cache_update"):
         register_task("pricing_cache_update", PricingCacheUpdateTask)
     if not registry.is_registered("version_update_check"):
         register_task("version_update_check", VersionUpdateCheckTask)
+    if not registry.is_registered("pool_stats"):
+        register_task("pool_stats", PoolStatsTask)
 
 
 async def start_scheduler(settings: Settings) -> Scheduler | None:
@@ -156,7 +181,7 @@ async def start_scheduler(settings: Settings) -> Scheduler | None:
             return None
 
         # Register task types (only when actually starting scheduler)
-        _register_default_tasks()
+        _register_default_tasks(settings)
 
         # Create scheduler with settings
         scheduler = Scheduler(

@@ -38,9 +38,11 @@ async def create_openai_chat_completion(
         )
 
         # Handle the request using proxy service directly
+        # Strip the /api prefix from the path
+        service_path = request.url.path.removeprefix("/api")
         response = await proxy_service.handle_request(
             method=request.method,
-            path=request.url.path,
+            path=service_path,
             headers=headers,
             body=body,
             query_params=query_params,
@@ -55,6 +57,8 @@ async def create_openai_chat_completion(
             # Tuple response - handle regular response
             status_code, response_headers, response_body = response
             if status_code >= 400:
+                # Store headers for preservation middleware
+                request.state.preserve_headers = response_headers
                 # Forward error response directly with headers
                 return ProxyResponse(
                     content=response_body,
@@ -128,9 +132,11 @@ async def create_anthropic_message(
         )
 
         # Handle the request using proxy service directly
+        # Strip the /api prefix from the path
+        service_path = request.url.path.removeprefix("/api")
         response = await proxy_service.handle_request(
             method=request.method,
-            path=request.url.path,
+            path=service_path,
             headers=headers,
             body=body,
             query_params=query_params,
@@ -145,6 +151,8 @@ async def create_anthropic_message(
             # Tuple response - handle regular response
             status_code, response_headers, response_body = response
             if status_code >= 400:
+                # Store headers for preservation middleware
+                request.state.preserve_headers = response_headers
                 # Forward error response directly with headers
                 return ProxyResponse(
                     content=response_body,
@@ -163,15 +171,26 @@ async def create_anthropic_message(
                         if line.strip():
                             yield f"{line}\n".encode()
 
+                # Start with the response headers from proxy service
+                streaming_headers = response_headers.copy()
+
+                # Ensure critical headers for streaming
+                streaming_headers["Cache-Control"] = "no-cache"
+                streaming_headers["Connection"] = "keep-alive"
+
+                # Set content-type if not already set by upstream
+                if "content-type" not in streaming_headers:
+                    streaming_headers["content-type"] = "text/event-stream"
+
                 return StreamingResponse(
                     stream_generator(),
                     media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                    },
+                    headers=streaming_headers,
                 )
             else:
+                # Store headers for preservation middleware
+                request.state.preserve_headers = response_headers
+
                 # Parse JSON response
                 response_data = json.loads(response_body.decode())
 

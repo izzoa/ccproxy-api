@@ -125,7 +125,8 @@ docker_environment = {CLAUDE_ENV = "production"}
 enabled = true
 max_concurrent_tasks = 10
 pricing_update_interval_hours = 24
-pricing_update_enabled = true
+pricing_update_enabled = false     # Default: false (privacy-first)
+version_check_enabled = false      # Default: false (privacy-first)
 
 # Pricing settings
 [pricing]
@@ -291,6 +292,48 @@ Configure health monitoring:
   }
 }
 ```
+
+### Privacy & Network Configuration
+
+CCProxy respects your privacy by disabling network calls by default. The following features make external network connections:
+
+- **Version Update Checks**: Disabled by default (checks GitHub API for new releases)
+- **Pricing Data Updates**: Disabled by default (downloads pricing data from GitHub)
+
+#### Controlling Network Features
+
+**Via Environment Variables:**
+```bash
+# Disable all network features
+SCHEDULER__VERSION_CHECK_ENABLED=false
+SCHEDULER__PRICING_UPDATE_ENABLED=false
+
+# Enable specific features if needed
+SCHEDULER__VERSION_CHECK_ENABLED=true      # Enable version checks
+SCHEDULER__PRICING_UPDATE_ENABLED=true      # Enable pricing updates
+```
+
+**Via CLI Flags:**
+```bash
+# Disable all network calls
+ccproxy serve --no-network-calls
+
+# Disable specific features
+ccproxy serve --disable-version-check
+ccproxy serve --disable-pricing-updates
+
+# Enable features (override defaults)
+SCHEDULER__VERSION_CHECK_ENABLED=true ccproxy serve
+```
+
+**Via TOML Configuration:**
+```toml
+[scheduler]
+version_check_enabled = false      # Default: false
+pricing_update_enabled = false     # Default: false
+```
+
+**Note:** Network features are disabled by default for privacy. You must explicitly enable them if desired.
 
 ## Claude CLI Auto-Detection
 

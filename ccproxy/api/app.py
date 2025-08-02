@@ -1,9 +1,8 @@
 """FastAPI application factory for CCProxy API Server."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypedDict
 
 from fastapi import APIRouter, FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -19,7 +18,6 @@ from ccproxy.api.middleware.request_content_logging import (
 from ccproxy.api.middleware.request_id import RequestIDMiddleware
 from ccproxy.api.middleware.server_header import ServerHeaderMiddleware
 from ccproxy.api.routes.claude import router as claude_router
-from ccproxy.api.routes.health import get_claude_cli_info
 from ccproxy.api.routes.health import router as health_router
 from ccproxy.api.routes.mcp import setup_mcp
 from ccproxy.api.routes.metrics import (
@@ -29,23 +27,91 @@ from ccproxy.api.routes.metrics import (
 )
 from ccproxy.api.routes.permissions import router as permissions_router
 from ccproxy.api.routes.proxy import router as proxy_router
-from ccproxy.api.services.permission_service import get_permission_service
-from ccproxy.auth.credentials_adapter import CredentialsAuthManager
-from ccproxy.auth.exceptions import CredentialsNotFoundError
 from ccproxy.auth.oauth.routes import router as oauth_router
 from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.logging import setup_logging
-from ccproxy.observability import get_metrics
-from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
-from ccproxy.scheduler.errors import SchedulerError
-from ccproxy.scheduler.manager import start_scheduler, stop_scheduler
-from ccproxy.services.claude_detection_service import ClaudeDetectionService
-from ccproxy.services.claude_sdk_service import ClaudeSDKService
-from ccproxy.services.credentials import CredentialsManager
 from ccproxy.utils.models_provider import get_models_list
+from ccproxy.utils.startup_helpers import (
+    check_claude_cli_startup,
+    flush_streaming_batches_shutdown,
+    initialize_claude_detection_startup,
+    initialize_claude_sdk_startup,
+    initialize_log_storage_shutdown,
+    initialize_log_storage_startup,
+    initialize_permission_service_startup,
+    setup_permission_service_shutdown,
+    setup_scheduler_shutdown,
+    setup_scheduler_startup,
+    setup_session_manager_shutdown,
+    validate_authentication_startup,
+)
 
 
 logger = get_logger(__name__)
+
+
+# Type definitions for lifecycle components
+class LifecycleComponent(TypedDict):
+    name: str
+    startup: Callable[[FastAPI, Any], Awaitable[None]] | None
+    shutdown: (
+        Callable[[FastAPI], Awaitable[None]]
+        | Callable[[FastAPI, Any], Awaitable[None]]
+        | None
+    )
+
+
+class ShutdownComponent(TypedDict):
+    name: str
+    shutdown: Callable[[FastAPI], Awaitable[None]] | None
+
+
+# Define lifecycle components for startup/shutdown organization
+LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
+    {
+        "name": "Authentication",
+        "startup": validate_authentication_startup,
+        "shutdown": None,  # One-time validation, no cleanup needed
+    },
+    {
+        "name": "Claude CLI",
+        "startup": check_claude_cli_startup,
+        "shutdown": None,  # Detection only, no cleanup needed
+    },
+    {
+        "name": "Claude Detection",
+        "startup": initialize_claude_detection_startup,
+        "shutdown": None,  # No cleanup needed
+    },
+    {
+        "name": "Claude SDK",
+        "startup": initialize_claude_sdk_startup,
+        "shutdown": setup_session_manager_shutdown,
+    },
+    {
+        "name": "Scheduler",
+        "startup": setup_scheduler_startup,
+        "shutdown": setup_scheduler_shutdown,
+    },
+    {
+        "name": "Log Storage",
+        "startup": initialize_log_storage_startup,
+        "shutdown": initialize_log_storage_shutdown,
+    },
+    {
+        "name": "Permission Service",
+        "startup": initialize_permission_service_startup,
+        "shutdown": setup_permission_service_shutdown,
+    },
+]
+
+# Additional shutdown-only components that need special handling
+SHUTDOWN_ONLY_COMPONENTS: list[ShutdownComponent] = [
+    {
+        "name": "Streaming Batches",
+        "shutdown": flush_streaming_batches_shutdown,
+    },
+]
 
 
 # Create shared models router
@@ -64,7 +130,7 @@ async def list_models() -> dict[str, Any]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager."""
+    """Application lifespan manager using component-based approach."""
     settings = get_settings()
 
     # Store settings in app state for reuse in dependencies
@@ -90,285 +156,57 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "claude_cli_search_paths", paths=settings.claude.get_searched_paths()
         )
 
-    # Validate authentication token at startup
-    try:
-        credentials_manager = CredentialsManager()
-        validation = await credentials_manager.validate()
-
-        if validation.valid and not validation.expired:
-            credentials = validation.credentials
-            oauth_token = credentials.claude_ai_oauth if credentials else None
-
-            if oauth_token and oauth_token.expires_at_datetime:
-                hours_until_expiry = int(
-                    (
-                        oauth_token.expires_at_datetime - datetime.now(UTC)
-                    ).total_seconds()
-                    / 3600
+    # Execute startup components in order
+    for component in LIFECYCLE_COMPONENTS:
+        if component["startup"]:
+            component_name = component["name"]
+            try:
+                logger.debug(f"starting_{component_name.lower().replace(' ', '_')}")
+                await component["startup"](app, settings)
+            except Exception as e:
+                logger.error(
+                    f"{component_name.lower().replace(' ', '_')}_startup_failed",
+                    error=str(e),
+                    component=component_name,
                 )
-                logger.debug(
-                    "auth_token_valid",
-                    expires_in_hours=hours_until_expiry,
-                    subscription_type=oauth_token.subscription_type,
-                    credentials_path=str(validation.path) if validation.path else None,
-                )
-            else:
-                logger.debug("auth_token_valid", credentials_path=str(validation.path))
-        elif validation.expired:
-            logger.warning(
-                "auth_token_expired",
-                message="Authentication token has expired. Please run 'ccproxy auth login' to refresh.",
-                credentials_path=str(validation.path) if validation.path else None,
-            )
-        else:
-            logger.warning(
-                "auth_token_invalid",
-                message="Authentication token is invalid. Please run 'ccproxy auth login'.",
-                credentials_path=str(validation.path) if validation.path else None,
-            )
-    except CredentialsNotFoundError:
-        logger.warning(
-            "auth_token_not_found",
-            message="No authentication credentials found. Please run 'ccproxy auth login' to authenticate.",
-            searched_paths=settings.auth.storage.storage_paths,
-        )
-    except Exception as e:
-        logger.error(
-            "auth_token_validation_error",
-            error=str(e),
-            message="Failed to validate authentication token. The server will continue without authentication.",
-            exc_info=True,
-        )
-
-    # Validate Claude binary at startup using the new function
-    try:
-        claude_info = await get_claude_cli_info()
-
-        if claude_info.status == "available":
-            logger.info(
-                "claude_cli_available",
-                status=claude_info.status,
-                version=claude_info.version,
-                binary_path=claude_info.binary_path,
-            )
-        else:
-            logger.warning(
-                "claude_cli_unavailable",
-                status=claude_info.status,
-                error=claude_info.error,
-                binary_path=claude_info.binary_path,
-                message=f"Claude CLI status: {claude_info.status}",
-            )
-    except Exception as e:
-        logger.error(
-            "claude_cli_check_failed",
-            error=str(e),
-            message="Failed to check Claude CLI status during startup",
-        )
-
-    # Initialize Claude detection service
-    try:
-        logger.debug("initializing_claude_detection")
-        detection_service = ClaudeDetectionService(settings)
-        claude_data = await detection_service.initialize_detection()
-        app.state.claude_detection_data = claude_data
-        app.state.claude_detection_service = detection_service
-        logger.debug(
-            "claude_detection_completed",
-            version=claude_data.claude_version,
-            cached_at=claude_data.cached_at.isoformat(),
-        )
-    except Exception as e:
-        logger.error("claude_detection_startup_failed", error=str(e))
-        # Continue startup with fallback - detection service will provide fallback data
-        detection_service = ClaudeDetectionService(settings)
-        app.state.claude_detection_data = detection_service._get_fallback_data()
-        app.state.claude_detection_service = detection_service
-
-    # Initialize ClaudeSDKService and store in app state
-    try:
-        # Create auth manager with settings
-        auth_manager = CredentialsAuthManager()
-
-        # Get global metrics instance
-        metrics = get_metrics()
-
-        # Check if pooling should be enabled from settings configuration
-        use_pool = settings.claude.use_client_pool
-
-        # Initialize pool manager for dependency injection when pooling is enabled
-        pool_manager = None
-        if use_pool:
-            from ccproxy.claude_sdk.manager import get_pool_manager
-            from ccproxy.claude_sdk.pool import PoolConfig
-
-            pool_manager = await get_pool_manager()
-
-            # Create pool configuration from settings
-            pool_config = None
-            if hasattr(settings, "claude") and settings.claude.use_client_pool:
-                pool_settings = settings.claude.pool_settings
-                pool_config = PoolConfig(
-                    pool_size=pool_settings.pool_size,
-                    max_pool_size=pool_settings.max_pool_size,
-                    connection_timeout=pool_settings.connection_timeout,
-                    idle_timeout=pool_settings.idle_timeout,
-                    health_check_interval=pool_settings.health_check_interval,
-                    enable_health_checks=pool_settings.enable_health_checks,
-                )
-
-            # Pre-start the pool to populate it with clients
-            pool = await pool_manager.get_pool(config=pool_config)
-
-        # Create ClaudeSDKService instance
-        claude_service = ClaudeSDKService(
-            auth_manager=auth_manager,
-            metrics=metrics,
-            settings=settings,
-            use_pool=use_pool,
-            pool_manager=pool_manager,
-        )
-
-        # Store in app state for reuse in dependencies
-        app.state.claude_service = claude_service
-        logger.debug("claude_sdk_service_initialized")
-    except Exception as e:
-        logger.error("claude_sdk_service_initialization_failed", error=str(e))
-        # Continue startup even if ClaudeSDKService fails (graceful degradation)
-
-    # Start scheduler system
-    try:
-        scheduler = await start_scheduler(settings)
-        app.state.scheduler = scheduler
-        logger.debug("scheduler_initialized")
-    except SchedulerError as e:
-        logger.error("scheduler_initialization_failed", error=str(e))
-        # Continue startup even if scheduler fails (graceful degradation)
-
-    # Initialize log storage if needed and backend is duckdb
-    if (
-        settings.observability.needs_storage_backend
-        and settings.observability.log_storage_backend == "duckdb"
-    ):
-        try:
-            storage = SimpleDuckDBStorage(
-                database_path=settings.observability.duckdb_path
-            )
-            await storage.initialize()
-            app.state.log_storage = storage
-            logger.debug(
-                "log_storage_initialized",
-                backend="duckdb",
-                path=str(settings.observability.duckdb_path),
-                collection_enabled=settings.observability.logs_collection_enabled,
-            )
-        except Exception as e:
-            logger.error("log_storage_initialization_failed", error=str(e))
-            # Continue without log storage (graceful degradation)
-
-    # Initialize permission service (conditional on builtin_permissions)
-    if settings.claude.builtin_permissions:
-        try:
-            permission_service = get_permission_service()
-
-            # Only connect terminal handler if not using external handler
-            if settings.server.use_terminal_permission_handler:
-                # terminal_handler = TerminalPermissionHandler()
-
-                # TODO: Terminal handler should subscribe to events from the service
-                # instead of trying to set a handler directly
-                # The service uses an event-based architecture, not direct handlers
-
-                # logger.info(
-                #     "permission_handler_configured",
-                #     handler_type="terminal",
-                #     message="Connected terminal handler to permission service",
-                # )
-                # app.state.terminal_handler = terminal_handler
-                pass
-            else:
-                logger.debug(
-                    "permission_handler_configured",
-                    handler_type="external_sse",
-                    message="Terminal permission handler disabled - use 'ccproxy permission-handler connect' to handle permissions",
-                )
-                logger.warning(
-                    "permission_handler_required",
-                    message="Start external handler with: ccproxy permission-handler connect",
-                )
-
-            # Start the permission service
-            await permission_service.start()
-
-            # Store references in app state
-            app.state.permission_service = permission_service
-
-            logger.debug(
-                "permission_service_initialized",
-                timeout_seconds=permission_service._timeout_seconds,
-                terminal_handler_enabled=settings.server.use_terminal_permission_handler,
-                builtin_permissions_enabled=True,
-            )
-        except Exception as e:
-            logger.error("permission_service_initialization_failed", error=str(e))
-            # Continue without permission service (API will work but without prompts)
-    else:
-        logger.debug(
-            "permission_service_skipped",
-            builtin_permissions_enabled=False,
-            message="Built-in permission handling disabled - users can configure custom MCP servers and permission tools",
-        )
+                # Continue with graceful degradation
 
     yield
 
     # Shutdown
     logger.debug("server_stop")
 
-    # Flush any remaining streaming log batches
-    try:
-        from ccproxy.utils.simple_request_logger import flush_all_streaming_batches
+    # Execute shutdown-only components first
+    for shutdown_component in SHUTDOWN_ONLY_COMPONENTS:
+        if shutdown_component["shutdown"]:
+            component_name = shutdown_component["name"]
+            try:
+                logger.debug(f"stopping_{component_name.lower().replace(' ', '_')}")
+                await shutdown_component["shutdown"](app)
+            except Exception as e:
+                logger.error(
+                    f"{component_name.lower().replace(' ', '_')}_shutdown_failed",
+                    error=str(e),
+                    component=component_name,
+                )
 
-        await flush_all_streaming_batches()
-        logger.debug("streaming_batches_flushed")
-    except Exception as e:
-        logger.error("streaming_batches_flush_failed", error=str(e))
-
-    # Stop scheduler system
-    try:
-        scheduler = getattr(app.state, "scheduler", None)
-        await stop_scheduler(scheduler)
-        logger.debug("scheduler_stopped_lifespan")
-    except SchedulerError as e:
-        logger.error("scheduler_stop_failed", error=str(e))
-
-    # Stop permission service (if it was initialized)
-    if (
-        hasattr(app.state, "permission_service")
-        and app.state.permission_service
-        and settings.claude.builtin_permissions
-    ):
-        try:
-            await app.state.permission_service.stop()
-            logger.debug("permission_service_stopped")
-        except Exception as e:
-            logger.error("permission_service_stop_failed", error=str(e))
-
-    # Close log storage if initialized
-    if hasattr(app.state, "log_storage") and app.state.log_storage:
-        try:
-            await app.state.log_storage.close()
-            logger.debug("log_storage_closed")
-        except Exception as e:
-            logger.error("log_storage_close_failed", error=str(e))
-
-    # Shutdown global Claude SDK client pool if it was used
-    try:
-        from ccproxy.claude_sdk.manager import reset_pool_manager
-
-        await reset_pool_manager()
-        logger.debug("claude_sdk_pool_shutdown")
-    except Exception as e:
-        logger.error("claude_sdk_pool_shutdown_failed", error=str(e))
+    # Execute shutdown components in reverse order
+    for component in reversed(LIFECYCLE_COMPONENTS):
+        if component["shutdown"]:
+            component_name = component["name"]
+            try:
+                logger.debug(f"stopping_{component_name.lower().replace(' ', '_')}")
+                # Some shutdown functions need settings, others don't
+                if component_name == "Permission Service":
+                    await component["shutdown"](app, settings)  # type: ignore
+                else:
+                    await component["shutdown"](app)  # type: ignore
+            except Exception as e:
+                logger.error(
+                    f"{component_name.lower().replace(' ', '_')}_shutdown_failed",
+                    error=str(e),
+                    component=component_name,
+                )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -416,13 +254,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     setup_cors_middleware(app, settings)
     setup_error_handlers(app)
 
-    # Add request content logging middleware first (will run third due to middleware order)
+    # Add request content logging middleware first (will run fourth due to middleware order)
     app.add_middleware(RequestContentLoggingMiddleware)
 
-    # Add custom access log middleware second (will run second due to middleware order)
+    # Add custom access log middleware second (will run third due to middleware order)
     app.add_middleware(AccessLogMiddleware)
 
-    # Add request ID middleware third (will run first to initialize context)
+    # Add request ID middleware fourth (will run first to initialize context)
     app.add_middleware(RequestIDMiddleware)
 
     # Add server header middleware (for non-proxy routes)

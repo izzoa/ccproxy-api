@@ -63,19 +63,30 @@ async def log_request_access(
     path = path or ctx_metadata.get("path")
     status_code = status_code or ctx_metadata.get("status_code")
 
-    # Prepare comprehensive log data
+    # Prepare basic log data (always included)
     log_data = {
         "request_id": context.request_id,
         "method": method,
         "path": path,
         "query": query,
-        "status_code": status_code,
         "client_ip": client_ip,
         "user_agent": user_agent,
-        "duration_ms": context.duration_ms,
-        "duration_seconds": context.duration_seconds,
-        "error_message": error_message,
     }
+
+    # Add response-specific fields (only for completed requests)
+    is_streaming = ctx_metadata.get("streaming", False)
+    is_streaming_complete = ctx_metadata.get("event_type", "") == "streaming_complete"
+
+    # Include response fields only if this is not a streaming start
+    if not is_streaming or is_streaming_complete or ctx_metadata.get("error"):
+        log_data.update(
+            {
+                "status_code": status_code,
+                "duration_ms": context.duration_ms,
+                "duration_seconds": context.duration_seconds,
+                "error_message": error_message,
+            }
+        )
 
     # Add token and cost metrics if available
     token_fields = [
@@ -85,6 +96,7 @@ async def log_request_access(
         "cache_write_tokens",
         "cost_usd",
         "cost_sdk_usd",
+        "num_turns",
     ]
 
     for field in token_fields:
@@ -96,6 +108,24 @@ async def log_request_access(
     service_fields = ["endpoint", "model", "streaming", "service_type", "headers"]
 
     for field in service_fields:
+        value = ctx_metadata.get(field)
+        if value is not None:
+            log_data[field] = value
+
+    # Add session context metadata if available
+    session_fields = [
+        "session_id",
+        "session_type",  # "session_pool" or "direct"
+        "session_status",  # active, idle, connecting, etc.
+        "session_age_seconds",  # how long session has been alive
+        "session_message_count",  # number of messages in session
+        "session_pool_enabled",  # whether session pooling is enabled
+        "session_idle_seconds",  # how long since last activity
+        "session_error_count",  # number of errors in this session
+        "session_is_new",  # whether this is a newly created session
+    ]
+
+    for field in session_fields:
         value = ctx_metadata.get(field)
         if value is not None:
             log_data[field] = value
@@ -126,10 +156,6 @@ async def log_request_access(
     log_data = {k: v for k, v in log_data.items() if v is not None}
 
     logger = context.logger.bind(**log_data)
-    is_streaming = log_data.get("streaming", False)
-    is_streaming_complete = (
-        context.metadata.get("event_type", "") == "streaming_complete"
-    )
 
     if context.metadata.get("error"):
         logger.warn("access_log", exc_info=context.metadata.get("error"))
@@ -141,7 +167,7 @@ async def log_request_access(
     else:
         # if streaming is true, and not streaming_complete log as debug
         # real access_log will come later
-        logger.debug("access_log_streaming_start")
+        logger.info("access_log_streaming_start")
 
     # Store in DuckDB if available
     await _store_access_log(log_data, storage)
@@ -279,6 +305,17 @@ async def _store_access_log(
             "cache_write_tokens": log_data.get("cache_write_tokens", 0),
             "cost_usd": log_data.get("cost_usd", 0.0),
             "cost_sdk_usd": log_data.get("cost_sdk_usd", 0.0),
+            "num_turns": log_data.get("num_turns", 0),
+            # Session context metadata
+            "session_type": log_data.get("session_type", ""),
+            "session_status": log_data.get("session_status", ""),
+            "session_age_seconds": log_data.get("session_age_seconds", 0.0),
+            "session_message_count": log_data.get("session_message_count", 0),
+            "session_client_id": log_data.get("session_client_id", ""),
+            "session_pool_enabled": log_data.get("session_pool_enabled", False),
+            "session_idle_seconds": log_data.get("session_idle_seconds", 0.0),
+            "session_error_count": log_data.get("session_error_count", 0),
+            "session_is_new": log_data.get("session_is_new", True),
         }
 
         # Store asynchronously using queue-based DuckDB (prevents deadlocks)
