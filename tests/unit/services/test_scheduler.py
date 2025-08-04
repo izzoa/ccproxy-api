@@ -387,10 +387,11 @@ class TestSchedulerConfiguration:
         assert settings.enabled is True
         assert settings.max_concurrent_tasks == 10
         assert settings.graceful_shutdown_timeout == 30.0
-        assert settings.pricing_update_enabled is False
+        assert settings.pricing_update_enabled is True  # Enabled by default for privacy
         assert settings.pricing_update_interval_hours == 24
-        assert settings.pushgateway_enabled is False
-        assert settings.stats_printing_enabled is False  # Default is False
+        assert settings.pushgateway_enabled is False  # Disabled by default
+        assert settings.stats_printing_enabled is False  # Disabled by default
+        assert settings.version_check_enabled is True  # Enabled by default for privacy
 
     def test_scheduler_settings_environment_override(self) -> None:
         """Test scheduler settings from environment variables."""
@@ -488,6 +489,9 @@ class TestSchedulerManagerIntegration:
         settings.scheduler.stats_printing_interval_seconds = 60.0
         settings.scheduler.pricing_update_enabled = True
         settings.scheduler.pricing_update_interval_hours = 6
+        settings.scheduler.version_check_enabled = (
+            False  # Disable version check for this test
+        )
 
         with (
             patch("ccproxy.observability.metrics.get_metrics"),

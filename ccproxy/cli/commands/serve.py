@@ -10,6 +10,7 @@ import uvicorn
 from click import get_current_context
 from structlog import get_logger
 
+from ccproxy._version import __version__
 from ccproxy.cli.helpers import (
     get_rich_toolkit,
     is_running_in_docker,
@@ -709,7 +710,6 @@ def api(
 
         # Always reconfigure logging to ensure log level changes are picked up
         # Use JSON logs if explicitly requested via env var
-        print(f"{settings.server.log_level} {settings.server.log_file}")
         setup_logging(
             json_logs=settings.server.log_format == "json",
             log_level_name=settings.server.log_level,
@@ -729,6 +729,7 @@ def api(
         logger.info(
             "cli_command_starting",
             command="serve",
+            version=__version__,
             docker=docker,
             port=server_options.port,
             host=server_options.host,
@@ -896,6 +897,7 @@ def claude(
         logger.info(
             "cli_command_starting",
             command="claude",
+            version=__version__,
             docker=docker,
             args=args if args else [],
         )
