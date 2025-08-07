@@ -361,6 +361,139 @@ class HTTPRequestTransformer(RequestTransformer):
 
         return proxy_headers
 
+    def _count_cache_control_blocks(self, data: dict[str, Any]) -> dict[str, int]:
+        """Count cache_control blocks in different parts of the request.
+
+        Returns:
+            Dictionary with counts for 'injected_system', 'user_system', and 'messages'
+        """
+        counts = {"injected_system": 0, "user_system": 0, "messages": 0}
+
+        # Count in system field
+        system = data.get("system")
+        if system:
+            if isinstance(system, str):
+                # String system prompts don't have cache_control
+                pass
+            elif isinstance(system, list):
+                # Count cache_control in system prompt blocks
+                # The first block(s) are injected, rest are user's
+                injected_count = 0
+                for i, block in enumerate(system):
+                    if isinstance(block, dict) and "cache_control" in block:
+                        # Check if this is the injected prompt (contains Claude Code identity)
+                        text = block.get("text", "")
+                        if "Claude Code" in text or "Anthropic's official CLI" in text:
+                            counts["injected_system"] += 1
+                            injected_count = max(injected_count, i + 1)
+                        elif i < injected_count:
+                            # Part of injected system (multiple blocks)
+                            counts["injected_system"] += 1
+                        else:
+                            counts["user_system"] += 1
+
+        # Count in messages
+        messages = data.get("messages", [])
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and "cache_control" in block:
+                        counts["messages"] += 1
+
+        return counts
+
+    def _limit_cache_control_blocks(
+        self, data: dict[str, Any], max_blocks: int = 4
+    ) -> dict[str, Any]:
+        """Limit the number of cache_control blocks to comply with Anthropic's limit.
+
+        Priority order:
+        1. Injected system prompt cache_control (highest priority - Claude Code identity)
+        2. User's system prompt cache_control
+        3. User's message cache_control (lowest priority)
+
+        Args:
+            data: Request data dictionary
+            max_blocks: Maximum number of cache_control blocks allowed (default: 4)
+
+        Returns:
+            Modified data dictionary with cache_control blocks limited
+        """
+        import copy
+
+        # Deep copy to avoid modifying original
+        data = copy.deepcopy(data)
+
+        # Count existing blocks
+        counts = self._count_cache_control_blocks(data)
+        total = counts["injected_system"] + counts["user_system"] + counts["messages"]
+
+        if total <= max_blocks:
+            # No need to remove anything
+            return data
+
+        logger.warning(
+            "cache_control_limit_exceeded",
+            total_blocks=total,
+            max_blocks=max_blocks,
+            injected=counts["injected_system"],
+            user_system=counts["user_system"],
+            messages=counts["messages"],
+        )
+
+        # Calculate how many to remove
+        to_remove = total - max_blocks
+        removed = 0
+
+        # Remove from messages first (lowest priority)
+        if to_remove > 0 and counts["messages"] > 0:
+            messages = data.get("messages", [])
+            for msg in reversed(messages):  # Remove from end first
+                if removed >= to_remove:
+                    break
+                content = msg.get("content")
+                if isinstance(content, list):
+                    for block in reversed(content):
+                        if removed >= to_remove:
+                            break
+                        if isinstance(block, dict) and "cache_control" in block:
+                            del block["cache_control"]
+                            removed += 1
+                            logger.debug("removed_cache_control", location="message")
+
+        # Remove from user system prompts next
+        if removed < to_remove and counts["user_system"] > 0:
+            system = data.get("system")
+            if isinstance(system, list):
+                # Find and remove cache_control from user system blocks (non-injected)
+                for block in reversed(system):
+                    if removed >= to_remove:
+                        break
+                    if isinstance(block, dict) and "cache_control" in block:
+                        text = block.get("text", "")
+                        # Skip injected prompts (highest priority)
+                        if (
+                            "Claude Code" not in text
+                            and "Anthropic's official CLI" not in text
+                        ):
+                            del block["cache_control"]
+                            removed += 1
+                            logger.debug(
+                                "removed_cache_control", location="user_system"
+                            )
+
+        # In theory, we should never need to remove injected system cache_control
+        # but include this for completeness
+        if removed < to_remove:
+            logger.error(
+                "cannot_preserve_injected_cache_control",
+                needed_to_remove=to_remove,
+                actually_removed=removed,
+            )
+
+        return data
+
     def transform_request_body(
         self,
         body: bytes,
@@ -439,6 +572,9 @@ class HTTPRequestTransformer(RequestTransformer):
                 elif isinstance(existing_system, list):
                     # Both are lists, concatenate
                     data["system"] = detected_system + existing_system
+
+        # Limit cache_control blocks to comply with Anthropic's limit
+        data = self._limit_cache_control_blocks(data)
 
         return json.dumps(data).encode("utf-8")
 

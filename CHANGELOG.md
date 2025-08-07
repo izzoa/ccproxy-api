@@ -5,48 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.6] - 2025-08-04
+
+## [0.1.5] - 2025-08-03
 
 ### Added
 
 - **Advanced Session and Pool Management**:
-    - Implemented a robust session-aware pool for persistent Claude SDK connections, significantly improving performance and maintaining conversation continuity.
-    - Introduced a hybrid pooling system that automatically transfers clients from a general pool to the session pool upon receiving a session ID.
-    - Developed a queue-based streaming architecture to efficiently handle and broadcast messages to multiple listeners, improving session management and disconnection handling.
+  - Implemented a robust session-aware pool for persistent Claude SDK connections, significantly improving performance and maintaining conversation continuity.
+  - Introduced a hybrid pooling system that automatically transfers clients from a general pool to the session pool upon receiving a session ID.
+  - Developed a queue-based streaming architecture to efficiently handle and broadcast messages to multiple listeners, improving session management and disconnection handling.
 - **Enhanced Observability and Logging**:
-    - Upgraded logging capabilities to include detailed session metadata, providing deeper insights into session lifecycle and reuse.
-    - Implemented a pool monitoring system to track the health and performance of both general and session-based connection pools.
-    - Reduced logging noise by adjusting log levels for operational SDK messages, focusing on essential access logs, warnings, and errors.
+  - Upgraded logging capabilities to include detailed session metadata, providing deeper insights into session lifecycle and reuse.
+  - Implemented a pool monitoring system to track the health and performance of both general and session-based connection pools.
+  - Reduced logging noise by adjusting log levels for operational SDK messages, focusing on essential access logs, warnings, and errors.
 - **Improved Configuration and Control**:
-    - Introduced a `builtin_permissions` flag to provide granular control over the built-in permission handling infrastructure (MCP and SSE).
-    - Implemented configurable system prompt injection modes (`minimal` and `full`) to customize how the Claude Code identity is presented in requests.
+  - Introduced a `builtin_permissions` flag to provide granular control over the built-in permission handling infrastructure (MCP and SSE).
+  - Implemented configurable system prompt injection modes (`minimal` and `full`) to customize how the Claude Code identity is presented in requests.
 - **Robust Streaming and Header Management**:
-    - Implemented `StreamingResponseWithLogging` for unified and consistent access logging across all streaming endpoints.
-    - Ensured critical upstream headers (e.g., `cf-ray`, `anthropic-ratelimit-*`) are correctly forwarded in SSE streaming responses.
+  - Implemented `StreamingResponseWithLogging` for unified and consistent access logging across all streaming endpoints.
+  - Ensured critical upstream headers (e.g., `cf-ray`, `anthropic-ratelimit-*`) are correctly forwarded in SSE streaming responses.
 
 ### Changed
 
 - **Default Behavior**:
-    - The Claude SDK connection pool is now disabled by default, requiring an explicit opt-in for safer and more predictable behavior.
+  - The Claude SDK connection pool is now disabled by default, requiring an explicit opt-in for safer and more predictable behavior.
 - **Architectural Improvements**:
-    - Refactored the application's startup and shutdown logic into a modular, component-based architecture for better maintainability and testability.
-    - Renamed `SessionContext` to `SessionClient` for improved clarity and consistency in the session pooling implementation.
+  - Refactored the application's startup and shutdown logic into a modular, component-based architecture for better maintainability and testability.
+  - Renamed `SessionContext` to `SessionClient` for improved clarity and consistency in the session pooling implementation.
 - **Testing Infrastructure**:
-    - Reorganized the entire test suite into a hierarchical structure (`unit` and `integration`) to improve navigation and maintainability.
-    - Migrated from legacy test fixtures to a more flexible and maintainable factory pattern for creating test clients and application instances.
+  - Reorganized the entire test suite into a hierarchical structure (`unit` and `integration`) to improve navigation and maintainability.
+  - Migrated from legacy test fixtures to a more flexible and maintainable factory pattern for creating test clients and application instances.
 
 ### Fixed
 
 - **Session and Streaming Stability**:
-    - Eliminated critical race conditions and `AttributeError` exceptions in the session pool and stream handling logic.
-    - Replaced fragile `asyncio.sleep` calls with a robust, event-based synchronization mechanism to prevent timing-related failures.
-    - Implemented a more accurate message-based stale detection mechanism to prevent the incorrect termination of active sessions.
+  - Eliminated critical race conditions and `AttributeError` exceptions in the session pool and stream handling logic.
+  - Replaced fragile `asyncio.sleep` calls with a robust, event-based synchronization mechanism to prevent timing-related failures.
+  - Implemented a more accurate message-based stale detection mechanism to prevent the incorrect termination of active sessions.
 - **Resource Management**:
-    - Corrected several resource leak issues by improving stream interruption handling, ensuring that hanging sessions are properly cleaned up.
+  - Corrected several resource leak issues by improving stream interruption handling, ensuring that hanging sessions are properly cleaned up.
 - **Header and Content Formatting**:
-    - Resolved an issue that prevented the forwarding of upstream headers in SSE streaming responses.
-    - Fixed a formatting bug in the OpenAI adapter that caused message content to be improperly concatenated.
-
+  - Resolved an issue that prevented the forwarding of upstream headers in SSE streaming responses.
+  - Fixed a formatting bug in the OpenAI adapter that caused message content to be improperly concatenated.
 
 ### Added
 
