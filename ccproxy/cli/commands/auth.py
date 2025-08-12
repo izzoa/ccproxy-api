@@ -3,7 +3,12 @@
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
+
+
+if TYPE_CHECKING:
+    from ccproxy.auth.openai import OpenAIOAuthClient, OpenAITokenManager
+    from ccproxy.config.codex import CodexSettings
 
 import typer
 from rich import box
@@ -560,6 +565,310 @@ def renew(
         raise typer.Exit(1) from None
     except Exception as e:
         toolkit.print(f"Error during renewal: {e}", tag="error")
+        raise typer.Exit(1) from e
+
+
+# OpenAI Codex Authentication Commands
+
+
+def get_openai_token_manager() -> "OpenAITokenManager":
+    """Get OpenAI token manager dependency."""
+    from ccproxy.auth.openai import OpenAITokenManager
+
+    return OpenAITokenManager()
+
+
+def get_openai_oauth_client(settings: "CodexSettings") -> "OpenAIOAuthClient":
+    """Get OpenAI OAuth client dependency."""
+    from ccproxy.auth.openai import OpenAIOAuthClient
+
+    token_manager = get_openai_token_manager()
+    return OpenAIOAuthClient(settings, token_manager)
+
+
+@app.command(name="login-openai")
+def login_openai_command(
+    no_browser: Annotated[
+        bool,
+        typer.Option(
+            "--no-browser",
+            help="Don't automatically open browser for authentication",
+        ),
+    ] = False,
+) -> None:
+    """Login to OpenAI using OAuth authentication.
+
+    This command will start a local callback server and open your web browser
+    to authenticate with OpenAI. The credentials will be saved to ~/.codex/auth.json.
+
+    Examples:
+        ccproxy auth login-openai
+        ccproxy auth login-openai --no-browser
+    """
+    import asyncio
+
+    from ccproxy.config.codex import CodexSettings
+
+    toolkit = get_rich_toolkit()
+    toolkit.print("[bold cyan]OpenAI OAuth Login[/bold cyan]", centered=True)
+    toolkit.print_line()
+
+    try:
+        # Get Codex settings
+        settings = CodexSettings()
+
+        # Check if already logged in
+        token_manager = get_openai_token_manager()
+        existing_creds = asyncio.run(token_manager.load_credentials())
+
+        if existing_creds and not existing_creds.is_expired():
+            console.print(
+                "[yellow]You are already logged in with valid OpenAI credentials.[/yellow]"
+            )
+            console.print(
+                "Use [cyan]ccproxy auth openai-info[/cyan] to view current credentials."
+            )
+
+            overwrite = typer.confirm(
+                "Do you want to login again and overwrite existing credentials?"
+            )
+            if not overwrite:
+                console.print("Login cancelled.")
+                return
+
+        # Create OAuth client and perform login
+        oauth_client = get_openai_oauth_client(settings)
+
+        console.print("Starting OpenAI OAuth login process...")
+        console.print(
+            "A temporary server will start on port 1455 for the OAuth callback..."
+        )
+
+        if no_browser:
+            console.print("Browser will NOT be opened automatically.")
+        else:
+            console.print("Your browser will open for authentication.")
+
+        try:
+            credentials = asyncio.run(
+                oauth_client.authenticate(open_browser=not no_browser)
+            )
+
+            toolkit.print("Successfully logged in to OpenAI!", tag="success")
+
+            # Show credential info
+            console.print("\n[dim]Credential information:[/dim]")
+            console.print(f"  Account ID: {credentials.account_id}")
+            console.print(
+                f"  Expires: {credentials.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            )
+            console.print(f"  Active: {'Yes' if credentials.active else 'No'}")
+
+        except Exception as e:
+            logger.error(f"OpenAI login failed: {e}")
+            toolkit.print(f"Login failed: {e}", tag="error")
+            raise typer.Exit(1) from e
+
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Login cancelled by user.[/yellow]")
+        raise typer.Exit(1) from None
+    except Exception as e:
+        toolkit.print(f"Error during OpenAI login: {e}", tag="error")
+        raise typer.Exit(1) from e
+
+
+@app.command(name="logout-openai")
+def logout_openai_command() -> None:
+    """Logout from OpenAI and remove saved credentials.
+
+    This command will remove the OpenAI credentials file (~/.codex/auth.json)
+    and invalidate the current session.
+
+    Examples:
+        ccproxy auth logout-openai
+    """
+    import asyncio
+
+    toolkit = get_rich_toolkit()
+    toolkit.print("[bold cyan]OpenAI Logout[/bold cyan]", centered=True)
+    toolkit.print_line()
+
+    try:
+        token_manager = get_openai_token_manager()
+
+        # Check if credentials exist
+        existing_creds = asyncio.run(token_manager.load_credentials())
+        if not existing_creds:
+            console.print(
+                "[yellow]No OpenAI credentials found. Already logged out.[/yellow]"
+            )
+            return
+
+        # Confirm logout
+        confirm = typer.confirm(
+            "Are you sure you want to logout and remove OpenAI credentials?"
+        )
+        if not confirm:
+            console.print("Logout cancelled.")
+            return
+
+        # Delete credentials
+        success = asyncio.run(token_manager.delete_credentials())
+
+        if success:
+            toolkit.print("Successfully logged out from OpenAI!", tag="success")
+            console.print("OpenAI credentials have been removed.")
+        else:
+            toolkit.print("Failed to remove OpenAI credentials", tag="error")
+            raise typer.Exit(1)
+
+    except Exception as e:
+        toolkit.print(f"Error during OpenAI logout: {e}", tag="error")
+        raise typer.Exit(1) from e
+
+
+@app.command(name="openai-info")
+def openai_info_command() -> None:
+    """Display OpenAI credential information.
+
+    Shows detailed information about the current OpenAI credentials including
+    account ID, token expiration, and storage location.
+
+    Examples:
+        ccproxy auth openai-info
+    """
+    import asyncio
+    from datetime import UTC, datetime
+
+    from rich import box
+    from rich.table import Table
+
+    toolkit = get_rich_toolkit()
+    toolkit.print("[bold cyan]OpenAI Credential Information[/bold cyan]", centered=True)
+    toolkit.print_line()
+
+    try:
+        token_manager = get_openai_token_manager()
+        credentials = asyncio.run(token_manager.load_credentials())
+
+        if not credentials:
+            toolkit.print("No OpenAI credentials found", tag="error")
+            console.print("\n[dim]Expected location:[/dim]")
+            storage_location = token_manager.storage.get_location()
+            console.print(f"  - {storage_location}")
+            console.print("\n[dim]To login:[/dim]")
+            console.print("  ccproxy auth login-openai")
+            raise typer.Exit(1)
+
+        # Display account section
+        console.print("\n[bold]OpenAI Account[/bold]")
+        console.print(f"  L Account ID: {credentials.account_id}")
+        console.print(f"  L Status: {'Active' if credentials.active else 'Inactive'}")
+
+        # Create details table
+        console.print()
+        table = Table(
+            show_header=True,
+            header_style="bold cyan",
+            box=box.ROUNDED,
+            title="Credential Details",
+            title_style="bold white",
+        )
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="white")
+
+        # File location
+        storage_location = token_manager.storage.get_location()
+        table.add_row("Storage Location", storage_location)
+
+        # Token status
+        table.add_row(
+            "Token Expired",
+            "[red]Yes[/red]" if credentials.is_expired() else "[green]No[/green]",
+        )
+
+        # Expiration details
+        exp_dt = credentials.expires_at
+        table.add_row("Expires At", exp_dt.strftime("%Y-%m-%d %H:%M:%S UTC"))
+
+        # Time until expiration
+        now = datetime.now(UTC)
+        time_diff = exp_dt - now
+        if time_diff.total_seconds() > 0:
+            days = time_diff.days
+            hours = (time_diff.seconds % 86400) // 3600
+            minutes = (time_diff.seconds % 3600) // 60
+            table.add_row(
+                "Time Remaining", f"{days} days, {hours} hours, {minutes} minutes"
+            )
+        else:
+            table.add_row("Time Remaining", "[red]Expired[/red]")
+
+        # Token preview (first and last 8 chars)
+        if credentials.access_token:
+            token_preview = (
+                f"{credentials.access_token[:12]}...{credentials.access_token[-8:]}"
+            )
+            table.add_row("Access Token", f"[dim]{token_preview}[/dim]")
+
+        # Refresh token status
+        has_refresh = bool(credentials.refresh_token)
+        table.add_row(
+            "Refresh Token",
+            "[green]Available[/green]"
+            if has_refresh
+            else "[yellow]Not available[/yellow]",
+        )
+
+        console.print(table)
+
+        # Show usage instructions
+        console.print("\n[dim]Commands:[/dim]")
+        console.print("  ccproxy auth login-openai    - Re-authenticate")
+        console.print("  ccproxy auth logout-openai   - Remove credentials")
+
+    except Exception as e:
+        toolkit.print(f"Error getting OpenAI credential info: {e}", tag="error")
+        raise typer.Exit(1) from e
+
+
+@app.command(name="openai-status")
+def openai_status_command() -> None:
+    """Check OpenAI authentication status.
+
+    Quick status check for OpenAI credentials without detailed information.
+    Useful for scripts and automation.
+
+    Examples:
+        ccproxy auth openai-status
+    """
+    import asyncio
+
+    try:
+        token_manager = get_openai_token_manager()
+        credentials = asyncio.run(token_manager.load_credentials())
+
+        if not credentials:
+            console.print("[red]✗[/red] Not logged in to OpenAI")
+            raise typer.Exit(1)
+
+        if credentials.is_expired():
+            console.print("[yellow]⚠[/yellow] OpenAI credentials expired")
+            console.print(
+                f"  Expired: {credentials.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            )
+            raise typer.Exit(1)
+
+        console.print("[green]✓[/green] OpenAI credentials valid")
+        console.print(f"  Account: {credentials.account_id}")
+        console.print(
+            f"  Expires: {credentials.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        )
+
+    except SystemExit:
+        raise
+    except Exception as e:
+        console.print(f"[red]✗[/red] Error checking OpenAI status: {e}")
         raise typer.Exit(1) from e
 
 

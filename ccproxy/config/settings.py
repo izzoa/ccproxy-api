@@ -15,6 +15,7 @@ from ccproxy.config.discovery import find_toml_config_file
 
 from .auth import AuthSettings
 from .claude import ClaudeSettings
+from .codex import CodexSettings
 from .cors import CORSSettings
 from .docker_settings import DockerSettings
 from .observability import ObservabilitySettings
@@ -83,6 +84,12 @@ class Settings(BaseSettings):
     claude: ClaudeSettings = Field(
         default_factory=ClaudeSettings,
         description="Claude-specific configuration settings",
+    )
+
+    # Codex-specific settings
+    codex: CodexSettings = Field(
+        default_factory=CodexSettings,
+        description="OpenAI Codex-specific configuration settings",
     )
 
     # Proxy and authentication
@@ -166,6 +173,18 @@ class Settings(BaseSettings):
             return v
         if isinstance(v, dict):
             return ClaudeSettings(**v)
+        return v
+
+    @field_validator("codex", mode="before")
+    @classmethod
+    def validate_codex(cls, v: Any) -> Any:
+        """Validate and convert Codex settings."""
+        if v is None:
+            return CodexSettings()
+        if isinstance(v, CodexSettings):
+            return v
+        if isinstance(v, dict):
+            return CodexSettings(**v)
         return v
 
     @field_validator("reverse_proxy", mode="before")

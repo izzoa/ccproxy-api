@@ -18,6 +18,7 @@ from ccproxy.api.middleware.request_content_logging import (
 from ccproxy.api.middleware.request_id import RequestIDMiddleware
 from ccproxy.api.middleware.server_header import ServerHeaderMiddleware
 from ccproxy.api.routes.claude import router as claude_router
+from ccproxy.api.routes.codex import router as codex_router
 from ccproxy.api.routes.health import router as health_router
 from ccproxy.api.routes.mcp import setup_mcp
 from ccproxy.api.routes.metrics import (
@@ -33,9 +34,11 @@ from ccproxy.core.logging import setup_logging
 from ccproxy.utils.models_provider import get_models_list
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
+    check_codex_cli_startup,
     flush_streaming_batches_shutdown,
     initialize_claude_detection_startup,
     initialize_claude_sdk_startup,
+    initialize_codex_detection_startup,
     initialize_log_storage_shutdown,
     initialize_log_storage_startup,
     initialize_permission_service_startup,
@@ -79,8 +82,18 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "shutdown": None,  # Detection only, no cleanup needed
     },
     {
+        "name": "Codex CLI",
+        "startup": check_codex_cli_startup,
+        "shutdown": None,  # Detection only, no cleanup needed
+    },
+    {
         "name": "Claude Detection",
         "startup": initialize_claude_detection_startup,
+        "shutdown": None,  # No cleanup needed
+    },
+    {
+        "name": "Codex Detection",
+        "startup": initialize_codex_detection_startup,
         "shutdown": None,  # No cleanup needed
     },
     {
@@ -281,6 +294,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.include_router(dashboard_router, tags=["dashboard"])
 
     app.include_router(oauth_router, prefix="/oauth", tags=["oauth"])
+
+    # Codex routes for OpenAI integration
+    app.include_router(codex_router, tags=["codex"])
 
     # New /sdk/ routes for Claude SDK endpoints
     app.include_router(claude_router, prefix="/sdk", tags=["claude-sdk"])

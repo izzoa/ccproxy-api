@@ -1,12 +1,24 @@
 # CCProxy API Server
 
-`ccproxy` is a local reverse proxy server for Anthropic Claude LLM at `api.anthropic.com/v1/messages`. It allows you to use your existing Claude Max subscription to interact with the Anthropic API, bypassing the need for separate API key billing.
+`ccproxy` is a local reverse proxy server that provides unified access to multiple AI providers through a single interface. It supports both Anthropic Claude and OpenAI Codex backends, allowing you to use your existing subscriptions without separate API key billing.
+
+## Supported Providers
+
+### Anthropic Claude
+Access Claude via your Claude Max subscription at `api.anthropic.com/v1/messages`.
 
 The server provides two primary modes of operation:
 *   **SDK Mode (`/sdk`):** Routes requests through the local `claude-code-sdk`. This enables access to tools configured in your Claude environment and includes an integrated MCP (Model Context Protocol) server for permission management.
 *   **API Mode (`/api`):** Acts as a direct reverse proxy, injecting the necessary authentication headers. This provides full access to the underlying API features and model settings.
 
-It includes a translation layer to support both Anthropic and OpenAI-compatible API formats for requests and responses, including streaming.
+### OpenAI Codex (Experimental)
+Access OpenAI models via your ChatGPT subscription at `chatgpt.com/backend-api/codex`.
+
+*   **Codex Routes (`/codex`):** Direct reverse proxy to ChatGPT backend with session management
+*   **Session Management:** Supports both auto-generated and persistent session IDs
+*   **OpenAI OAuth:** Integrated authentication flow matching Codex CLI
+
+The server includes a translation layer to support both Anthropic and OpenAI-compatible API formats for requests and responses, including streaming.
 
 ## Installation
 
@@ -36,7 +48,9 @@ For dev version replace `ccproxy-api` with `git+https://github.com/caddyglow/ccp
 
 ## Authentication
 
-The proxy uses two different authentication mechanisms depending on the mode.
+The proxy uses different authentication mechanisms depending on the provider and mode.
+
+### Claude Authentication
 
 1.  **Claude CLI (`sdk` mode):**
     This mode relies on the authentication handled by the `claude-code-sdk`.
@@ -46,9 +60,9 @@ The proxy uses two different authentication mechanisms depending on the mode.
 
     It's also possible now to get a long live token to avoid renewing issues
     using
-    ```sh
     ```bash
-    claude setup-token`
+    claude setup-token
+    ```
 
 2.  **ccproxy (`api` mode):**
     This mode uses its own OAuth2 flow to obtain credentials for direct API access.
@@ -58,9 +72,33 @@ The proxy uses two different authentication mechanisms depending on the mode.
 
     If you are already connected with Claude CLI the credentials should be found automatically
 
-You can check the status of these credentials with `ccproxy auth validate` and `ccproxy auth info`.
+### OpenAI Codex Authentication (Experimental)
 
-Warning is show on start up if no credentials are setup.
+For OpenAI Codex routes, use the dedicated OpenAI OAuth flow:
+
+```bash
+# Enable Codex provider
+ccproxy config codex --enable
+
+# Login with OpenAI OAuth (opens browser)
+ccproxy auth login-openai
+
+# Check authentication status for all providers
+ccproxy auth status
+```
+
+The OpenAI authentication uses the same OAuth flow as the official Codex CLI, storing credentials in `~/.openai.toml`.
+
+### Authentication Status
+
+You can check the status of all credentials with:
+```bash
+ccproxy auth status       # All providers
+ccproxy auth validate     # Claude only
+ccproxy auth info         # Claude only
+```
+
+Warning is shown on startup if no credentials are setup.
 
 ## Usage
 
@@ -76,7 +114,7 @@ The server will start on `http://127.0.0.1:8000` by default.
 
 Point your existing tools and applications to the local proxy instance by setting the appropriate environment variables. A dummy API key is required by most client libraries but is not used by the proxy itself.
 
-**For OpenAI-compatible clients:**
+**For Claude (OpenAI-compatible clients):**
 ```bash
 # For SDK mode
 export OPENAI_BASE_URL="http://localhost:8000/sdk/v1"
@@ -86,7 +124,7 @@ export OPENAI_BASE_URL="http://localhost:8000/api/v1"
 export OPENAI_API_KEY="dummy-key"
 ```
 
-**For Anthropic-compatible clients:**
+**For Claude (Anthropic-compatible clients):**
 ```bash
 # For SDK mode
 export ANTHROPIC_BASE_URL="http://localhost:8000/sdk"
@@ -95,6 +133,27 @@ export ANTHROPIC_BASE_URL="http://localhost:8000/api"
 
 export ANTHROPIC_API_KEY="dummy-key"
 ```
+
+**For OpenAI Codex:**
+```bash
+# Direct API calls to Codex endpoints
+curl -X POST http://localhost:8000/codex/responses \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Hello"}]}'
+
+# With specific session ID
+curl -X POST http://localhost:8000/codex/my_session_123/responses \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+### Codex Session Management
+
+The Codex provider supports flexible session management:
+
+- **Auto-generated sessions**: `POST /codex/responses` - New session ID per request
+- **Persistent sessions**: `POST /codex/{session_id}/responses` - Use specific session ID
+- **Header forwarding**: `session_id` header is always forwarded when present
 
 
 ## MCP Server Integration & Permission System

@@ -226,7 +226,7 @@ class ClaudeSettings(BaseModel):
             # Extract default values as a dict for merging
             default_values = {
                 "mcp_servers": dict(defaults.mcp_servers)
-                if defaults.mcp_servers
+                if isinstance(defaults.mcp_servers, dict)
                 else {},
                 "permission_prompt_tool_name": defaults.permission_prompt_tool_name,
             }
