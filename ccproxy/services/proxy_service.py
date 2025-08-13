@@ -554,7 +554,7 @@ class ProxyService:
                                 headers=dict(response.headers),
                                 stream_type="codex_sse",
                             )
-                            
+
                             # Check if upstream actually returned streaming
                             content_type = response.headers.get("content-type", "")
                             if "text/event-stream" not in content_type:
@@ -563,7 +563,7 @@ class ProxyService:
                                     content_type=content_type,
                                     status_code=response.status_code,
                                 )
-                            
+
                             async for chunk in response.aiter_bytes():
                                 chunk_count += 1
                                 chunk_size = len(chunk)
@@ -625,7 +625,7 @@ class ProxyService:
                         upstream_is_streaming=upstream_is_streaming,
                         transfer_encoding=transfer_encoding,
                     )
-                    
+
                     if upstream_is_streaming:
                         # Upstream is streaming but user didn't request streaming
                         # Collect all streaming data and return as JSON

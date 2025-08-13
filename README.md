@@ -5,20 +5,23 @@
 ## Supported Providers
 
 ### Anthropic Claude
+
 Access Claude via your Claude Max subscription at `api.anthropic.com/v1/messages`.
 
 The server provides two primary modes of operation:
-*   **SDK Mode (`/sdk`):** Routes requests through the local `claude-code-sdk`. This enables access to tools configured in your Claude environment and includes an integrated MCP (Model Context Protocol) server for permission management.
-*   **API Mode (`/api`):** Acts as a direct reverse proxy, injecting the necessary authentication headers. This provides full access to the underlying API features and model settings.
+
+- **SDK Mode (`/sdk`):** Routes requests through the local `claude-code-sdk`. This enables access to tools configured in your Claude environment and includes an integrated MCP (Model Context Protocol) server for permission management.
+- **API Mode (`/api`):** Acts as a direct reverse proxy, injecting the necessary authentication headers. This provides full access to the underlying API features and model settings.
 
 ### OpenAI Codex Response API (Experimental)
+
 Access OpenAI's [Response API](https://platform.openai.com/docs/api-reference/responses) via your ChatGPT Plus subscription. This provides programmatic access to ChatGPT models through the `chatgpt.com/backend-api/codex` endpoint.
 
-*   **Response API (`/codex/responses`):** Direct reverse proxy to ChatGPT backend for conversation responses
-*   **Session Management:** Supports both auto-generated and persistent session IDs for conversation continuity
-*   **OpenAI OAuth:** Uses the same OAuth2 PKCE authentication flow as the official Codex CLI
-*   **ChatGPT Plus Required:** Requires an active ChatGPT Plus subscription for API access
-*   **Instruction Prompt:** Automatically injects the Codex instruction prompt into conversations
+- **Response API (`/codex/responses`):** Direct reverse proxy to ChatGPT backend for conversation responses
+- **Session Management:** Supports both auto-generated and persistent session IDs for conversation continuity
+- **OpenAI OAuth:** Uses the same OAuth2 PKCE authentication flow as the official Codex CLI
+- **ChatGPT Plus Required:** Requires an active ChatGPT Plus subscription for API access
+- **Instruction Prompt:** Automatically injects the Codex instruction prompt into conversations
 
 The server includes a translation layer to support both Anthropic and OpenAI-compatible API formats for requests and responses, including streaming.
 
@@ -45,7 +48,6 @@ eval "$(ccproxy --show-completion zsh)"  # For zsh
 eval "$(ccproxy --show-completion bash)" # For bash
 ```
 
-
 For dev version replace `ccproxy-api` with `git+https://github.com/caddyglow/ccproxy-api.git@dev`
 
 ## Authentication
@@ -56,18 +58,21 @@ The proxy uses different authentication mechanisms depending on the provider and
 
 1.  **Claude CLI (`sdk` mode):**
     This mode relies on the authentication handled by the `claude-code-sdk`.
+
     ```bash
     claude /login
     ```
 
     It's also possible now to get a long live token to avoid renewing issues
     using
+
     ```bash
     claude setup-token
     ```
 
 2.  **ccproxy (`api` mode):**
     This mode uses its own OAuth2 flow to obtain credentials for direct API access.
+
     ```bash
     ccproxy auth login
     ```
@@ -100,6 +105,7 @@ ccproxy auth status
 ```
 
 **Important Notes:**
+
 - Credentials are stored in `$HOME/.codex/auth.json`
 - CCProxy reuses existing Codex CLI credentials when available
 - If credentials are expired, CCProxy attempts automatic renewal
@@ -108,6 +114,7 @@ ccproxy auth status
 ### Authentication Status
 
 You can check the status of all credentials with:
+
 ```bash
 ccproxy auth status       # All providers
 ccproxy auth validate     # Claude only
@@ -124,6 +131,7 @@ Warning is shown on startup if no credentials are setup.
 # Start the proxy server
 ccproxy
 ```
+
 The server will start on `http://127.0.0.1:8000` by default.
 
 ### Client Configuration
@@ -131,6 +139,7 @@ The server will start on `http://127.0.0.1:8000` by default.
 Point your existing tools and applications to the local proxy instance by setting the appropriate environment variables. A dummy API key is required by most client libraries but is not used by the proxy itself.
 
 **For Claude (OpenAI-compatible clients):**
+
 ```bash
 # For SDK mode
 export OPENAI_BASE_URL="http://localhost:8000/sdk/v1"
@@ -141,6 +150,7 @@ export OPENAI_API_KEY="dummy-key"
 ```
 
 **For Claude (Anthropic-compatible clients):**
+
 ```bash
 # For SDK mode
 export ANTHROPIC_BASE_URL="http://localhost:8000/sdk"
@@ -151,12 +161,13 @@ export ANTHROPIC_API_KEY="dummy-key"
 ```
 
 **For OpenAI Codex Response API:**
+
 ```bash
 # Create a new conversation response (auto-generated session)
 curl -X POST http://localhost:8000/codex/responses \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4",
+    "model": "gpt-5",
     "messages": [
       {"role": "user", "content": "Hello, can you help me with Python?"}
     ]
@@ -166,7 +177,7 @@ curl -X POST http://localhost:8000/codex/responses \
 curl -X POST http://localhost:8000/codex/my_session_123/responses \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4",
+    "model": "gpt-5",
     "messages": [
       {"role": "user", "content": "Show me an example of async/await"}
     ]
@@ -176,17 +187,36 @@ curl -X POST http://localhost:8000/codex/my_session_123/responses \
 curl -X POST http://localhost:8000/codex/responses \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4",
+    "model": "gpt-5",
     "messages": [{"role": "user", "content": "Explain quantum computing"}],
     "stream": true
   }'
 ```
+
+**For OpenAI-compatible clients using Codex:**
+
+```yaml
+# Example aichat configuration (~/.config/aichat/config.yaml)
+clients:
+  - type: claude
+    api_base: http://127.0.0.1:8000/codex
+
+# Usage
+aichat --model openai:gpt-5 "hello"
+```
+
+**Important Codex Limitations:**
+
+- Limited model support (e.g., `gpt-5` works, others may not)
+- Many OpenAI parameters not supported (temperature, top_p, etc.)
+- Reasoning content appears in XML tags for capable models
 
 **Note:** The Codex instruction prompt is automatically injected into all conversations to maintain compatibility with the ChatGPT backend.
 
 ### Codex Response API Details
 
 #### Session Management
+
 The Codex Response API supports flexible session management for conversation continuity:
 
 - **Auto-generated sessions**: `POST /codex/responses` - Creates a new session ID for each request
@@ -194,6 +224,7 @@ The Codex Response API supports flexible session management for conversation con
 - **Header forwarding**: Optional `session_id` header for custom session tracking
 
 #### Instruction Prompt Injection
+
 **Important:** CCProxy automatically injects the Codex instruction prompt into every conversation. This is required for proper interaction with the ChatGPT backend but affects your token usage:
 
 - The instruction prompt is prepended to your messages
@@ -202,12 +233,13 @@ The Codex Response API supports flexible session management for conversation con
 - You cannot disable this injection as it's required by the backend
 
 #### Model Differences
+
 The Response API models differ from standard OpenAI API models:
+
 - Uses ChatGPT Plus models (e.g., `gpt-4`, `gpt-4-turbo`)
 - Model behavior matches ChatGPT web interface
 - Token limits and pricing follow ChatGPT Plus subscription terms
 - See [OpenAI Response API Documentation](https://platform.openai.com/docs/api-reference/responses) for details
-
 
 ## MCP Server Integration & Permission System
 
@@ -216,6 +248,7 @@ In SDK mode, CCProxy automatically configures an MCP (Model Context Protocol) se
 ### Permission Management
 
 **Starting the Permission Handler:**
+
 ```bash
 # In a separate terminal, start the permission handler
 ccproxy permission-handler
@@ -225,12 +258,14 @@ ccproxy permission-handler --host 127.0.0.1 --port 8000
 ```
 
 The permission handler provides:
+
 - **Real-time Permission Requests**: Streams permission requests via Server-Sent Events (SSE)
 - **Interactive Approval/Denial**: Command-line interface for managing tool permissions
 - **Automatic MCP Integration**: Works seamlessly with Claude Code SDK tools
 
 **Working Directory Control:**
 Control which project the Claude SDK API can access using the `--cwd` flag:
+
 ```bash
 # Set working directory for Claude SDK
 ccproxy --claude-code-options-cwd /path/to/your/project
@@ -254,6 +289,7 @@ CCProxy supports flexible message formatting through the `sdk_message_mode` conf
 - **`ignore`**: Filters out Claude SDK-specific content entirely
 
 Configure via environment variables:
+
 ```bash
 # Use formatted XML output
 CLAUDE__SDK_MESSAGE_MODE=formatted ccproxy
@@ -267,11 +303,13 @@ CLAUDE__PRETTY_FORMAT=false ccproxy
 CCProxy supports connection pooling for Claude Code SDK clients to improve request performance by maintaining a pool of pre-initialized Claude instances.
 
 ### Benefits
+
 - **Reduced Latency**: Eliminates Claude Code startup overhead on each request
 - **Improved Performance**: Reuses established connections for faster response times
 - **Resource Efficiency**: Maintains a configurable pool size to balance performance and resource usage
 
 ### Usage
+
 Pool mode is disabled by default and can be enabled using the CLI flag:
 
 ```bash
@@ -283,6 +321,7 @@ ccproxy --sdk-enable-pool --sdk-pool-size 5
 ```
 
 ### Limitations
+
 - **No Dynamic Options**: Pool instances cannot change Claude options (max_tokens, model, etc.) after initialization
 - **Shared Configuration**: All requests using the pool must use identical Claude configuration
 - **Memory Usage**: Each pool instance consumes additional memory
@@ -294,6 +333,7 @@ Pool mode is most effective for high-frequency requests with consistent configur
 CCProxy works seamlessly with Aider and other AI coding assistants:
 
 ### Anthropic Mode
+
 ```bash
 export ANTHROPIC_API_KEY=dummy
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8000/api
@@ -320,6 +360,30 @@ export OPENAI_BASE_URL=http://127.0.0.1:8000/api/v1
 aider --model o3-mini
 ```
 
+### Using with OpenAI Codex
+
+For tools that support custom API bases, you can use the Codex provider. Note that this has significant limitations compared to Claude providers.
+
+**Example with aichat:**
+
+```yaml
+# ~/.config/aichat/config.yaml
+clients:
+  - type: claude
+    api_base: http://127.0.0.1:8000/codex
+```
+
+```bash
+# Usage with confirmed working model
+aichat --model openai:gpt-5 "hello"
+```
+
+**Codex Limitations:**
+
+- Only select models work (gpt-5 confirmed, others may fail)
+- No support for temperature, top_p, or most OpenAI parameters
+- When using reasoning models, reasoning appears as XML tags in output
+
 ### `curl` Example
 
 ```bash
@@ -341,6 +405,7 @@ curl -X POST http://localhost:8000/api/v1/messages \
     "max_tokens": 100
   }'
 ```
+
 More examples are available in the `examples/` directory.
 
 ## Endpoints
@@ -349,57 +414,72 @@ The proxy exposes endpoints under multiple prefixes for different providers and 
 
 ### Claude Endpoints
 
-| Mode | URL Prefix | Description | Use Case |
-|------|------------|-------------|----------|
-| **SDK** | `/sdk/` | Uses `claude-code-sdk` with its configured tools. | Accessing Claude with local tools. |
-| **API** | `/api/` | Direct proxy with header injection. | Full API control, direct access. |
+| Mode    | URL Prefix | Description                                       | Use Case                           |
+| ------- | ---------- | ------------------------------------------------- | ---------------------------------- |
+| **SDK** | `/sdk/`    | Uses `claude-code-sdk` with its configured tools. | Accessing Claude with local tools. |
+| **API** | `/api/`    | Direct proxy with header injection.               | Full API control, direct access.   |
 
-*   **Anthropic Format:**
-    *   `POST /sdk/v1/messages`
-    *   `POST /api/v1/messages`
-*   **OpenAI-Compatible Format:**
-    *   `POST /sdk/v1/chat/completions`
-    *   `POST /api/v1/chat/completions`
+- **Anthropic Format:**
+  - `POST /sdk/v1/messages`
+  - `POST /api/v1/messages`
+- **OpenAI-Compatible Format:**
+  - `POST /sdk/v1/chat/completions`
+  - `POST /api/v1/chat/completions`
 
 ### OpenAI Codex Endpoints
 
-*   **Response API:**
-    *   `POST /codex/responses` - Create response with auto-generated session
-    *   `POST /codex/{session_id}/responses` - Create response with persistent session
-    *   Supports streaming via SSE when `stream: true` is set
-    *   See [Response API docs](https://platform.openai.com/docs/api-reference/responses)
+- **Response API:**
+  - `POST /codex/responses` - Create response with auto-generated session
+  - `POST /codex/{session_id}/responses` - Create response with persistent session
+  - `POST /codex/chat/completions` - OpenAI-compatible chat completions endpoint
+  - `POST /codex/v1/chat/completions` - Alternative OpenAI-compatible endpoint
+  - Supports streaming via SSE when `stream: true` is set
+  - See [Response API docs](https://platform.openai.com/docs/api-reference/responses)
+
+**Codex Chat Completions Limitations:**
+
+- **No Tool/Function Calling Support**: Tool use and function calling are not supported (use `/codex/responses` for tool calls)
+- **Limited Parameter Support**: Many OpenAI parameters (temperature, top_p, frequency_penalty, etc.) are not supported
+- **Restricted Model Support**: Only certain models work (e.g., `gpt-5` confirmed working, others may fail)
+- **No Custom System Prompts**: System messages and instructions are overridden by the required Codex instruction prompt
+- **Reasoning Mode**: GPT models with reasoning capabilities pass reasoning content between XML tags (`<reasoning>...</reasoning>`)
+- **Session Management**: Uses auto-generated sessions; persistent sessions require the `/codex/{session_id}/responses` endpoint
+- **ChatGPT Plus Required**: Requires active ChatGPT Plus subscription for access
+
+**Note**: The `/codex/responses` endpoint supports tool calling and more parameters, but specific feature availability depends on ChatGPT's backend - users should test individual capabilities.
 
 ### Utility Endpoints
 
-*   **Health & Status:**
-    *   `GET /health`
-    *   `GET /sdk/models`, `GET /api/models`
-    *   `GET /sdk/status`, `GET /api/status`
-*   **Authentication:**
-    *   `GET /oauth/callback` - OAuth callback for both Claude and OpenAI
-*   **MCP & Permissions:**
-    *   `POST /mcp/permission/check` - MCP permission checking endpoint
-    *   `GET /permissions/stream` - SSE stream for permission requests
-    *   `GET /permissions/{id}` - Get permission request details
-    *   `POST /permissions/{id}/respond` - Respond to permission request
-*   **Observability (Optional):**
-    *   `GET /metrics`
-    *   `GET /logs/status`, `GET /logs/query`
-    *   `GET /dashboard`
+- **Health & Status:**
+  - `GET /health`
+  - `GET /sdk/models`, `GET /api/models`
+  - `GET /sdk/status`, `GET /api/status`
+- **Authentication:**
+  - `GET /oauth/callback` - OAuth callback for both Claude and OpenAI
+- **MCP & Permissions:**
+  - `POST /mcp/permission/check` - MCP permission checking endpoint
+  - `GET /permissions/stream` - SSE stream for permission requests
+  - `GET /permissions/{id}` - Get permission request details
+  - `POST /permissions/{id}/respond` - Respond to permission request
+- **Observability (Optional):**
+  - `GET /metrics`
+  - `GET /logs/status`, `GET /logs/query`
+  - `GET /dashboard`
 
 ## Supported Models
 
 CCProxy supports recent Claude models including Opus, Sonnet, and Haiku variants. The specific models available to you will depend on your Claude account and the features enabled for your subscription.
 
- * `claude-opus-4-20250514`
- * `claude-sonnet-4-20250514`
- * `claude-3-7-sonnet-20250219`
- * `claude-3-5-sonnet-20241022`
- * `claude-3-5-sonnet-20240620`
+- `claude-opus-4-20250514`
+- `claude-sonnet-4-20250514`
+- `claude-3-7-sonnet-20250219`
+- `claude-3-5-sonnet-20241022`
+- `claude-3-5-sonnet-20240620`
 
 ## Configuration
 
 Settings can be configured through (in order of precedence):
+
 1. Command-line arguments
 2. Environment variables
 3. `.env` file
@@ -420,12 +500,14 @@ SERVER__PORT=8080
 You can enable token authentication for the proxy. This supports multiple header formats (`x-api-key` for Anthropic, `Authorization: Bearer` for OpenAI) for compatibility with standard client libraries.
 
 **1. Generate a Token:**
+
 ```bash
 ccproxy generate-token
 # Output: SECURITY__AUTH_TOKEN=abc123xyz789...
 ```
 
 **2. Configure the Token:**
+
 ```bash
 # Set environment variable
 export SECURITY__AUTH_TOKEN=abc123xyz789...
@@ -436,6 +518,7 @@ echo "SECURITY__AUTH_TOKEN=abc123xyz789..." >> .env
 
 **3. Use in Requests:**
 When authentication is enabled, include the token in your API requests.
+
 ```bash
 # Anthropic Format (x-api-key)
 curl -H "x-api-key: your-token" ...
@@ -448,10 +531,10 @@ curl -H "Authorization: Bearer your-token" ...
 
 `ccproxy` includes an optional but powerful observability suite for monitoring and analytics. When enabled, it provides:
 
-*   **Prometheus Metrics:** A `/metrics` endpoint for real-time operational monitoring.
-*   **Access Log Storage:** Detailed request logs, including token usage and costs, are stored in a local DuckDB database.
-*   **Analytics API:** Endpoints to query and analyze historical usage data.
-*   **Real-time Dashboard:** A live web interface at `/dashboard` to visualize metrics and request streams.
+- **Prometheus Metrics:** A `/metrics` endpoint for real-time operational monitoring.
+- **Access Log Storage:** Detailed request logs, including token usage and costs, are stored in a local DuckDB database.
+- **Analytics API:** Endpoints to query and analyze historical usage data.
+- **Real-time Dashboard:** A live web interface at `/dashboard` to visualize metrics and request streams.
 
 These features are disabled by default and can be enabled via configuration. For a complete guide on setting up and using these features, see the [Observability Documentation](docs/observability.md).
 

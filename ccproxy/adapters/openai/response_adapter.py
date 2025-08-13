@@ -20,6 +20,7 @@ from ccproxy.adapters.openai.models import (
     OpenAIChatCompletionResponse,
     OpenAIChoice,
     OpenAIResponseMessage,
+    OpenAIUsage,
 )
 from ccproxy.adapters.openai.response_models import (
     ResponseCompleted,
@@ -145,11 +146,14 @@ class ResponseAdapter:
                             content += content_block.get("text", "")
 
         # Build Chat Completions response
+        usage_data = response.get("usage") if isinstance(response, dict) else None
+        converted_usage = self._convert_usage(usage_data) if usage_data else None
+        
         return OpenAIChatCompletionResponse(
-            id=response.get("id", f"resp_{uuid.uuid4().hex}"),
+            id=response.get("id", f"resp_{uuid.uuid4().hex}") if isinstance(response, dict) else f"resp_{uuid.uuid4().hex}",
             object="chat.completion",
-            created=response.get("created_at", int(time.time())),
-            model=response.get("model", "gpt-5"),
+            created=response.get("created_at", int(time.time())) if isinstance(response, dict) else int(time.time()),
+            model=response.get("model", "gpt-5") if isinstance(response, dict) else "gpt-5",
             choices=[
                 OpenAIChoice(
                     index=0,
@@ -159,10 +163,8 @@ class ResponseAdapter:
                     finish_reason="stop",
                 )
             ],
-            usage=self._convert_usage(response.get("usage"))
-            if response.get("usage")
-            else None,
-            system_fingerprint=response.get("safety_identifier"),
+            usage=converted_usage,
+            system_fingerprint=response.get("safety_identifier") if isinstance(response, dict) else None,
         )
 
     async def stream_response_to_chat(
@@ -299,7 +301,7 @@ class ResponseAdapter:
                             has_usage=usage is not None,
                         )
 
-                        yield {
+                        chunk_data = {
                             "id": stream_id,
                             "object": "chat.completion.chunk",
                             "created": created,
@@ -307,8 +309,14 @@ class ResponseAdapter:
                             "choices": [
                                 {"index": 0, "delta": {}, "finish_reason": "stop"}
                             ],
-                            "usage": self._convert_usage(usage) if usage else None,
                         }
+                        
+                        # Add usage if available
+                        converted_usage = self._convert_usage(usage) if usage else None
+                        if converted_usage:
+                            chunk_data["usage"] = converted_usage.model_dump()
+                            
+                        yield chunk_data
 
         logger.debug(
             "response_adapter_stream_finished",
@@ -320,16 +328,16 @@ class ResponseAdapter:
 
     def _convert_usage(
         self, response_usage: dict[str, Any] | None
-    ) -> dict[str, Any] | None:
+    ) -> OpenAIUsage | None:
         """Convert Response API usage to Chat Completions format."""
         if not response_usage:
             return None
 
-        return {
-            "prompt_tokens": response_usage.get("input_tokens", 0),
-            "completion_tokens": response_usage.get("output_tokens", 0),
-            "total_tokens": response_usage.get("total_tokens", 0),
-        }
+        return OpenAIUsage(
+            prompt_tokens=response_usage.get("input_tokens", 0),
+            completion_tokens=response_usage.get("output_tokens", 0),
+            total_tokens=response_usage.get("total_tokens", 0),
+        )
 
     def _get_default_codex_instructions(self) -> str:
         """Get default Codex CLI instructions."""

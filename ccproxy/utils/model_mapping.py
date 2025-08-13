@@ -9,6 +9,7 @@ from __future__ import annotations
 
 # Combined mapping: OpenAI models → Claude models AND Claude aliases → canonical Claude models
 MODEL_MAPPING: dict[str, str] = {
+    "gpt-5": "claude-sonnet-4-20250514",
     # OpenAI GPT-4 models → Claude 3.5 Sonnet (most comparable)
     "gpt-4": "claude-3-5-sonnet-20241022",
     "gpt-4-turbo": "claude-3-5-sonnet-20241022",
@@ -80,11 +81,12 @@ def map_model_to_claude(model_name: str) -> str:
         return "claude-3-7-sonnet-20250219"
     elif model_name.startswith("gpt-3.5"):
         return "claude-3-5-haiku-latest"
-    elif model_name.startswith("o1"):
-        return "claude-sonnet-4-20250514"
-    elif model_name.startswith("o3"):
-        return "claude-opus-4-20250514"
-    elif model_name.startswith("gpt"):
+    elif (
+        model_name.startswith("o1")
+        or model_name.startswith("gpt-5")
+        or model_name.startswith("o3")
+        or model_name.startswith("gpt")
+    ):
         return "claude-sonnet-4-20250514"
 
     # If it's already a Claude model, pass through unchanged

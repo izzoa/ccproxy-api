@@ -245,7 +245,7 @@ async def codex_chat_completions(
                         # Check if we got a streaming response
                         content_type = response.headers.get("content-type", "")
                         transfer_encoding = response.headers.get("transfer-encoding", "")
-                        
+
                         logger.debug(
                             "codex_chat_response_headers",
                             status_code=response.status_code,
@@ -254,14 +254,14 @@ async def codex_chat_completions(
                             headers=dict(response.headers),
                             url=str(response.url),
                         )
-                        
+
                         # Check if this is a streaming response
                         # The backend may return chunked transfer encoding without content-type
                         is_streaming = (
                             "text/event-stream" in content_type or
                             (transfer_encoding == "chunked" and not content_type)
                         )
-                        
+
                         if is_streaming:
                             logger.debug(
                                 "codex_stream_conversion_started",
@@ -278,7 +278,6 @@ async def codex_chat_completions(
                             line_count = 0
                             first_chunk_sent = False
                             thinking_block_active = False
-                            current_thinking_signature = None
                             try:
                                 async for line in response.aiter_lines():
                                     line_count += 1
@@ -287,11 +286,11 @@ async def codex_chat_completions(
                                         line_number=line_count,
                                         line_preview=line[:100] if line else "(empty)",
                                     )
-                                    
+
                                     # Skip empty lines
                                     if not line or line.strip() == "":
                                         continue
-                                        
+
                                     if line.startswith("data:"):
                                         data_str = line[5:].strip()
                                         if data_str == "[DONE]":
@@ -320,34 +319,30 @@ async def codex_chat_completions(
                                                 yield f"data: {json.dumps(initial_chunk)}\n\n".encode()
                                                 first_chunk_sent = True
                                                 chunk_count += 1
-                                                
+
                                                 logger.debug(
                                                     "codex_stream_initial_chunk_sent",
                                                     event_type=event_type,
                                                 )
 
-                                            # Handle thinking/reasoning blocks - stream them wrapped in XML
-                                            if event_type in ["response.output_item.added", "response.content_part.added", "response.reasoning_summary_part.added"]:
-                                                # Check if this is a thinking/reasoning block
+                                            # Handle reasoning blocks based on official OpenAI Response API
+                                            if event_type == "response.output_item.added":
+                                                # Check if this is a reasoning block
                                                 item = event_data.get("item", {})
-                                                part_type = item.get("type")
-                                                
-                                                # Check for both regular thinking blocks and reasoning summary parts
-                                                if part_type in ["thinking", "reasoning", "internal_monologue"] or event_type == "response.reasoning_summary_part.added":
+                                                item_type = item.get("type")
+
+                                                if item_type == "reasoning":
                                                     # Only send opening tag if not already in a thinking block
                                                     if not thinking_block_active:
-                                                        # Start streaming thinking block with opening XML tag
                                                         thinking_block_active = True
-                                                        current_thinking_signature = item.get("signature", "")
-                                                        
+
                                                         logger.debug(
-                                                            "codex_thinking_block_started",
-                                                            part_type=part_type,
-                                                            signature=current_thinking_signature,
+                                                            "codex_reasoning_block_started",
+                                                            item_type=item_type,
                                                             event_type=event_type,
                                                         )
-                                                        
-                                                        # Send opening reasoning tag (different from regular thinking)
+
+                                                        # Send opening reasoning tag (no signature in official API)
                                                         openai_chunk = {
                                                             "id": stream_id,
                                                             "object": "chat.completion.chunk",
@@ -356,29 +351,66 @@ async def codex_chat_completions(
                                                             "choices": [
                                                                 {
                                                                     "index": 0,
-                                                                    "delta": {
-                                                                        "content": f'<reasoning signature="{current_thinking_signature}">'
-                                                                    },
+                                                                    "delta": {"content": "<reasoning>"},
                                                                     "finish_reason": None,
                                                                 }
                                                             ],
                                                         }
                                                         yield f"data: {json.dumps(openai_chunk)}\n\n".encode()
                                                         chunk_count += 1
-                                                    else:
-                                                        # We're seeing a new reasoning part while already in a block
-                                                        # This happens when there are multiple reasoning parts
-                                                        logger.debug(
-                                                            "codex_additional_reasoning_part",
-                                                            event_type=event_type,
-                                                            already_active=thinking_block_active,
-                                                        )
-                                                    
-                                            # Handle thinking/reasoning summary text deltas
+
+                                            # Handle content part deltas - various content types from API
+                                            elif event_type == "response.content_part.delta":
+                                                delta = event_data.get("delta", {})
+                                                delta_type = delta.get("type")
+
+                                                if delta_type == "text" and not thinking_block_active:
+                                                    # Regular text content
+                                                    text_content = delta.get("text", "")
+                                                    if text_content:
+                                                        openai_chunk = {
+                                                            "id": stream_id,
+                                                            "object": "chat.completion.chunk",
+                                                            "created": created,
+                                                            "model": "gpt-5",
+                                                            "choices": [
+                                                                {
+                                                                    "index": 0,
+                                                                    "delta": {"content": text_content},
+                                                                    "finish_reason": None,
+                                                                }
+                                                            ],
+                                                        }
+                                                        yield f"data: {json.dumps(openai_chunk)}\n\n".encode()
+                                                        chunk_count += 1
+
+                                                elif delta_type == "reasoning" and thinking_block_active:
+                                                    # Reasoning content within reasoning block
+                                                    reasoning_content = delta.get("reasoning", "")
+                                                    if reasoning_content:
+                                                        openai_chunk = {
+                                                            "id": stream_id,
+                                                            "object": "chat.completion.chunk",
+                                                            "created": created,
+                                                            "model": "gpt-5",
+                                                            "choices": [
+                                                                {
+                                                                    "index": 0,
+                                                                    "delta": {"content": reasoning_content},
+                                                                    "finish_reason": None,
+                                                                }
+                                                            ],
+                                                        }
+                                                        yield f"data: {json.dumps(openai_chunk)}\n\n".encode()
+                                                        chunk_count += 1
+                                                        
+                                            # Handle reasoning summary text - the actual reasoning content
                                             elif event_type == "response.reasoning_summary_text.delta" and thinking_block_active:
-                                                # Stream thinking content directly from reasoning summary
-                                                delta_text = event_data.get("delta", "")
-                                                if delta_text:
+                                                # Extract reasoning text content from delta field
+                                                reasoning_text = event_data.get("delta", "")
+                                                
+                                                if reasoning_text:
+                                                    chunk_count += 1
                                                     openai_chunk = {
                                                         "id": stream_id,
                                                         "object": "chat.completion.chunk",
@@ -387,45 +419,22 @@ async def codex_chat_completions(
                                                         "choices": [
                                                             {
                                                                 "index": 0,
-                                                                "delta": {"content": delta_text},
+                                                                "delta": {"content": reasoning_text},
                                                                 "finish_reason": None,
                                                             }
                                                         ],
                                                     }
                                                     yield f"data: {json.dumps(openai_chunk)}\n\n".encode()
-                                                    chunk_count += 1
-                                                    
-                                            # Handle thinking content deltas
-                                            elif event_type == "response.output_item.delta" and thinking_block_active:
-                                                # Stream thinking content directly
+
+                                            # Handle reasoning block completion - official API
+                                            elif event_type == "response.output_item.done" and thinking_block_active:
+                                                # Check if this is the end of a reasoning block
                                                 item = event_data.get("item", {})
-                                                if item.get("type") in ["thinking", "reasoning", "internal_monologue"]:
-                                                    thinking_content = item.get("content", "")
-                                                    if thinking_content:
-                                                        openai_chunk = {
-                                                            "id": stream_id,
-                                                            "object": "chat.completion.chunk",
-                                                            "created": created,
-                                                            "model": "gpt-5",
-                                                            "choices": [
-                                                                {
-                                                                    "index": 0,
-                                                                    "delta": {"content": thinking_content},
-                                                                    "finish_reason": None,
-                                                                }
-                                                            ],
-                                                        }
-                                                        yield f"data: {json.dumps(openai_chunk)}\n\n".encode()
-                                                        chunk_count += 1
-                                                        
-                                            # Handle thinking block completion
-                                            elif event_type in ["response.output_item.done", "response.reasoning_summary_part.done", "response.reasoning_summary_text.done"] and thinking_block_active:
-                                                # Close the thinking block
-                                                item = event_data.get("item", {})
-                                                # Close on any of these done events when a thinking block is active
-                                                if thinking_block_active:
+                                                item_type = item.get("type")
+
+                                                if item_type == "reasoning":
                                                     thinking_block_active = False
-                                                    
+
                                                     # Send closing reasoning tag
                                                     openai_chunk = {
                                                         "id": stream_id,
@@ -442,13 +451,13 @@ async def codex_chat_completions(
                                                     }
                                                     yield f"data: {json.dumps(openai_chunk)}\n\n".encode()
                                                     chunk_count += 1
-                                                    
+
                                                     logger.debug(
-                                                        "codex_thinking_block_ended",
-                                                        signature=current_thinking_signature,
+                                                        "codex_reasoning_block_ended",
+                                                        item_type=item_type,
+                                                        event_type=event_type,
                                                     )
-                                                    current_thinking_signature = None
-                                                    
+
                                             # Convert Response API events to OpenAI format
                                             elif event_type == "response.output_text.delta":
                                                 # Direct text delta event (only if not in thinking block)
@@ -559,6 +568,70 @@ async def codex_chat_completions(
 
                                                                     yield chunk_data
 
+                                            # Handle additional official API event types
+                                            elif event_type == "response.function_call_arguments.delta":
+                                                # Function call arguments streaming - official API
+                                                if not thinking_block_active:
+                                                    arguments = event_data.get("arguments", "")
+                                                    if arguments:
+                                                        chunk_count += 1
+                                                        openai_chunk = {
+                                                            "id": stream_id,
+                                                            "object": "chat.completion.chunk",
+                                                            "created": created,
+                                                            "model": "gpt-5",
+                                                            "choices": [
+                                                                {
+                                                                    "index": 0,
+                                                                    "delta": {"content": arguments},
+                                                                    "finish_reason": None,
+                                                                }
+                                                            ],
+                                                        }
+                                                        yield f"data: {json.dumps(openai_chunk)}\n\n".encode()
+
+                                            elif event_type == "response.audio_transcript.delta":
+                                                # Audio transcript streaming - official API
+                                                if not thinking_block_active:
+                                                    transcript = event_data.get("transcript", "")
+                                                    if transcript:
+                                                        chunk_count += 1
+                                                        openai_chunk = {
+                                                            "id": stream_id,
+                                                            "object": "chat.completion.chunk",
+                                                            "created": created,
+                                                            "model": "gpt-5",
+                                                            "choices": [
+                                                                {
+                                                                    "index": 0,
+                                                                    "delta": {"content": f"[Audio: {transcript}]"},
+                                                                    "finish_reason": None,
+                                                                }
+                                                            ],
+                                                        }
+                                                        yield f"data: {json.dumps(openai_chunk)}\n\n".encode()
+
+                                            elif event_type == "response.tool_calls.function.name":
+                                                # Tool function name - official API
+                                                if not thinking_block_active:
+                                                    function_name = event_data.get("name", "")
+                                                    if function_name:
+                                                        chunk_count += 1
+                                                        openai_chunk = {
+                                                            "id": stream_id,
+                                                            "object": "chat.completion.chunk",
+                                                            "created": created,
+                                                            "model": "gpt-5",
+                                                            "choices": [
+                                                                {
+                                                                    "index": 0,
+                                                                    "delta": {"content": f"[Function: {function_name}]"},
+                                                                    "finish_reason": None,
+                                                                }
+                                                            ],
+                                                        }
+                                                        yield f"data: {json.dumps(openai_chunk)}\n\n".encode()
+
                                             elif event_type == "response.completed":
                                                 # Final chunk with usage info
                                                 response_obj = event_data.get("response", {})
@@ -615,7 +688,7 @@ async def codex_chat_completions(
                                     line_count=line_count,
                                 )
                                 raise
-                            
+
                             # Send final [DONE] message
                             logger.debug(
                                 "codex_stream_sending_done",
@@ -629,15 +702,15 @@ async def codex_chat_completions(
                             chunks = []
                             async for chunk in response.aiter_bytes():
                                 chunks.append(chunk)
-                            
+
                             response_body = b"".join(chunks)
-                            
+
                             logger.debug(
                                 "codex_chat_non_streaming_response",
                                 body_length=len(response_body),
                                 body_preview=response_body[:200].decode("utf-8", errors="replace") if response_body else "empty",
                             )
-                            
+
                             if response_body:
                                 # Check if it's actually SSE data that we missed
                                 body_str = response_body.decode("utf-8")
@@ -778,11 +851,21 @@ async def codex_chat_completions(
                                     error_data=error_data,
                                 )
                                 # Pass through the error from backend
+                                # Handle different error formats from backend
+                                error_message = "Request failed"
+                                if "detail" in error_data:
+                                    error_message = error_data["detail"]
+                                elif "error" in error_data:
+                                    if isinstance(error_data["error"], dict):
+                                        error_message = error_data["error"].get("message", "Request failed")
+                                    else:
+                                        error_message = str(error_data["error"])
+                                elif "message" in error_data:
+                                    error_message = error_data["message"]
+                                
                                 raise HTTPException(
                                     status_code=response.status_code,
-                                    detail=error_data.get("error", {}).get(
-                                        "message", "Request failed"
-                                    ),
+                                    detail=error_message,
                                 )
                             except (json.JSONDecodeError, UnicodeDecodeError):
                                 logger.error(
