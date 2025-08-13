@@ -298,14 +298,9 @@ class CodexRequestTransformer(RequestTransformer):
                 codex_headers["chatgpt-account-id"] = account_id
             logger.debug("using_fallback_codex_headers")
 
-        # Set Accept header based on user's original streaming request
-        user_requested_streaming = self._is_user_streaming_request(body)
-        if user_requested_streaming:
-            codex_headers["Accept"] = "text/event-stream"
-            logger.debug("setting_streaming_accept_header", user_requested=True)
-        # Note: Don't set Accept to application/json when stream:true is in body
-        # as this causes 400 Bad Request from ChatGPT. Instead, we'll handle
-        # response conversion in the proxy service.
+        # Don't set Accept header - let the backend handle it based on stream parameter
+        # Setting Accept: text/event-stream with stream:true in body causes 400 Bad Request
+        # The backend will determine the response format based on the stream parameter
 
         return codex_headers
 
@@ -351,6 +346,17 @@ class CodexRequestTransformer(RequestTransformer):
                 else None,
                 body_length=len(body) if body else 0,
             )
+            return body
+
+        # Check if this request already has the full Codex instructions
+        # If instructions field exists and is longer than 1000 chars, it's already set
+        if (
+            "instructions" in data
+            and data["instructions"]
+            and len(data["instructions"]) > 1000
+        ):
+            # This already has full Codex instructions, don't replace them
+            logger.debug("skipping_codex_transform_has_full_instructions")
             return body
 
         # Get the instructions to inject

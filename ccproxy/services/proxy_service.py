@@ -521,170 +521,211 @@ class ProxyService:
                 session_id=session_id,
             )
 
+            # Check if user explicitly requested streaming (from original request)
+            user_requested_streaming = self.codex_transformer._is_streaming_request(
+                body
+            )
+
             # Forward request to ChatGPT backend
-            async with httpx.AsyncClient(timeout=240.0) as client:
-                response = await client.request(
-                    method=method,
-                    url=target_url,
-                    headers=headers,
-                    content=transformed_body,
-                )
+            if user_requested_streaming:
+                # Handle streaming request with proper context management
+                async def stream_codex_response() -> AsyncGenerator[bytes, None]:
+                    collected_chunks = []
+                    chunk_count = 0
+                    total_bytes = 0
 
-                # Check if user explicitly requested streaming (from original request)
-                user_requested_streaming = (
-                    self.codex_transformer._is_user_streaming_request(body)
-                )
-
-                # Check if upstream response is streaming
-                content_type = response.headers.get("content-type", "")
-                transfer_encoding = response.headers.get("transfer-encoding", "")
-                upstream_is_streaming = "text/event-stream" in content_type or (
-                    transfer_encoding == "chunked" and content_type == ""
-                )
-
-                # Only return streaming response if user explicitly requested it
-                should_return_streaming = (
-                    user_requested_streaming and upstream_is_streaming
-                )
-
-                logger.debug(
-                    "codex_response_streaming_decision",
-                    content_type=content_type,
-                    user_requested_streaming=user_requested_streaming,
-                    upstream_is_streaming=upstream_is_streaming,
-                    should_return_streaming=should_return_streaming,
-                    transfer_encoding=transfer_encoding,
-                )
-                if should_return_streaming:
-                    # For streaming responses, log headers and capture stream data
-                    await self._log_codex_response_headers(
+                    logger.debug(
+                        "proxy_service_streaming_started",
                         request_id=request_id,
-                        status_code=response.status_code,
-                        headers=dict(response.headers),
-                        stream_type="codex_sse",
+                        session_id=session_id,
                     )
 
-                    # Return streaming response with logging
-                    async def stream_codex_response() -> AsyncGenerator[bytes, None]:
+                    async with httpx.AsyncClient(timeout=240.0) as client:
+                        async with client.stream(
+                            method=method,
+                            url=target_url,
+                            headers=headers,
+                            content=transformed_body,
+                        ) as response:
+                            # Log response headers for streaming
+                            await self._log_codex_response_headers(
+                                request_id=request_id,
+                                status_code=response.status_code,
+                                headers=dict(response.headers),
+                                stream_type="codex_sse",
+                            )
+                            
+                            # Check if upstream actually returned streaming
+                            content_type = response.headers.get("content-type", "")
+                            if "text/event-stream" not in content_type:
+                                logger.warning(
+                                    "codex_expected_streaming_but_got_regular",
+                                    content_type=content_type,
+                                    status_code=response.status_code,
+                                )
+                            
+                            async for chunk in response.aiter_bytes():
+                                chunk_count += 1
+                                chunk_size = len(chunk)
+                                total_bytes += chunk_size
+                                collected_chunks.append(chunk)
+
+                                logger.debug(
+                                    "proxy_service_streaming_chunk",
+                                    request_id=request_id,
+                                    chunk_number=chunk_count,
+                                    chunk_size=chunk_size,
+                                    total_bytes=total_bytes,
+                                )
+
+                                yield chunk
+
+                    logger.debug(
+                        "proxy_service_streaming_complete",
+                        request_id=request_id,
+                        total_chunks=chunk_count,
+                        total_bytes=total_bytes,
+                    )
+
+                    # Log the complete stream data after streaming finishes
+                    await self._log_codex_streaming_complete(
+                        request_id=request_id,
+                        chunks=collected_chunks,
+                    )
+
+                return StreamingResponse(
+                    stream_codex_response(),
+                    media_type="text/event-stream",
+                    headers={
+                        "cache-control": "no-cache",
+                        "connection": "keep-alive",
+                    },
+                )
+            else:
+                # Handle non-streaming request
+                async with httpx.AsyncClient(timeout=240.0) as client:
+                    response = await client.request(
+                        method=method,
+                        url=target_url,
+                        headers=headers,
+                        content=transformed_body,
+                    )
+
+                    # Check if upstream response is streaming (shouldn't happen)
+                    content_type = response.headers.get("content-type", "")
+                    transfer_encoding = response.headers.get("transfer-encoding", "")
+                    upstream_is_streaming = "text/event-stream" in content_type or (
+                        transfer_encoding == "chunked" and content_type == ""
+                    )
+
+                    logger.debug(
+                        "codex_response_non_streaming",
+                        content_type=content_type,
+                        user_requested_streaming=user_requested_streaming,
+                        upstream_is_streaming=upstream_is_streaming,
+                        transfer_encoding=transfer_encoding,
+                    )
+                    
+                    if upstream_is_streaming:
+                        # Upstream is streaming but user didn't request streaming
+                        # Collect all streaming data and return as JSON
+                        logger.debug(
+                            "converting_upstream_stream_to_json", request_id=request_id
+                        )
+
                         collected_chunks = []
                         async for chunk in response.aiter_bytes():
                             collected_chunks.append(chunk)
-                            yield chunk
 
-                        # Log the complete stream data after streaming finishes
-                        await self._log_codex_streaming_complete(
-                            request_id=request_id,
-                            chunks=collected_chunks,
-                        )
+                        # Combine all chunks
+                        full_content = b"".join(collected_chunks)
 
-                    return StreamingResponse(
-                        stream_codex_response(),
-                        media_type="text/event-stream",
-                        headers={
-                            "cache-control": "no-cache",
-                            "connection": "keep-alive",
-                        },
-                    )
-                elif upstream_is_streaming:
-                    # Upstream is streaming but user didn't request streaming
-                    # Collect all streaming data and return as JSON
-                    logger.debug(
-                        "converting_upstream_stream_to_json", request_id=request_id
-                    )
+                        # Try to parse the streaming data and extract the final response
+                        try:
+                            # Parse SSE data to extract JSON response
+                            content_str = full_content.decode("utf-8")
+                            lines = content_str.strip().split("\n")
 
-                    collected_chunks = []
-                    async for chunk in response.aiter_bytes():
-                        collected_chunks.append(chunk)
+                            # Look for the last data line with JSON content
+                            final_json = None
+                            for line in reversed(lines):
+                                if line.startswith("data: ") and not line.endswith(
+                                    "[DONE]"
+                                ):
+                                    try:
+                                        json_str = line[6:]  # Remove "data: " prefix
+                                        final_json = json.loads(json_str)
+                                        break
+                                    except json.JSONDecodeError:
+                                        continue
 
-                    # Combine all chunks
-                    full_content = b"".join(collected_chunks)
+                            if final_json:
+                                response_content = json.dumps(final_json).encode("utf-8")
+                            else:
+                                # Fallback: return the raw content
+                                response_content = full_content
 
-                    # Try to parse the streaming data and extract the final response
-                    try:
-                        # Parse SSE data to extract JSON response
-                        content_str = full_content.decode("utf-8")
-                        lines = content_str.strip().split("\n")
-
-                        # Look for the last data line with JSON content
-                        final_json = None
-                        for line in reversed(lines):
-                            if line.startswith("data: ") and not line.endswith(
-                                "[DONE]"
-                            ):
-                                try:
-                                    json_str = line[6:]  # Remove "data: " prefix
-                                    final_json = json.loads(json_str)
-                                    break
-                                except json.JSONDecodeError:
-                                    continue
-
-                        if final_json:
-                            response_content = json.dumps(final_json).encode("utf-8")
-                        else:
-                            # Fallback: return the raw content
+                        except (UnicodeDecodeError, json.JSONDecodeError):
+                            # Fallback: return raw content
                             response_content = full_content
 
-                    except (UnicodeDecodeError, json.JSONDecodeError):
-                        # Fallback: return raw content
-                        response_content = full_content
+                        # Log the complete response
+                        try:
+                            response_data = json.loads(response_content.decode("utf-8"))
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            response_data = {
+                                "raw_content": response_content.decode(
+                                    "utf-8", errors="replace"
+                                )
+                            }
 
-                    # Log the complete response
-                    try:
-                        response_data = json.loads(response_content.decode("utf-8"))
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        response_data = {
-                            "raw_content": response_content.decode(
-                                "utf-8", errors="replace"
-                            )
-                        }
-
-                    await self._log_codex_response(
-                        request_id=request_id,
-                        status_code=response.status_code,
-                        headers=dict(response.headers),
-                        body_data=response_data,
-                    )
-
-                    # Return as JSON response
-                    return Response(
-                        content=response_content,
-                        status_code=response.status_code,
-                        headers={
-                            "content-type": "application/json",
-                            "content-length": str(len(response_content)),
-                        },
-                        media_type="application/json",
-                    )
-                else:
-                    # For regular non-streaming responses
-                    response_data = None
-                    try:
-                        response_data = (
-                            json.loads(response.content.decode("utf-8"))
-                            if response.content
-                            else {}
+                        await self._log_codex_response(
+                            request_id=request_id,
+                            status_code=response.status_code,
+                            headers=dict(response.headers),
+                            body_data=response_data,
                         )
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        response_data = {
-                            "raw_content": response.content.decode(
-                                "utf-8", errors="replace"
+
+                        # Return as JSON response
+                        return Response(
+                            content=response_content,
+                            status_code=response.status_code,
+                            headers={
+                                "content-type": "application/json",
+                                "content-length": str(len(response_content)),
+                            },
+                            media_type="application/json",
+                        )
+                    else:
+                        # For regular non-streaming responses
+                        response_data = None
+                        try:
+                            response_data = (
+                                json.loads(response.content.decode("utf-8"))
+                                if response.content
+                                else {}
                             )
-                        }
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            response_data = {
+                                "raw_content": response.content.decode(
+                                    "utf-8", errors="replace"
+                                )
+                            }
 
-                    await self._log_codex_response(
-                        request_id=request_id,
-                        status_code=response.status_code,
-                        headers=dict(response.headers),
-                        body_data=response_data,
-                    )
+                        await self._log_codex_response(
+                            request_id=request_id,
+                            status_code=response.status_code,
+                            headers=dict(response.headers),
+                            body_data=response_data,
+                        )
 
-                    # Return regular response
-                    return Response(
-                        content=response.content,
-                        status_code=response.status_code,
-                        headers=dict(response.headers),
-                        media_type=response.headers.get("content-type"),
-                    )
+                        # Return regular response
+                        return Response(
+                            content=response.content,
+                            status_code=response.status_code,
+                            headers=dict(response.headers),
+                            media_type=response.headers.get("content-type"),
+                        )
 
         except Exception as e:
             logger.error("Codex request failed", error=str(e), session_id=session_id)
