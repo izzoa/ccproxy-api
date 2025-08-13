@@ -63,8 +63,36 @@ class TestVersionComparison:
 
     def test_compare_versions_dev_versions(self) -> None:
         """Test comparison with development versions."""
-        assert compare_versions("1.0.0.dev1", "1.0.0") is True
+        # Dev version with same base should not need update
+        assert compare_versions("1.0.0.dev1", "1.0.0") is False
+        # Regular version should need update to newer dev version's base
         assert compare_versions("1.0.0", "1.0.1.dev1") is True
+
+    def test_compare_versions_dev_version_same_base(self) -> None:
+        """Test comparison when dev version has same base as latest release."""
+        # Dev version 0.1.6.dev3 should not need update to 0.1.6
+        assert compare_versions("0.1.6.dev3", "0.1.6") is False
+        assert compare_versions("0.1.6.dev1+hash", "0.1.6") is False
+        assert compare_versions("0.1.6.dev3+gf8991df.d19800101", "0.1.6") is False
+
+    def test_compare_versions_dev_version_older_base(self) -> None:
+        """Test comparison when dev version base is older than latest release."""
+        # Dev version 0.1.5.dev3 should need update to 0.1.6
+        assert compare_versions("0.1.5.dev3", "0.1.6") is True
+        assert compare_versions("0.1.5.dev1+hash", "0.1.6") is True
+
+    def test_compare_versions_dev_version_newer_base(self) -> None:
+        """Test comparison when dev version base is newer than latest release."""
+        # Dev version 0.1.7.dev1 should not need update to 0.1.6
+        assert compare_versions("0.1.7.dev1", "0.1.6") is False
+        assert compare_versions("0.1.7.dev3+hash", "0.1.6") is False
+
+    def test_compare_versions_dev_version_needs_update(self) -> None:
+        """Test comparison when dev version needs update to newer release."""
+        # Dev version 0.1.6.dev3 should need update to 0.1.7
+        assert compare_versions("0.1.6.dev3", "0.1.7") is True
+        assert compare_versions("0.1.6.dev1+hash", "0.1.7") is True
+        assert compare_versions("0.1.6.dev3+gf8991df.d19800101", "0.1.7") is True
 
     def test_compare_versions_invalid_format(self) -> None:
         """Test comparison with invalid version formats."""

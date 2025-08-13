@@ -122,12 +122,12 @@ async def setup_scheduler_tasks(scheduler: Scheduler, settings: Settings) -> Non
                 task_type="version_update_check",
                 interval_seconds=interval_seconds,
                 enabled=True,
-                startup_max_age_hours=scheduler_config.version_check_startup_max_age_hours,
+                version_check_cache_ttl_hours=scheduler_config.version_check_cache_ttl_hours,
             )
             logger.debug(
                 "version_check_task_added",
                 interval_hours=scheduler_config.version_check_interval_hours,
-                startup_max_age_hours=scheduler_config.version_check_startup_max_age_hours,
+                version_check_cache_ttl_hours=scheduler_config.version_check_cache_ttl_hours,
             )
         except Exception as e:
             logger.error(

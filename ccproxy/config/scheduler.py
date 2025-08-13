@@ -89,17 +89,17 @@ class SchedulerSettings(BaseSettings):
     )
 
     version_check_interval_hours: int = Field(
-        default=12,
+        default=6,
         ge=1,
         le=168,  # Max 1 week
         description="Interval in hours between version checks",
     )
 
-    version_check_startup_max_age_hours: float = Field(
-        default=1.0,
+    version_check_cache_ttl_hours: float = Field(
+        default=6,
         ge=0.1,
         le=24.0,
-        description="Maximum age in hours since last check before running startup check",
+        description="Maximum age in hours since last check version check",
     )
 
     model_config = SettingsConfigDict(

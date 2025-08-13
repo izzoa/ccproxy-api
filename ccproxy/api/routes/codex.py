@@ -1,6 +1,7 @@
 """OpenAI Codex API routes."""
 
 import json
+import time
 import uuid
 from collections.abc import AsyncIterator
 
@@ -233,6 +234,9 @@ async def codex_chat_completions(
 
             # Convert Response API SSE stream to Chat Completions format
             response_headers = {}
+            # Generate stream_id and timestamp outside the nested function to avoid closure issues
+            stream_id = f"chatcmpl_{uuid.uuid4().hex[:29]}"
+            created = int(time.time())
 
             async def stream_codex_response() -> AsyncIterator[bytes]:
                 """Stream and convert Response API to Chat Completions format."""
@@ -317,8 +321,6 @@ async def codex_chat_completions(
 
                         chunk_count = 0
                         total_bytes = 0
-                        stream_id = f"chatcmpl_{uuid.uuid4().hex[:29]}"
-                        created = int(time.time())
 
                         # Process SSE events directly without buffering
                         line_count = 0
@@ -951,9 +953,6 @@ async def codex_chat_completions(
 
             # Create a minimal request context if none exists
             if request_context is None:
-                import time
-                import uuid
-
                 request_context = RequestContext(
                     request_id=str(uuid.uuid4()),
                     start_time=time.perf_counter(),

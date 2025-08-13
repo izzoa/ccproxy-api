@@ -613,7 +613,9 @@ class VersionUpdateCheckTask(BaseScheduledTask):
         name: str,
         interval_seconds: float,
         enabled: bool = True,
-        startup_max_age_hours: float = 1.0,
+        version_check_cache_ttl_hours: float = 1.0,
+        *,
+        skip_first_scheduled_run: bool = True,
     ):
         """
         Initialize version update check task.
@@ -622,19 +624,61 @@ class VersionUpdateCheckTask(BaseScheduledTask):
             name: Task name
             interval_seconds: Interval between version checks
             enabled: Whether task is enabled
-            startup_max_age_hours: Maximum age in hours before running startup check
+            version_check_cache_ttl_hours: Maximum cache age (hours) used at startup before contacting GitHub
+            skip_first_scheduled_run: If True, first scheduled loop execution is skipped
         """
         super().__init__(
             name=name,
             interval_seconds=interval_seconds,
             enabled=enabled,
         )
-        self.startup_max_age_hours = startup_max_age_hours
+        self.version_check_cache_ttl_hours = version_check_cache_ttl_hours
+        # Mark first scheduled execution; allow skipping to avoid duplicate run after startup
         self._first_run = True
+        self._skip_first_run = skip_first_scheduled_run
+
+    def _log_version_comparison(
+        self, current_version: str, latest_version: str, *, source: str | None = None
+    ) -> None:
+        """
+        Log version comparison results with appropriate warning level.
+
+        Args:
+            current_version: Current version string
+            latest_version: Latest version string
+        """
+        from ccproxy.utils.version_checker import compare_versions
+
+        if compare_versions(current_version, latest_version):
+            logger.warning(
+                "version_update_available",
+                task_name=self.name,
+                current_version=current_version,
+                latest_version=latest_version,
+                source=source,
+                message=(f"New version available: {latest_version}"),
+            )
+        else:
+            logger.debug(
+                "version_check_complete_no_update",
+                task_name=self.name,
+                current_version=current_version,
+                latest_version=latest_version,
+                source=source,
+                message=(
+                    f"No update: latest_version={latest_version} "
+                    f"current_version={current_version}"
+                ),
+            )
 
     async def run(self) -> bool:
         """Execute version update check."""
         try:
+            logger.debug(
+                "version_check_task_run_start",
+                task_name=self.name,
+                first_run=self._first_run,
+            )
             from datetime import datetime
 
             from ccproxy.utils.version_checker import (
@@ -650,74 +694,67 @@ class VersionUpdateCheckTask(BaseScheduledTask):
             state_path = get_version_check_state_path()
             current_time = datetime.now(UTC)
 
-            # Check if we should run based on startup logic
-            if self._first_run:
+            # Skip first scheduled run to avoid duplicate check after startup
+            if self._first_run and self._skip_first_run:
                 self._first_run = False
-                should_run_startup_check = False
-
-                # Load existing state if available
-                existing_state = await load_check_state(state_path)
-                if existing_state:
-                    # Check age of last check
-                    time_diff = current_time - existing_state.last_check_at
-                    age_hours = time_diff.total_seconds() / 3600
-
-                    if age_hours > self.startup_max_age_hours:
-                        should_run_startup_check = True
-                        logger.debug(
-                            "version_check_startup_needed",
-                            task_name=self.name,
-                            age_hours=age_hours,
-                            max_age_hours=self.startup_max_age_hours,
-                        )
-                    else:
-                        logger.debug(
-                            "version_check_startup_skipped",
-                            task_name=self.name,
-                            age_hours=age_hours,
-                            max_age_hours=self.startup_max_age_hours,
-                        )
-                        return True  # Skip this run
-                else:
-                    # No previous state, run check
-                    should_run_startup_check = True
-                    logger.debug("version_check_startup_no_state", task_name=self.name)
-
-                if not should_run_startup_check:
-                    return True
-
-            # Fetch latest version from GitHub
-            latest_version = await fetch_latest_github_version()
-            if latest_version is None:
-                logger.warning("version_check_fetch_failed", task_name=self.name)
-                return False
-
-            # Get current version
-            current_version = get_current_version()
-
-            # Save state
-            new_state = VersionCheckState(
-                last_check_at=current_time,
-                latest_version_found=latest_version,
-            )
-            await save_check_state(state_path, new_state)
-
-            # Compare versions
-            if compare_versions(current_version, latest_version):
-                logger.info(
-                    "version_update_available",
-                    task_name=self.name,
-                    current_version=current_version,
-                    latest_version=latest_version,
-                    message=f"New version {latest_version} available! You are running {current_version}",
-                )
-            else:
                 logger.debug(
-                    "version_check_complete_no_update",
+                    "version_check_first_run_skipped",
                     task_name=self.name,
-                    current_version=current_version,
-                    latest_version=latest_version,
+                    message="Skipping first scheduled run since startup check already completed",
                 )
+                return True
+
+            # Determine freshness window using configured cache TTL
+            # Applies to both startup and scheduled runs to avoid unnecessary network calls
+            max_age_hours = self.version_check_cache_ttl_hours
+
+            # Load previous state if available
+            prev_state: VersionCheckState | None = await load_check_state(state_path)
+            latest_version: str | None = None
+            source: str | None = None
+
+            # If we have a recent state within the freshness window, avoid network call
+            if prev_state is not None:
+                age_hours = (
+                    current_time - prev_state.last_check_at
+                ).total_seconds() / 3600.0
+                if age_hours < max_age_hours:
+                    logger.debug(
+                        "version_check_cache_fresh",
+                        task_name=self.name,
+                        age_hours=round(age_hours, 3),
+                        max_age_hours=max_age_hours,
+                    )
+                    latest_version = prev_state.latest_version_found
+                    source = "cache"
+                else:
+                    logger.debug(
+                        "version_check_cache_stale",
+                        task_name=self.name,
+                        age_hours=round(age_hours, 3),
+                        max_age_hours=max_age_hours,
+                    )
+
+            # Fetch only if we don't have a fresh cached version
+            if latest_version is None:
+                latest_version = await fetch_latest_github_version()
+                if latest_version is None:
+                    logger.warning("version_check_fetch_failed", task_name=self.name)
+                    return False
+                # Persist refreshed state
+                new_state = VersionCheckState(
+                    last_check_at=current_time,
+                    latest_version_found=latest_version,
+                )
+                await save_check_state(state_path, new_state)
+                source = "network"
+            else:
+                # Ensure state file at least exists; if it didn't, we wouldn't be here
+                pass
+
+            # Compare versions and log result
+            current_version = get_current_version()
+            self._log_version_comparison(current_version, latest_version, source=source)
 
             return True
 

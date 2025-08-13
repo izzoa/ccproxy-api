@@ -35,6 +35,7 @@ from ccproxy.utils.models_provider import get_models_list
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
     check_codex_cli_startup,
+    check_version_updates_startup,
     flush_streaming_batches_shutdown,
     initialize_claude_detection_startup,
     initialize_claude_sdk_startup,
@@ -75,6 +76,11 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "name": "Authentication",
         "startup": validate_authentication_startup,
         "shutdown": None,  # One-time validation, no cleanup needed
+    },
+    {
+        "name": "Version Check",
+        "startup": check_version_updates_startup,
+        "shutdown": None,  # One-time check, no cleanup needed
     },
     {
         "name": "Claude CLI",

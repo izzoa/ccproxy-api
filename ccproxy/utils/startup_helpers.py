@@ -92,6 +92,50 @@ async def validate_authentication_startup(app: FastAPI, settings: Settings) -> N
         )
 
 
+async def check_version_updates_startup(app: FastAPI, settings: Settings) -> None:
+    """Trigger version update check at startup.
+
+    Manually runs the version check task once during application startup,
+    before the scheduler starts managing periodic checks.
+
+    Args:
+        app: FastAPI application instance
+        settings: Application settings
+    """
+    # Skip version check if disabled by settings
+    if not settings.scheduler.version_check_enabled:
+        logger.debug("version_check_startup_disabled")
+        return
+
+    try:
+        # Import locally to avoid circular imports and create task instance
+        from ccproxy.scheduler.tasks import VersionUpdateCheckTask
+
+        # Create a temporary task instance for startup check
+        version_task = VersionUpdateCheckTask(
+            name="version_check_startup",
+            interval_seconds=settings.scheduler.version_check_interval_hours * 3600,
+            enabled=True,
+            version_check_cache_ttl_hours=settings.scheduler.version_check_cache_ttl_hours,
+            skip_first_scheduled_run=False,
+        )
+
+        # Run the version check once and wait for it to complete
+        success = await version_task.run()
+
+        if success:
+            logger.debug("version_check_startup_completed")
+        else:
+            logger.debug("version_check_startup_failed")
+
+    except Exception as e:
+        logger.debug(
+            "version_check_startup_error",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+
+
 async def check_claude_cli_startup(app: FastAPI, settings: Settings) -> None:
     """Check Claude CLI availability at startup.
 
@@ -304,6 +348,25 @@ async def initialize_codex_detection_startup(app: FastAPI, settings: Settings) -
         app: FastAPI application instance
         settings: Application settings
     """
+    # Skip codex detection if codex is disabled
+    if not settings.codex.enabled:
+        logger.debug("codex_detection_skipped", reason="codex_disabled")
+        detection_service = CodexDetectionService(settings)
+        app.state.codex_detection_data = detection_service._get_fallback_data()
+        app.state.codex_detection_service = detection_service
+        return
+
+    # Check if Codex CLI is available before attempting header detection
+    from ccproxy.api.routes.health import get_codex_cli_info
+
+    codex_info = await get_codex_cli_info()
+    if codex_info.status != "available":
+        logger.debug("codex_detection_skipped", reason="codex_cli_not_available", status=codex_info.status)
+        detection_service = CodexDetectionService(settings)
+        app.state.codex_detection_data = detection_service._get_fallback_data()
+        app.state.codex_detection_service = detection_service
+        return
+
     try:
         logger.debug("initializing_codex_detection")
         detection_service = CodexDetectionService(settings)
