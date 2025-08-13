@@ -318,7 +318,7 @@ class TestClaudeSDKClientStatelessQueries:
 
         # Create a message that will fail conversion
         bad_message: AssistantMessage = AssistantMessage(
-            content=[TextBlock(text="Hello")],
+            content=[TextBlock(text="Hello")], model="claude-3-5-sonnet-20241022"
         )
 
         # Create a mock SDK client

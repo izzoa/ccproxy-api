@@ -61,7 +61,7 @@ class OptionsHandler:
             # Extract configuration values with proper types
             mcp_servers = (
                 configured_opts.mcp_servers.copy()
-                if configured_opts.mcp_servers
+                if isinstance(configured_opts.mcp_servers, dict)
                 else {}
             )
             permission_prompt_tool_name = configured_opts.permission_prompt_tool_name

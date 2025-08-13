@@ -32,7 +32,9 @@ def mock_sdk_client_instance() -> AsyncMock:
     mock_client.query = AsyncMock()
 
     async def simple_response() -> AsyncGenerator[Any, None]:
-        yield AssistantMessage(content=[TextBlock(text="Hello")])
+        yield AssistantMessage(
+            content=[TextBlock(text="Hello")], model="claude-3-5-sonnet-20241022"
+        )
 
     # receive_response should be a method that returns the generator when called
     mock_client.receive_response = lambda: simple_response()
@@ -49,7 +51,9 @@ def mock_sdk_client_streaming() -> AsyncMock:
 
     async def streaming_response() -> AsyncGenerator[Any, None]:
         yield UserMessage(content="Hello")
-        yield AssistantMessage(content=[TextBlock(text="Hi there!")])
+        yield AssistantMessage(
+            content=[TextBlock(text="Hi there!")], model="claude-3-5-sonnet-20241022"
+        )
         yield SystemMessage(subtype="test", data={"message": "System message"})
         yield ResultMessage(
             subtype="success",

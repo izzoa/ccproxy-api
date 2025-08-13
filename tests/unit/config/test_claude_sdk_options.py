@@ -1,5 +1,7 @@
 """Tests for Claude SDK options handling."""
 
+from typing import Any, cast
+
 from ccproxy.claude_sdk.options import OptionsHandler
 from ccproxy.config.claude import ClaudeSettings
 from ccproxy.config.settings import Settings
@@ -38,12 +40,10 @@ class TestOptionsHandler:
         # Should have the default MCP server configuration
         assert hasattr(options, "mcp_servers")
         assert options.mcp_servers is not None
-        assert "confirmation" in options.mcp_servers
-        assert options.mcp_servers["confirmation"].get("type") == "sse"
-        assert (
-            options.mcp_servers["confirmation"].get("url")
-            == "http://127.0.0.1:8000/mcp"
-        )
+        mcp_servers = cast(dict[str, Any], options.mcp_servers)
+        assert "confirmation" in mcp_servers
+        assert mcp_servers["confirmation"].get("type") == "sse"
+        assert mcp_servers["confirmation"].get("url") == "http://127.0.0.1:8000/mcp"
         # Should have the default permission tool name
         assert hasattr(options, "permission_prompt_tool_name")
         assert (
@@ -68,8 +68,9 @@ class TestOptionsHandler:
 
         assert options.model == "claude-3-5-sonnet-20241022"
         # Should have the custom MCP server configuration
-        assert "custom" in options.mcp_servers
-        assert options.mcp_servers["custom"].get("url") == "http://localhost:9000/mcp"
+        mcp_servers = cast(dict[str, Any], options.mcp_servers)
+        assert "custom" in mcp_servers
+        assert mcp_servers["custom"].get("url") == "http://localhost:9000/mcp"
         # Should have the custom permission tool name
         assert options.permission_prompt_tool_name == "custom_permission_tool"
         # Should have the custom max thinking tokens
@@ -94,7 +95,8 @@ class TestOptionsHandler:
         assert options.system_prompt == "Custom system prompt"
         assert options.max_thinking_tokens == 20000
         # Should still have the default MCP configuration
-        assert "confirmation" in options.mcp_servers
+        mcp_servers = cast(dict[str, Any], options.mcp_servers)
+        assert "confirmation" in mcp_servers
         assert (
             options.permission_prompt_tool_name == "mcp__confirmation__check_permission"
         )
@@ -118,7 +120,9 @@ class TestOptionsHandler:
         # Should override the default permission tool name
         assert options.permission_prompt_tool_name == "override_tool"
         # Should still have the default MCP configuration
-        assert "confirmation" in options.mcp_servers
+
+        mcp_servers = cast(dict[str, Any], options.mcp_servers)
+        assert "confirmation" in mcp_servers
 
     def test_create_options_preserves_all_configuration_attributes(self):
         """Test that all attributes from configuration are properly copied."""
@@ -146,9 +150,10 @@ class TestOptionsHandler:
         options = handler.create_options(model="claude-3-5-sonnet-20241022")
 
         # Verify all attributes are preserved
-        assert len(options.mcp_servers) == 2
-        assert "confirmation" in options.mcp_servers
-        assert "filesystem" in options.mcp_servers
+        mcp_servers = cast(dict[str, Any], options.mcp_servers)
+        assert len(mcp_servers) == 2
+        assert "confirmation" in mcp_servers
+        assert "filesystem" in mcp_servers
         assert (
             options.permission_prompt_tool_name == "mcp__confirmation__check_permission"
         )

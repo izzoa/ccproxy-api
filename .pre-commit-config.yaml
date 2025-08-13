@@ -1,7 +1,7 @@
 repos:
   # Ruff linting and formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.2
+    rev: v0.12.8
     hooks:
       # Ruff linting (matches: make lint -> uv run ruff check .)
       - id: ruff
@@ -16,7 +16,7 @@ repos:
 
   # MyPy type checking (matches: make typecheck -> uv run mypy .)
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.16.1
+    rev: v1.17.1
     hooks:
       - id: mypy
         name: mypy type check
@@ -58,6 +58,7 @@ repos:
           - textual>=3.7.1
           - aiofiles>=24.1.0
           - types-aiofiles>=24.0.0
+          - pyjwt>=2.10.0
         args: [--config-file=pyproject.toml]
         exclude: ^(docs/|examples/)
 
@@ -81,7 +82,7 @@ repos:
 
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       # Basic file checks
       - id: trailing-whitespace

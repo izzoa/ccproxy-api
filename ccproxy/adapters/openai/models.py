@@ -286,7 +286,7 @@ class OpenAIChatCompletionResponse(BaseModel):
     created: int
     model: str
     choices: list[OpenAIChoice]
-    usage: OpenAIUsage
+    usage: OpenAIUsage | None = None
     system_fingerprint: str | None = None
 
     model_config = ConfigDict(extra="forbid")

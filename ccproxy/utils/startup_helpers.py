@@ -23,6 +23,7 @@ from ccproxy.scheduler.errors import SchedulerError
 from ccproxy.scheduler.manager import start_scheduler, stop_scheduler
 from ccproxy.services.claude_detection_service import ClaudeDetectionService
 from ccproxy.services.claude_sdk_service import ClaudeSDKService
+from ccproxy.services.codex_detection_service import CodexDetectionService
 from ccproxy.services.credentials.manager import CredentialsManager
 
 
@@ -123,6 +124,41 @@ async def check_claude_cli_startup(app: FastAPI, settings: Settings) -> None:
             "claude_cli_check_failed",
             error=str(e),
             message="Failed to check Claude CLI status during startup",
+        )
+
+
+async def check_codex_cli_startup(app: FastAPI, settings: Settings) -> None:
+    """Check Codex CLI availability at startup.
+
+    Args:
+        app: FastAPI application instance
+        settings: Application settings
+    """
+    try:
+        from ccproxy.api.routes.health import get_codex_cli_info
+
+        codex_info = await get_codex_cli_info()
+
+        if codex_info.status == "available":
+            logger.info(
+                "codex_cli_available",
+                status=codex_info.status,
+                version=codex_info.version,
+                binary_path=codex_info.binary_path,
+            )
+        else:
+            logger.warning(
+                "codex_cli_unavailable",
+                status=codex_info.status,
+                error=codex_info.error,
+                binary_path=codex_info.binary_path,
+                message=f"Codex CLI status: {codex_info.status}",
+            )
+    except Exception as e:
+        logger.error(
+            "codex_cli_check_failed",
+            error=str(e),
+            message="Failed to check Codex CLI status during startup",
         )
 
 
@@ -259,6 +295,32 @@ async def initialize_claude_detection_startup(app: FastAPI, settings: Settings) 
         detection_service = ClaudeDetectionService(settings)
         app.state.claude_detection_data = detection_service._get_fallback_data()
         app.state.claude_detection_service = detection_service
+
+
+async def initialize_codex_detection_startup(app: FastAPI, settings: Settings) -> None:
+    """Initialize Codex detection service.
+
+    Args:
+        app: FastAPI application instance
+        settings: Application settings
+    """
+    try:
+        logger.debug("initializing_codex_detection")
+        detection_service = CodexDetectionService(settings)
+        codex_data = await detection_service.initialize_detection()
+        app.state.codex_detection_data = codex_data
+        app.state.codex_detection_service = detection_service
+        logger.debug(
+            "codex_detection_completed",
+            version=codex_data.codex_version,
+            cached_at=codex_data.cached_at.isoformat(),
+        )
+    except Exception as e:
+        logger.error("codex_detection_startup_failed", error=str(e))
+        # Continue startup with fallback - detection service will provide fallback data
+        detection_service = CodexDetectionService(settings)
+        app.state.codex_detection_data = detection_service._get_fallback_data()
+        app.state.codex_detection_service = detection_service
 
 
 async def initialize_claude_sdk_startup(app: FastAPI, settings: Settings) -> None:

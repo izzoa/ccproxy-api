@@ -531,8 +531,16 @@ class HTTPRequestTransformer(RequestTransformer):
             import json
 
             data = json.loads(body.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             # Return original if not valid JSON
+            logger.warning(
+                "http_transform_json_decode_failed",
+                error=str(e),
+                body_preview=body[:200].decode("utf-8", errors="replace")
+                if body
+                else None,
+                body_length=len(body) if body else 0,
+            )
             return body
 
         # Get the system field to inject
@@ -598,7 +606,14 @@ class HTTPRequestTransformer(RequestTransformer):
                 messages = data.get("messages", [])
                 if messages and any(msg.get("role") == "system" for msg in messages):
                     return True
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                logger.warning(
+                    "openai_request_detection_json_decode_failed",
+                    error=str(e),
+                    body_preview=body[:100].decode("utf-8", errors="replace")
+                    if body
+                    else None,
+                )
                 pass
 
         return False

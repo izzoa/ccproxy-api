@@ -30,6 +30,7 @@ dependencies = [
   "fastapi-mcp",
   "textual>=3.7.1",
   "claude-code-sdk>=0.0.19",
+  "pyjwt>=2.10.1",
 ]
 
 [build-system]
