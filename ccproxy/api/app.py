@@ -2,53 +2,51 @@
 
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any, TypedDict
+from typing import Any
+import os
 
+import httpx
 from fastapi import APIRouter, FastAPI
 from fastapi.staticfiles import StaticFiles
 from structlog import get_logger
+from typing_extensions import TypedDict
 
 from ccproxy import __version__
 from ccproxy.api.middleware.cors import setup_cors_middleware
 from ccproxy.api.middleware.errors import setup_error_handlers
 from ccproxy.api.middleware.logging import AccessLogMiddleware
-from ccproxy.api.middleware.request_content_logging import (
-    RequestContentLoggingMiddleware,
-)
 from ccproxy.api.middleware.request_id import RequestIDMiddleware
 from ccproxy.api.middleware.server_header import ServerHeaderMiddleware
-from ccproxy.api.routes.claude import router as claude_router
-from ccproxy.api.routes.codex import router as codex_router
 from ccproxy.api.routes.health import router as health_router
-from ccproxy.api.routes.mcp import setup_mcp
 from ccproxy.api.routes.metrics import (
     dashboard_router,
     logs_router,
     prometheus_router,
 )
-from ccproxy.api.routes.permissions import router as permissions_router
-from ccproxy.api.routes.proxy import router as proxy_router
+from ccproxy.api.routes.plugins import router as plugins_router
+
+# proxy routes are now handled by plugin system
 from ccproxy.auth.oauth.routes import router as oauth_router
 from ccproxy.config.settings import Settings, get_settings
+from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
+from ccproxy.core.http_client import close_shared_http_client
 from ccproxy.core.logging import setup_logging
+from ccproxy.hooks import HookManager, HookRegistry
+from ccproxy.hooks.events import HookEvent
+from ccproxy.observability import get_metrics
 from ccproxy.utils.models_provider import get_models_list
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
-    check_codex_cli_startup,
     check_version_updates_startup,
     flush_streaming_batches_shutdown,
-    initialize_claude_detection_startup,
-    initialize_claude_sdk_startup,
-    initialize_codex_detection_startup,
     initialize_log_storage_shutdown,
     initialize_log_storage_startup,
     initialize_permission_service_startup,
+    initialize_proxy_service_startup,
     setup_permission_service_shutdown,
     setup_scheduler_shutdown,
     setup_scheduler_startup,
-    setup_session_manager_shutdown,
     validate_claude_authentication_startup,
-    validate_codex_authentication_startup,
 )
 
 
@@ -71,16 +69,189 @@ class ShutdownComponent(TypedDict):
     shutdown: Callable[[FastAPI], Awaitable[None]] | None
 
 
+# Define startup/shutdown functions first
+async def setup_task_manager_startup(app: FastAPI, settings: Settings) -> None:
+    """Start the async task manager."""
+    await start_task_manager()
+    logger.debug("task_manager_startup_completed")
+
+
+async def setup_task_manager_shutdown(app: FastAPI) -> None:
+    """Stop the async task manager."""
+    await stop_task_manager()
+    logger.debug("task_manager_shutdown_completed")
+
+
+async def setup_http_client_shutdown(app: FastAPI) -> None:
+    """Close the shared HTTP client."""
+    await close_shared_http_client()
+    logger.debug("shared_http_client_shutdown_completed")
+
+
+async def setup_proxy_service_shutdown(app: FastAPI) -> None:
+    """Close the proxy service and its resources."""
+    if hasattr(app.state, "proxy_service"):
+        proxy_service = app.state.proxy_service
+        if hasattr(proxy_service, "close"):
+            try:
+                await proxy_service.close()
+                logger.debug("proxy_service_shutdown_completed")
+            except Exception as e:
+                logger.error(
+                    "proxy_service_shutdown_failed",
+                    error=str(e),
+                    exc_info=e,
+                )
+
+
+async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
+    """Initialize plugins during startup."""
+    if not settings.enable_plugins:
+        logger.info("plugin_system_disabled")
+        return
+
+    # Get proxy service from app state if available
+    if hasattr(app.state, "proxy_service"):
+        proxy_service = app.state.proxy_service
+
+        # Check if plugins are already initialized (from startup_helpers)
+        # plugin_registry is actually a PluginManager instance
+        plugin_manager = proxy_service.plugin_registry
+        if (
+            plugin_manager
+            and hasattr(plugin_manager, "initialized")
+            and not plugin_manager.initialized
+        ):
+            # Pass scheduler if available
+            scheduler = getattr(app.state, "scheduler", None)
+            await proxy_service.initialize_plugins(scheduler=scheduler)
+
+        # Register plugin routes and middleware (this should always happen)
+        if plugin_manager and hasattr(plugin_manager, "plugin_registry"):
+            # Access the internal PluginRegistry from PluginManager
+            for plugin_name in plugin_manager.plugin_registry.list_plugins():
+                plugin = plugin_manager.plugin_registry.get_plugin(plugin_name)
+                
+                # Note: raw_http_logger middleware is added during app creation
+                # to ensure proper ordering (must be added before app starts)
+                
+                # Register routes
+                if plugin and hasattr(plugin, "get_routes"):
+                    routes = plugin.get_routes()
+
+                    if isinstance(routes, dict):
+                        # New format: dictionary mapping paths to routers
+                        for prefix, router in routes.items():
+                            if router:
+                                app.include_router(
+                                    router,
+                                    prefix=prefix,
+                                    tags=[f"plugin-{plugin.name}"],
+                                )
+                                logger.debug(
+                                    "plugin_routes_registered",
+                                    plugin_name=plugin.name,
+                                    router_prefix=prefix,
+                                )
+                    elif routes:
+                        # Backward compatibility: single router
+                        app.include_router(
+                            routes,
+                            prefix=plugin.router_prefix,
+                            tags=[f"plugin-{plugin.name}"],
+                        )
+                        logger.debug(
+                            "plugin_routes_registered",
+                            plugin_name=plugin.name,
+                            router_prefix=plugin.router_prefix,
+                        )
+
+        logger.info(
+            "plugins_initialization_completed",
+            providers=len(plugin_manager.list_active_providers())
+            if hasattr(plugin_manager, "list_active_providers")
+            else 0,
+        )
+
+
+async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
+    """Initialize hook system during startup."""
+    if not settings.hooks.enabled:
+        logger.info("hook_system_disabled")
+        return
+
+    # Create hook system
+    hook_registry = HookRegistry()
+    hook_manager = HookManager(hook_registry)
+
+
+    # Load plugin hooks from plugin registry
+    if hasattr(app.state, "proxy_service"):
+        proxy_service = app.state.proxy_service
+        if hasattr(proxy_service, "plugin_registry"):
+            plugin_manager = proxy_service.plugin_registry
+            if plugin_manager and hasattr(plugin_manager, "plugin_registry"):
+                # Access the internal PluginRegistry from PluginManager
+                for plugin_name in plugin_manager.plugin_registry.list_plugins():
+                    plugin = plugin_manager.plugin_registry.get_plugin(plugin_name)
+                    if plugin and hasattr(plugin, "get_hooks"):
+                        try:
+                            hooks = plugin.get_hooks()
+                            if hooks:
+                                for hook in hooks:
+                                    hook_registry.register(hook)
+                                    logger.debug(
+                                        "plugin_hook_registered",
+                                        plugin_name=plugin.name,
+                                        hook_name=hook.name,
+                                    )
+                        except Exception as e:
+                            logger.error(
+                                "plugin_hook_registration_failed",
+                                plugin_name=plugin.name,
+                                error=str(e),
+                                exc_info=e,
+                            )
+
+    # Emit APP_STARTUP event
+    try:
+        await hook_manager.emit(HookEvent.APP_STARTUP)
+        logger.debug("app_startup_event_emitted")
+    except Exception as e:
+        logger.error(
+            "app_startup_event_failed",
+            error=str(e),
+            exc_info=e,
+        )
+
+    # Store hook_manager in app.state for FastAPI
+    app.state.hook_manager = hook_manager
+
+    # Set hook_manager on ProxyService if available
+    if hasattr(app.state, "proxy_service"):
+        proxy_service = app.state.proxy_service
+        if hasattr(proxy_service, "set_hook_manager"):
+            proxy_service.set_hook_manager(hook_manager)
+            logger.debug("hook_manager_set_on_proxy_service")
+
+    logger.info(
+        "hook_system_initialization_completed",
+        metrics_enabled=settings.hooks.metrics_enabled,
+        logging_enabled=settings.hooks.logging_enabled,
+        analytics_enabled=settings.hooks.analytics_enabled,
+    )
+
+
 # Define lifecycle components for startup/shutdown organization
 LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
     {
-        "name": "Claude Authentication",
-        "startup": validate_claude_authentication_startup,
-        "shutdown": None,  # One-time validation, no cleanup needed
+        "name": "Task Manager",
+        "startup": setup_task_manager_startup,
+        "shutdown": setup_task_manager_shutdown,
     },
     {
-        "name": "Codex Authentication",
-        "startup": validate_codex_authentication_startup,
+        "name": "Claude Authentication",
+        "startup": validate_claude_authentication_startup,
         "shutdown": None,  # One-time validation, no cleanup needed
     },
     {
@@ -92,26 +263,6 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "name": "Claude CLI",
         "startup": check_claude_cli_startup,
         "shutdown": None,  # Detection only, no cleanup needed
-    },
-    {
-        "name": "Codex CLI",
-        "startup": check_codex_cli_startup,
-        "shutdown": None,  # Detection only, no cleanup needed
-    },
-    {
-        "name": "Claude Detection",
-        "startup": initialize_claude_detection_startup,
-        "shutdown": None,  # No cleanup needed
-    },
-    {
-        "name": "Codex Detection",
-        "startup": initialize_codex_detection_startup,
-        "shutdown": None,  # No cleanup needed
-    },
-    {
-        "name": "Claude SDK",
-        "startup": initialize_claude_sdk_startup,
-        "shutdown": setup_session_manager_shutdown,
     },
     {
         "name": "Scheduler",
@@ -128,29 +279,42 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "startup": initialize_permission_service_startup,
         "shutdown": setup_permission_service_shutdown,
     },
+    {
+        "name": "Proxy Service",
+        "startup": initialize_proxy_service_startup,
+        "shutdown": setup_proxy_service_shutdown,
+    },
 ]
 
-# Additional shutdown-only components that need special handling
+
+# Add plugin initialization to lifecycle components
+LIFECYCLE_COMPONENTS.append(
+    {
+        "name": "Plugin System",
+        "startup": initialize_plugins_startup,
+        "shutdown": None,  # Plugins cleaned up with proxy service
+    }
+)
+
+# Add hook system initialization after plugins
+LIFECYCLE_COMPONENTS.append(
+    {
+        "name": "Hook System",
+        "startup": initialize_hooks_startup,
+        "shutdown": None,  # Hook system cleaned up automatically
+    }
+)
+
 SHUTDOWN_ONLY_COMPONENTS: list[ShutdownComponent] = [
     {
         "name": "Streaming Batches",
         "shutdown": flush_streaming_batches_shutdown,
     },
+    {
+        "name": "Shared HTTP Client",
+        "shutdown": setup_http_client_shutdown,
+    },
 ]
-
-
-# Create shared models router
-models_router = APIRouter(tags=["models"])
-
-
-@models_router.get("/v1/models", response_model=None)
-async def list_models() -> dict[str, Any]:
-    """List available models.
-
-    Returns a combined list of Anthropic models and recent OpenAI models.
-    This endpoint is shared between both SDK and proxy APIs.
-    """
-    return get_models_list()
 
 
 @asynccontextmanager
@@ -172,14 +336,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "server_configured", host=settings.server.host, port=settings.server.port
     )
 
-    # Log Claude CLI configuration
-    if settings.claude.cli_path:
-        logger.debug("claude_cli_configured", cli_path=settings.claude.cli_path)
-    else:
-        logger.debug("claude_cli_auto_detect")
-        logger.debug(
-            "claude_cli_search_paths", paths=settings.claude.get_searched_paths()
-        )
+    # Claude CLI configuration is now handled by the plugin
+    logger.debug("claude_cli_configuration_delegated_to_plugin")
 
     # Execute startup components in order
     for component in LIFECYCLE_COMPONENTS:
@@ -188,11 +346,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             try:
                 logger.debug(f"starting_{component_name.lower().replace(' ', '_')}")
                 await component["startup"](app, settings)
+            except (OSError, PermissionError) as e:
+                logger.error(
+                    f"{component_name.lower().replace(' ', '_')}_startup_io_failed",
+                    error=str(e),
+                    component=component_name,
+                    exc_info=e,
+                )
+                # Continue with graceful degradation
             except Exception as e:
                 logger.error(
                     f"{component_name.lower().replace(' ', '_')}_startup_failed",
                     error=str(e),
                     component=component_name,
+                    exc_info=e,
                 )
                 # Continue with graceful degradation
 
@@ -208,11 +375,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             try:
                 logger.debug(f"stopping_{component_name.lower().replace(' ', '_')}")
                 await shutdown_component["shutdown"](app)
+            except (OSError, PermissionError) as e:
+                logger.error(
+                    f"{component_name.lower().replace(' ', '_')}_shutdown_io_failed",
+                    error=str(e),
+                    component=component_name,
+                    exc_info=e,
+                )
             except Exception as e:
                 logger.error(
                     f"{component_name.lower().replace(' ', '_')}_shutdown_failed",
                     error=str(e),
                     component=component_name,
+                    exc_info=e,
                 )
 
     # Execute shutdown components in reverse order
@@ -226,11 +401,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await component["shutdown"](app, settings)  # type: ignore
                 else:
                     await component["shutdown"](app)  # type: ignore
+            except (OSError, PermissionError) as e:
+                logger.error(
+                    f"{component_name.lower().replace(' ', '_')}_shutdown_io_failed",
+                    error=str(e),
+                    component=component_name,
+                    exc_info=e,
+                )
             except Exception as e:
                 logger.error(
                     f"{component_name.lower().replace(' ', '_')}_shutdown_failed",
                     error=str(e),
                     component=component_name,
+                    exc_info=e,
                 )
 
 
@@ -279,10 +462,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     setup_cors_middleware(app, settings)
     setup_error_handlers(app)
 
-    # Add request content logging middleware first (will run fourth due to middleware order)
-    app.add_middleware(RequestContentLoggingMiddleware)
-
-    # Add custom access log middleware second (will run third due to middleware order)
+    # Add custom access log middleware (will run second due to middleware order)
     app.add_middleware(AccessLogMiddleware)
 
     # Add request ID middleware fourth (will run first to initialize context)
@@ -307,25 +487,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(oauth_router, prefix="/oauth", tags=["oauth"])
 
-    # Codex routes for OpenAI integration
-    app.include_router(codex_router, tags=["codex"])
 
-    # New /sdk/ routes for Claude SDK endpoints
-    app.include_router(claude_router, prefix="/sdk", tags=["claude-sdk"])
-
-    # New /api/ routes for proxy endpoints (includes OpenAI-compatible /v1/chat/completions)
-    app.include_router(proxy_router, prefix="/api", tags=["proxy-api"])
-
-    # Shared models endpoints for both SDK and proxy APIs
-    app.include_router(models_router, prefix="/sdk", tags=["claude-sdk", "models"])
-    app.include_router(models_router, prefix="/api", tags=["proxy-api", "models"])
-
-    # Confirmation endpoints for SSE streaming and responses (conditional on builtin_permissions)
-    if settings.claude.builtin_permissions:
-        app.include_router(
-            permissions_router, prefix="/permissions", tags=["permissions"]
-        )
-        setup_mcp(app)
+    # Plugin management endpoints (conditional on plugin system)
+    if settings.enable_plugins:
+        app.include_router(plugins_router, prefix="/api", tags=["plugins"])
 
     # Mount static files for dashboard SPA
     from pathlib import Path

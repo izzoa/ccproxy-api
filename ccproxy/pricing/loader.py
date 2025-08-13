@@ -1,8 +1,10 @@
 """Pricing data loader and format converter for LiteLLM pricing data."""
 
+import json
 from decimal import Decimal
 from typing import Any
 
+import httpx
 from pydantic import ValidationError
 from structlog import get_logger
 
@@ -165,11 +167,34 @@ class PricingLoader:
 
         except ValidationError as e:
             if verbose:
-                logger.error("pricing_validation_failed", error=str(e))
+                logger.error("pricing_validation_failed", error=str(e), exc_info=e)
+            return None
+        except json.JSONDecodeError as e:
+            if verbose:
+                logger.error(
+                    "pricing_json_decode_failed",
+                    source="LiteLLM",
+                    error=str(e),
+                    exc_info=e,
+                )
+            return None
+        except httpx.HTTPError as e:
+            if verbose:
+                logger.error(
+                    "pricing_http_error", source="LiteLLM", error=str(e), exc_info=e
+                )
+            return None
+        except OSError as e:
+            if verbose:
+                logger.error(
+                    "pricing_io_error", source="LiteLLM", error=str(e), exc_info=e
+                )
             return None
         except Exception as e:
             if verbose:
-                logger.error("pricing_load_failed", source="LiteLLM", error=str(e))
+                logger.error(
+                    "pricing_load_failed", source="LiteLLM", error=str(e), exc_info=e
+                )
             return None
 
     @staticmethod
@@ -222,11 +247,21 @@ class PricingLoader:
 
         except ValidationError as e:
             if verbose:
-                logger.error("pricing_validation_failed", error=str(e))
+                logger.error("pricing_validation_failed", error=str(e), exc_info=e)
+            return None
+        except json.JSONDecodeError as e:
+            if verbose:
+                logger.error("pricing_validation_json_error", error=str(e), exc_info=e)
+            return None
+        except OSError as e:
+            if verbose:
+                logger.error("pricing_validation_io_error", error=str(e), exc_info=e)
             return None
         except Exception as e:
             if verbose:
-                logger.error("pricing_validation_unexpected_error", error=str(e))
+                logger.error(
+                    "pricing_validation_unexpected_error", error=str(e), exc_info=e
+                )
             return None
 
     @staticmethod

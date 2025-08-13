@@ -8,12 +8,11 @@ from ccproxy.auth.exceptions import (
     CredentialsExpiredError,
     CredentialsNotFoundError,
 )
-from ccproxy.auth.manager import BaseAuthManager
 from ccproxy.auth.models import ClaudeCredentials, UserProfile
 from ccproxy.services.credentials.manager import CredentialsManager
 
 
-class CredentialsAuthManager(BaseAuthManager):
+class CredentialsAuthManager:
     """Adapter to make CredentialsManager compatible with AuthManager interface."""
 
     def __init__(self, credentials_manager: CredentialsManager | None = None) -> None:
@@ -91,3 +90,38 @@ class CredentialsAuthManager(BaseAuthManager):
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         await self._credentials_manager.__aexit__(exc_type, exc_val, exc_tb)
+
+    # ==================== Provider-Generic Methods ====================
+
+    async def get_auth_headers(self) -> dict[str, str]:
+        """Get authentication headers for the request.
+
+        Returns:
+            Dictionary of headers to add to requests
+        """
+        try:
+            # Delegate to the credentials manager which implements this method
+            return await self._credentials_manager.get_auth_headers()
+        except CredentialsError as e:
+            raise AuthenticationError(f"Failed to get auth headers: {e}") from e
+
+    async def validate_credentials(self) -> bool:
+        """Validate that credentials are available and valid.
+
+        Returns:
+            True if credentials are valid, False otherwise
+        """
+        try:
+            # Delegate to the credentials manager which implements this method
+            return await self._credentials_manager.validate_credentials()
+        except CredentialsError:
+            return False
+
+    def get_provider_name(self) -> str:
+        """Get the provider name for logging.
+
+        Returns:
+            Provider name string
+        """
+        # Delegate to the credentials manager which implements this method
+        return self._credentials_manager.get_provider_name()

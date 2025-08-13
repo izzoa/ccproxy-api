@@ -2,46 +2,27 @@
 
 import os
 import shutil
+import sys
+import typing
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
+import typing_extensions
+
+
+# Apply TypedDict patch for Python < 3.12
+if sys.version_info < (3, 12):
+    typing.TypedDict = typing_extensions.TypedDict
+
 import structlog
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from ccproxy.core.async_utils import get_package_dir, patched_typing
+from ccproxy.core.async_utils import get_package_dir
+from ccproxy.utils.binary_resolver import BinaryResolver
 
-
-# For further information visit https://errors.pydantic.dev/2.11/u/typed-dict-version
-with patched_typing():
-    from claude_code_sdk import ClaudeCodeOptions  # noqa: E402
 
 logger = structlog.get_logger(__name__)
-
-
-def _create_default_claude_code_options(
-    builtin_permissions: bool = True,
-    continue_conversation: bool = False,
-) -> ClaudeCodeOptions:
-    """Create ClaudeCodeOptions with default values.
-
-    Args:
-        builtin_permissions: Whether to include built-in permission handling defaults
-    """
-    if builtin_permissions:
-        return ClaudeCodeOptions(
-            continue_conversation=continue_conversation,
-            mcp_servers={
-                "confirmation": {"type": "sse", "url": "http://127.0.0.1:8000/mcp"}
-            },
-            permission_prompt_tool_name="mcp__confirmation__check_permission",
-        )
-    else:
-        return ClaudeCodeOptions(
-            mcp_servers={},
-            permission_prompt_tool_name=None,
-            continue_conversation=continue_conversation,
-        )
 
 
 class SDKMessageMode(str, Enum):
@@ -158,9 +139,9 @@ class ClaudeSettings(BaseModel):
         description="Whether to enable built-in permission handling infrastructure (MCP server and SSE endpoints). When disabled, users can still configure custom MCP servers and permission tools.",
     )
 
-    code_options: ClaudeCodeOptions | None = Field(
+    code_options: dict[str, Any] | None = Field(
         default=None,
-        description="Claude Code SDK options configuration",
+        description="Claude Code SDK options configuration (passed to plugin)",
     )
 
     sdk_message_mode: SDKMessageMode = Field(
@@ -199,97 +180,103 @@ class ClaudeSettings(BaseModel):
 
     @field_validator("code_options", mode="before")
     @classmethod
-    def validate_claude_code_options(cls, v: Any, info: Any) -> Any:
-        """Validate and convert Claude Code options."""
+    def validate_claude_code_options(cls, v: Any, info: Any) -> dict[str, Any] | None:
+        """Validate and convert Claude Code options to dict format."""
         # Get builtin_permissions setting from the model data
         builtin_permissions = True  # default
         if info.data and "builtin_permissions" in info.data:
             builtin_permissions = info.data["builtin_permissions"]
 
-        if v is None:
-            # Create instance with default values based on builtin_permissions
-            return _create_default_claude_code_options(builtin_permissions)
+        # Create default options dict based on builtin_permissions
+        default_options = {}
+        if builtin_permissions:
+            default_options = {
+                "continue_conversation": False,
+                "mcp_servers": {
+                    "confirmation": {"type": "sse", "url": "http://127.0.0.1:8000/mcp"}
+                },
+                "permission_prompt_tool_name": "mcp__confirmation__check_permission",
+            }
+        else:
+            default_options = {
+                "continue_conversation": False,
+                "mcp_servers": {},
+                "permission_prompt_tool_name": None,
+            }
 
-        # If it's already a ClaudeCodeOptions instance, return as-is
-        if isinstance(v, ClaudeCodeOptions):
-            return v
+        if v is None:
+            # Return default options
+            return default_options
 
         # If it's an empty dict, treat it like None and use defaults
         if isinstance(v, dict) and not v:
-            return _create_default_claude_code_options(builtin_permissions)
+            return default_options
 
-        # For non-empty dicts, merge with defaults instead of replacing them
+        # For non-empty dicts, merge with defaults
         if isinstance(v, dict):
-            # Start with default values based on builtin_permissions
-            defaults = _create_default_claude_code_options(builtin_permissions)
-
-            # Extract default values as a dict for merging
-            default_values = {
-                "mcp_servers": dict(defaults.mcp_servers)
-                if isinstance(defaults.mcp_servers, dict)
-                else {},
-                "permission_prompt_tool_name": defaults.permission_prompt_tool_name,
-            }
-
-            # Add other default attributes if they exist
-            for attr in [
-                "max_thinking_tokens",
-                "allowed_tools",
-                "disallowed_tools",
-                "cwd",
-                "append_system_prompt",
-                "max_turns",
-                "continue_conversation",
-                "permission_mode",
-                "model",
-                "system_prompt",
-            ]:
-                if hasattr(defaults, attr):
-                    default_value = getattr(defaults, attr, None)
-                    if default_value is not None:
-                        default_values[attr] = default_value
-
             # Handle MCP server merging when builtin_permissions is enabled
             if builtin_permissions and "mcp_servers" in v:
                 user_mcp_servers = v["mcp_servers"]
                 if isinstance(user_mcp_servers, dict):
                     # Merge user MCP servers with built-in ones (user takes precedence)
-                    default_mcp = default_values["mcp_servers"]
+                    default_mcp = default_options.get("mcp_servers", {})
                     if isinstance(default_mcp, dict):
                         merged_mcp_servers = {
                             **default_mcp,
                             **user_mcp_servers,
                         }
-                        v = {**v, "mcp_servers": merged_mcp_servers}
+                    else:
+                        merged_mcp_servers = user_mcp_servers
+                    v = {**v, "mcp_servers": merged_mcp_servers}
 
-            # Merge CLI overrides with defaults (CLI overrides take precedence)
-            merged_values = {**default_values, **v}
+            # Merge with defaults (user values take precedence)
+            return {**default_options, **v}
 
-            return ClaudeCodeOptions(**merged_values)
-
-        # Try to convert to ClaudeCodeOptions if possible
+        # Try to convert object to dict if possible
         if hasattr(v, "model_dump"):
-            return ClaudeCodeOptions(**v.model_dump())
+            return {**default_options, **v.model_dump()}
         elif hasattr(v, "__dict__"):
-            return ClaudeCodeOptions(**v.__dict__)
+            return {**default_options, **v.__dict__}
 
         # Fallback: use default values
-        return _create_default_claude_code_options(builtin_permissions)
+        return default_options
 
     @model_validator(mode="after")
     def validate_code_options_after(self) -> "ClaudeSettings":
         """Ensure code_options is properly initialized after field validation."""
         if self.code_options is None:
-            self.code_options = _create_default_claude_code_options(
-                self.builtin_permissions
-            )
+            # Create default options dict based on builtin_permissions
+            if self.builtin_permissions:
+                self.code_options = {
+                    "continue_conversation": False,
+                    "mcp_servers": {
+                        "confirmation": {
+                            "type": "sse",
+                            "url": "http://127.0.0.1:8000/mcp",
+                        }
+                    },
+                    "permission_prompt_tool_name": "mcp__confirmation__check_permission",
+                }
+            else:
+                self.code_options = {
+                    "continue_conversation": False,
+                    "mcp_servers": {},
+                    "permission_prompt_tool_name": None,
+                }
         return self
 
-    def find_claude_cli(self) -> tuple[str | None, bool]:
+    def find_claude_cli(
+        self, enable_fallback: bool = True
+    ) -> tuple[list[str] | str | None, bool]:
         """Find Claude CLI executable in PATH or specified location.
 
+        Args:
+            enable_fallback: Whether to use package manager fallback
+
         Returns:
-            tuple: (path_to_claude, found_in_path)
+            tuple: (command_or_path, found_in_path)
+                - command_or_path: Either a string path (direct binary) or list of strings (package manager command)
+                - found_in_path: True if found directly in PATH
         """
         if self.cli_path:
             return self.cli_path, False
@@ -317,6 +304,14 @@ class ClaudeSettings(BaseModel):
         for path in common_paths:
             if path.exists() and path.is_file() and os.access(path, os.X_OK):
                 return str(path), False
+
+        # Try package manager fallback if enabled
+        if enable_fallback:
+            resolver = BinaryResolver()
+            result = resolver.find_binary("claude", "@anthropic-ai/claude-code")
+            if result:
+                # Return the command list for package manager execution
+                return result.command, False
 
         return None, False
 

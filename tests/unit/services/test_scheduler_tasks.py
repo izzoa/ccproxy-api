@@ -1,12 +1,14 @@
 """Unit tests for individual scheduler task implementations."""
 
 import asyncio
+from collections.abc import AsyncGenerator
 from datetime import UTC
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
 from ccproxy.scheduler.tasks import (
     BaseScheduledTask,
     PricingCacheUpdateTask,
@@ -18,6 +20,15 @@ from ccproxy.scheduler.tasks import (
 
 class TestBaseScheduledTask:
     """Test the BaseScheduledTask abstract base class."""
+
+    @pytest.fixture
+    async def task_manager_lifecycle(self) -> AsyncGenerator[None, None]:
+        """Start and stop the task manager for tests that need it."""
+        await start_task_manager()
+        try:
+            yield
+        finally:
+            await stop_task_manager()
 
     class ConcreteTask(BaseScheduledTask):
         """Concrete implementation for testing."""
@@ -43,7 +54,7 @@ class TestBaseScheduledTask:
             self.cleanup_called = True
 
     @pytest.mark.asyncio
-    async def test_task_lifecycle(self) -> None:
+    async def test_task_lifecycle(self, task_manager_lifecycle: None) -> None:
         """Test task start and stop lifecycle."""
         task = self.ConcreteTask(
             name="test_task",

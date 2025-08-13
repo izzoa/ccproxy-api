@@ -1,12 +1,20 @@
 """OAuth authentication routes for Anthropic OAuth login."""
 
+import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
+from pydantic import ValidationError
 from structlog import get_logger
 
+from ccproxy.auth.exceptions import (
+    CredentialsStorageError,
+    OAuthError,
+    OAuthTokenRefreshError,
+)
 from ccproxy.auth.models import (
     ClaudeCredentials,
     OAuthToken,
@@ -235,14 +243,108 @@ async def oauth_callback(
                 status_code=500,
             )
 
-    except Exception as e:
+    except (OAuthError, OAuthTokenRefreshError, CredentialsStorageError) as e:
         logger.error(
-            "Unexpected error in OAuth callback",
-            error_type="unexpected_error",
-            error_message=str(e),
+            "oauth_callback_error",
+            error_type="auth_error",
+            error=str(e),
             state=state,
             operation="oauth_callback",
-            exc_info=True,
+            exc_info=e,
+        )
+
+        if state and state in _pending_flows:
+            _pending_flows[state].update(
+                {
+                    "completed": True,
+                    "success": False,
+                    "error": str(e),
+                }
+            )
+
+        return HTMLResponse(
+            content=f"""
+            <html>
+                <head><title>Login Error</title></head>
+                <body>
+                    <h1>Login Error</h1>
+                    <p>Authentication error: {str(e)}</p>
+                    <p>You can close this window and try again.</p>
+                </body>
+            </html>
+            """,
+            status_code=500,
+        )
+    except httpx.HTTPError as e:
+        logger.error(
+            "oauth_callback_http_error",
+            error=str(e),
+            status=e.response.status_code if hasattr(e, "response") else None,
+            state=state,
+            operation="oauth_callback",
+            exc_info=e,
+        )
+
+        if state and state in _pending_flows:
+            _pending_flows[state].update(
+                {
+                    "completed": True,
+                    "success": False,
+                    "error": f"HTTP error: {str(e)}",
+                }
+            )
+
+        return HTMLResponse(
+            content=f"""
+            <html>
+                <head><title>Login Error</title></head>
+                <body>
+                    <h1>Login Error</h1>
+                    <p>Network error occurred: {str(e)}</p>
+                    <p>You can close this window and try again.</p>
+                </body>
+            </html>
+            """,
+            status_code=500,
+        )
+    except ValidationError as e:
+        logger.error(
+            "oauth_callback_validation_error",
+            error=str(e),
+            state=state,
+            operation="oauth_callback",
+            exc_info=e,
+        )
+
+        if state and state in _pending_flows:
+            _pending_flows[state].update(
+                {
+                    "completed": True,
+                    "success": False,
+                    "error": f"Validation error: {str(e)}",
+                }
+            )
+
+        return HTMLResponse(
+            content="""
+            <html>
+                <head><title>Login Error</title></head>
+                <body>
+                    <h1>Login Error</h1>
+                    <p>Data validation error occurred</p>
+                    <p>You can close this window and try again.</p>
+                </body>
+            </html>
+            """,
+            status_code=500,
+        )
+    except Exception as e:
+        logger.error(
+            "oauth_callback_unexpected_error",
+            error=str(e),
+            state=state,
+            operation="oauth_callback",
+            exc_info=e,
         )
 
         if state and state in _pending_flows:
@@ -383,12 +485,51 @@ async def _exchange_code_for_tokens(
                 )
                 return False
 
+    except httpx.TimeoutException as e:
+        logger.error(
+            "token_exchange_timeout",
+            error=str(e),
+            operation="exchange_code_for_tokens",
+            exc_info=e,
+        )
+        return False
+    except httpx.HTTPError as e:
+        logger.error(
+            "token_exchange_http_error",
+            error=str(e),
+            operation="exchange_code_for_tokens",
+            exc_info=e,
+        )
+        return False
+    except CredentialsStorageError as e:
+        logger.error(
+            "credentials_save_failed",
+            error=str(e),
+            operation="exchange_code_for_tokens",
+            exc_info=e,
+        )
+        return False
+    except json.JSONDecodeError as e:
+        logger.error(
+            "token_exchange_json_decode_error",
+            error=str(e),
+            operation="exchange_code_for_tokens",
+            exc_info=e,
+        )
+        return False
+    except ValidationError as e:
+        logger.error(
+            "token_exchange_validation_error",
+            error=str(e),
+            operation="exchange_code_for_tokens",
+            exc_info=e,
+        )
+        return False
     except Exception as e:
         logger.error(
-            "Error during token exchange",
-            error_type="token_exchange_exception",
-            error_message=str(e),
+            "token_exchange_unexpected_error",
+            error=str(e),
             operation="exchange_code_for_tokens",
-            exc_info=True,
+            exc_info=e,
         )
         return False

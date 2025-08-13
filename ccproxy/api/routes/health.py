@@ -23,7 +23,6 @@ from structlog import get_logger
 
 from ccproxy import __version__
 from ccproxy.auth.exceptions import CredentialsExpiredError, CredentialsNotFoundError
-from ccproxy.core.async_utils import patched_typing
 from ccproxy.services.credentials import CredentialsManager
 
 
@@ -163,7 +162,14 @@ async def _check_oauth2_credentials() -> tuple[str, dict[str, Any]]:
             "auth_status": "expired",
             "error": "Claude credentials have expired",
         }
+    except (OSError, PermissionError) as e:
+        logger.error("oauth_credentials_check_io_failed", error=str(e), exc_info=e)
+        return "fail", {
+            "auth_status": "error",
+            "error": f"File access error: {str(e)}",
+        }
     except Exception as e:
+        logger.error("oauth_credentials_check_failed", error=str(e), exc_info=e)
         return "fail", {
             "auth_status": "error",
             "error": f"Unexpected error: {str(e)}",
@@ -295,7 +301,23 @@ async def check_claude_code() -> tuple[str, dict[str, Any]]:
         # Cache the result
         _claude_cli_cache = (current_time, result)
         return result
+    except (OSError, PermissionError) as e:
+        logger.error("claude_cli_check_io_failed", error=str(e), exc_info=e)
+        result = (
+            "fail",
+            {
+                "installation_status": "error",
+                "cli_status": "error",
+                "error": f"Process execution error: {str(e)}",
+                "version": None,
+                "binary_path": claude_path,
+            },
+        )
+        # Cache the result
+        _claude_cli_cache = (current_time, result)
+        return result
     except Exception as e:
+        logger.error("claude_cli_check_failed", error=str(e), exc_info=e)
         result = (
             "fail",
             {
@@ -452,7 +474,23 @@ async def check_codex_cli() -> tuple[str, dict[str, Any]]:
         _codex_cli_cache = (current_time, result)
         return result
 
+    except (OSError, PermissionError) as e:
+        logger.error("codex_cli_check_io_failed", error=str(e), exc_info=e)
+        result = (
+            "fail",
+            {
+                "installation_status": "error",
+                "cli_status": "error",
+                "error": f"Process execution error: {str(e)}",
+                "version": None,
+                "binary_path": codex_path,
+            },
+        )
+        # Cache the result
+        _codex_cli_cache = (current_time, result)
+        return result
     except Exception as e:
+        logger.error("codex_cli_check_failed", error=str(e), exc_info=e)
         result = (
             "fail",
             {
@@ -500,38 +538,23 @@ async def get_codex_cli_info() -> CodexCliInfo:
 async def _check_claude_sdk() -> tuple[str, dict[str, Any]]:
     """Check Claude SDK installation and version.
 
+    Note: Claude SDK is now only available as a plugin and not part of core.
+    This check always returns 'warn' status to indicate SDK should be accessed
+    via the plugin system.
+
     Returns:
         Tuple of (status, details) where status is 'pass'/'fail'/'warn'
         Details include SDK version and availability
     """
-    try:
-        # Try to import Claude Code SDK
-        with patched_typing():
-            from claude_code_sdk import __version__ as sdk_version
-
-        return "pass", {
-            "installation_status": "found",
-            "sdk_status": "available",
-            "version": sdk_version,
-            "import_successful": True,
-        }
-
-    except ImportError as e:
-        return "warn", {
-            "installation_status": "not_found",
-            "sdk_status": "not_installed",
-            "error": f"Claude SDK not available: {str(e)}",
-            "version": None,
-            "import_successful": False,
-        }
-    except Exception as e:
-        return "fail", {
-            "installation_status": "error",
-            "sdk_status": "error",
-            "error": f"Unexpected error checking SDK: {str(e)}",
-            "version": None,
-            "import_successful": False,
-        }
+    # Claude SDK has been moved to plugin system and is not available in core
+    return "warn", {
+        "installation_status": "plugin_only",
+        "sdk_status": "moved_to_plugin",
+        "error": "Claude SDK is now available via the claude_sdk plugin only",
+        "version": None,
+        "import_successful": False,
+        "plugin_name": "claude_sdk",
+    }
 
 
 @router.get("/health/live")

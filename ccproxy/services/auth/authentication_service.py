@@ -1,0 +1,234 @@
+"""Authentication service for managing OAuth tokens."""
+
+from datetime import UTC, datetime
+
+import httpx
+import structlog
+from fastapi import HTTPException
+
+from ccproxy.auth.exceptions import CredentialsExpiredError, CredentialsNotFoundError
+from ccproxy.auth.models import ClaudeCredentials
+from ccproxy.models.credentials import CredentialStatus, CredentialValidation
+from ccproxy.services.credentials.manager import CredentialsManager
+
+
+logger = structlog.get_logger(__name__)
+
+
+class AuthenticationService:
+    """Manages authentication token retrieval and validation."""
+
+    def __init__(self, credentials_manager: CredentialsManager) -> None:
+        """Initialize with credentials manager.
+
+        - Wraps existing CredentialsManager
+        - Provides cleaner interface for ProxyService
+        """
+        self.credentials_manager = credentials_manager
+
+    async def get_access_token(self) -> str:
+        """Retrieve valid OAuth access token.
+
+        - Gets token from credentials manager
+        - Validates token is not expired
+        - Attempts refresh if needed
+        - Raises HTTPException(401) with helpful message
+        """
+        try:
+            # Get current credentials
+            credentials = await self._get_credentials()
+
+            if not credentials or not credentials.claude_ai_oauth.access_token:
+                raise self._create_auth_error_response(
+                    CredentialValidation(
+                        status=CredentialStatus.MISSING,
+                        message="No credentials found. Please run: ccproxy auth login",
+                    )
+                )
+
+            # Check if token is expired
+            oauth_token = credentials.claude_ai_oauth
+            if oauth_token.expires_at:
+                now = datetime.now(UTC)
+                expires_at = oauth_token.expires_at_datetime
+
+                # Ensure expires_at is timezone-aware
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=UTC)
+
+                if now >= expires_at:
+                    # Try to refresh
+                    logger.info("Access token expired, attempting refresh")
+                    refreshed = await self.refresh_token_if_needed()
+
+                    if refreshed:
+                        # Get new credentials after refresh
+                        credentials = await self._get_credentials()
+                        if credentials and credentials.claude_ai_oauth.access_token:
+                            return credentials.claude_ai_oauth.access_token.get_secret_value()
+
+                    raise self._create_auth_error_response(
+                        CredentialValidation(
+                            status=CredentialStatus.EXPIRED,
+                            message="Token expired and refresh failed",
+                            expires_at=expires_at,
+                        )
+                    )
+
+            return credentials.claude_ai_oauth.access_token.get_secret_value()
+
+        except HTTPException:
+            raise
+        except (CredentialsNotFoundError, CredentialsExpiredError) as e:
+            logger.debug("credential_auth_error", error=str(e))
+            raise self._create_auth_error_response(
+                CredentialValidation(
+                    status=CredentialStatus.EXPIRED
+                    if isinstance(e, CredentialsExpiredError)
+                    else CredentialStatus.MISSING,
+                    message=f"Authentication error: {str(e)}",
+                )
+            ) from e
+        except (ValueError, TypeError) as e:
+            logger.error("access_token_validation_error", error=str(e), exc_info=e)
+            raise self._create_auth_error_response(
+                CredentialValidation(
+                    status=CredentialStatus.INVALID,
+                    message=f"Authentication error: {str(e)}",
+                )
+            ) from e
+        except Exception as e:
+            logger.error("access_token_unexpected_error", error=str(e), exc_info=e)
+            raise self._create_auth_error_response(
+                CredentialValidation(
+                    status=CredentialStatus.INVALID,
+                    message=f"Authentication error: {str(e)}",
+                )
+            ) from e
+
+    async def validate_credentials(self) -> CredentialValidation:
+        """Check credential status without retrieving token.
+
+        - Returns validation object with status
+        - Includes expiry information
+        - Indicates if refresh is needed
+        """
+        try:
+            credentials = await self._get_credentials()
+            if not credentials:
+                return CredentialValidation(
+                    status=CredentialStatus.MISSING, message="No credentials found"
+                )
+
+            # Check if token is expired
+            oauth_token = credentials.claude_ai_oauth
+            if oauth_token.is_expired:
+                return CredentialValidation(
+                    status=CredentialStatus.EXPIRED,
+                    message="Token has expired",
+                    expires_at=oauth_token.expires_at_datetime,
+                )
+
+            return CredentialValidation(
+                status=CredentialStatus.VALID,
+                message="Credentials are valid",
+                expires_at=oauth_token.expires_at_datetime,
+            )
+        except (CredentialsNotFoundError, CredentialsExpiredError):
+            return CredentialValidation(
+                status=CredentialStatus.INVALID, message="Invalid credentials"
+            )
+        except (ValueError, TypeError) as e:
+            logger.debug("credential_validation_value_error", error=str(e), exc_info=e)
+            return CredentialValidation(
+                status=CredentialStatus.INVALID, message="Invalid credentials"
+            )
+        except Exception as e:
+            logger.debug(
+                "credential_validation_unexpected_error", error=str(e), exc_info=e
+            )
+            return CredentialValidation(
+                status=CredentialStatus.INVALID, message="Invalid credentials"
+            )
+
+    async def refresh_token_if_needed(self) -> bool:
+        """Attempt to refresh token if expired.
+
+        - Checks expiry status first
+        - Calls refresh on credentials manager
+        - Returns True if successful
+        - Returns False if refresh fails
+        """
+        try:
+            validation = await self.validate_credentials()
+
+            if validation.status == CredentialStatus.EXPIRED:
+                logger.info("Attempting token refresh")
+                await self.credentials_manager.refresh_token()
+                refreshed = True
+
+                if refreshed:
+                    logger.info("Token refresh successful")
+                    return True
+                else:
+                    logger.warning("Token refresh failed")
+                    return False
+
+            # Token not expired, no refresh needed
+            return True
+
+        except (CredentialsNotFoundError, CredentialsExpiredError) as e:
+            logger.debug("token_refresh_credential_error", error=str(e))
+            return False
+        except (httpx.HTTPError, httpx.TimeoutException) as e:
+            logger.error("token_refresh_http_error", error=str(e), exc_info=e)
+            return False
+        except Exception as e:
+            logger.error("token_refresh_unexpected_error", error=str(e), exc_info=e)
+            return False
+
+    async def _get_credentials(self) -> ClaudeCredentials | None:
+        """Get credentials from manager, adapting interface."""
+        try:
+            return await self.credentials_manager.get_valid_credentials()
+        except (CredentialsNotFoundError, CredentialsExpiredError):
+            return None
+        except (ValueError, TypeError) as e:
+            logger.debug("get_credentials_value_error", error=str(e), exc_info=e)
+            return None
+        except Exception as e:
+            logger.debug("get_credentials_unexpected_error", error=str(e), exc_info=e)
+            return None
+
+    def _create_auth_error_response(
+        self, validation: CredentialValidation | None
+    ) -> HTTPException:
+        """Build detailed 401 error with helpful message.
+
+        - Includes 'ccproxy auth login' instructions
+        - Shows expiry time if token expired
+        - Provides different messages for different failures
+        """
+        if not validation:
+            message = "Authentication required. Please run: ccproxy auth login"
+        elif validation.status == CredentialStatus.MISSING:
+            message = (
+                validation.message
+                or "No credentials found. Please run: ccproxy auth login"
+            )
+        elif validation.status == CredentialStatus.EXPIRED:
+            if validation.expires_at:
+                message = f"Access token expired at {validation.expires_at}. Please run: ccproxy auth login"
+            else:
+                message = "Access token expired. Please run: ccproxy auth login"
+        elif validation.status == CredentialStatus.INVALID:
+            message = (
+                validation.message
+                or "Invalid credentials. Please run: ccproxy auth login"
+            )
+        else:
+            message = "Authentication failed. Please run: ccproxy auth login"
+
+        return HTTPException(
+            status_code=401, detail=message, headers={"WWW-Authenticate": "Bearer"}
+        )

@@ -8,29 +8,25 @@ requires-python = ">=3.11"
 dependencies = [
   "aiofiles>=24.1.0",
   "aiosqlite>=0.21.0",
-  "jsonschema>=0.33.2",
+  "jsonschema>=4.23.0",
   "fastapi[standard]>=0.115.14",
-  "httpx>=0.28.1",
-  "httpx-sse>=0.4.1",
+  "httpx[http2]>=0.28.1",
   "keyring>=25.6.0",
-  "openai>=1.93.0",
   "prometheus-client>=0.22.1",
   "pydantic>=2.8.0",
   "pydantic-settings>=2.4.0",
   "rich>=13.0.0",
   "rich-toolkit>=0.14.8",
   "structlog>=25.4.0",
-  "tomli>=2.0.0; python_version<'3.11'",
   "typer>=0.16.0",
   "duckdb>=1.1.0",
   "typing-extensions>=4.0.0",
   "uvicorn>=0.34.0",
   "sqlmodel>=0.0.24",
   "duckdb-engine>=0.17.0",
-  "fastapi-mcp",
   "textual>=3.7.1",
-  "claude-code-sdk>=0.0.19",
-  "pyjwt>=2.10.1",
+  "packaging>=25.0",
+  "h2>=4.2.0",
 ]
 
 [build-system]
@@ -48,9 +44,24 @@ source = "vcs"
 version-file = "ccproxy/_version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["ccproxy"]
+packages = ["ccproxy", "plugins"]
 include = [
-    "ccproxy/data/*.json"
+    "ccproxy/data/*.json",
+    "plugins/**/*.py",
+    "plugins/**/*.json",
+    "plugins/**/*.toml"
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "ccproxy/**/*.py",
+    "ccproxy/**/*.json",
+    "plugins/**/*.py",
+    "plugins/**/*.json",
+    "plugins/**/*.toml",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml"
 ]
 
 [project.scripts]
@@ -58,6 +69,13 @@ include = [
 ccproxy = "ccproxy.cli:main"
 ccproxy-api = "ccproxy.cli:main"
 ccproxy-perm = "ccproxy.cli.commands.permission:main"
+
+[project.entry-points."ccproxy.plugins"]
+claude_api = "plugins.claude_api.plugin:Plugin"
+claude_sdk = "plugins.claude_sdk.plugin:Plugin"
+codex = "plugins.codex.plugin:Plugin"
+permissions = "plugins.permissions.plugin:Plugin"
+raw_http_logger = "plugins.raw_http_logger.plugin:Plugin"
 
 [dependency-groups]
 dev = [
@@ -79,6 +97,8 @@ dev = [
   "pytest-httpx>=0.35.0",
   "types-pyyaml>=6.0.12.20250516",
   "types-aiofiles>=24.0.0",
+  "openai>=1.99.9",
+  "pyjwt>=2.10.1",
 ]
 security = [
   "keyring>=25.0.0", # Optional keyring support for secure credential storage
@@ -200,7 +220,7 @@ lines-after-imports = 2
 python_version = "3.11"
 show_column_numbers = true
 follow_imports = "normal"
-exclude = ["^[^/]+\\.py$", "docs/", "site/", "tests.depracted/", "examples/"]
+exclude = ["^[^/]+\\.py$", "docs/", "site/", "tests.deprecated/", "examples/"]
 
 # Enable all strict mode flags
 strict = true
@@ -348,5 +368,11 @@ include = ["ccproxy*"]
 [tool.uv]
 package = true
 
-[tool.uv.sources]
-fastapi-mcp = { git = "https://github.com/tadata-org/fastapi_mcp", rev = "6fdbff6168b2c84b22966886741d1f24a584856c" }
+# Workspace configuration for plugins
+[tool.uv.workspace]
+members = [
+    "plugins/claude_sdk",
+    "plugins/claude_api",
+    "plugins/codex",
+    "plugins/permissions",
+]

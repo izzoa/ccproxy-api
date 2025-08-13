@@ -4,6 +4,7 @@ import asyncio
 import base64
 import contextlib
 import hashlib
+import json
 import secrets
 import urllib.parse
 import webbrowser
@@ -14,8 +15,15 @@ import structlog
 import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
+from pydantic import ValidationError
 
-from ccproxy.config.codex import CodexSettings
+from ccproxy.auth.exceptions import (
+    CredentialsStorageError,
+    OAuthError,
+    OAuthTokenRefreshError,
+)
+from ccproxy.core.async_task_manager import create_managed_task
+from plugins.codex.config import CodexSettings
 
 from .credentials import OpenAICredentials, OpenAITokenManager
 
@@ -107,10 +115,16 @@ class OpenAIOAuthClient:
                     seconds=expires_in
                 )
 
+                # Capture id_token if available (contains chatgpt_account_id for proper UUID)
+                id_token = token_data.get("id_token")
+                if not id_token:
+                    logger.debug("No id_token in OAuth response")
+
                 # Create credentials (account_id will be extracted from access_token)
                 credentials = OpenAICredentials(
                     access_token=token_data["access_token"],
                     refresh_token=token_data.get("refresh_token", ""),
+                    id_token=id_token,
                     expires_at=expires_at,
                     account_id="",  # Will be auto-extracted by validator
                     active=True,
@@ -125,12 +139,33 @@ class OpenAIOAuthClient:
                     error_detail = error_data.get(
                         "error_description", error_data.get("error", str(e))
                     )
-                except Exception:
+                except json.JSONDecodeError:
                     error_detail = str(e)
 
                 raise ValueError(f"Token exchange failed: {error_detail}") from e
+            except httpx.TimeoutException as e:
+                logger.error("token_exchange_timeout", error=str(e), exc_info=e)
+                raise OAuthTokenRefreshError(f"Token exchange timed out: {e}") from e
+            except httpx.HTTPError as e:
+                logger.error("token_exchange_http_error", error=str(e), exc_info=e)
+                raise OAuthTokenRefreshError(f"Token exchange HTTP error: {e}") from e
+            except json.JSONDecodeError as e:
+                logger.error(
+                    "token_exchange_json_decode_error", error=str(e), exc_info=e
+                )
+                raise OAuthTokenRefreshError(f"Invalid JSON response: {e}") from e
+            except ValidationError as e:
+                logger.error(
+                    "token_exchange_validation_error", error=str(e), exc_info=e
+                )
+                raise OAuthTokenRefreshError(f"Token validation failed: {e}") from e
             except Exception as e:
-                raise ValueError(f"Token exchange request failed: {e}") from e
+                logger.error(
+                    "token_exchange_unexpected_error", error=str(e), exc_info=e
+                )
+                raise OAuthTokenRefreshError(
+                    f"Token exchange request failed: {e}"
+                ) from e
 
     def _create_callback_app(self, code_verifier: str, expected_state: str) -> FastAPI:
         """Create FastAPI app to handle OAuth callback."""
@@ -231,8 +266,62 @@ class OpenAIOAuthClient:
                     """
                 )
 
+            except (OAuthTokenRefreshError, OAuthError) as e:
+                logger.error("oauth_exchange_failed", error=str(e), exc_info=e)
+                self._auth_error = f"OAuth exchange failed: {e}"
+                self._auth_complete.set()
+                return HTMLResponse(
+                    f"""
+                    <html>
+                    <head><title>Authentication Failed</title></head>
+                    <body>
+                        <h1>Authentication Failed</h1>
+                        <p>OAuth exchange failed: {e}</p>
+                        <p>You can close this window and try again.</p>
+                    </body>
+                    </html>
+                    """
+                )
+            except CredentialsStorageError as e:
+                logger.error("oauth_credentials_save_failed", error=str(e), exc_info=e)
+                self._auth_error = f"Failed to save credentials: {e}"
+                self._auth_complete.set()
+                return HTMLResponse(
+                    f"""
+                    <html>
+                    <head><title>Authentication Failed</title></head>
+                    <body>
+                        <h1>Authentication Failed</h1>
+                        <p>Failed to save credentials: {e}</p>
+                        <p>You can close this window and try again.</p>
+                        <script>setTimeout(() => window.close(), 3000);</script>
+                    </body>
+                    </html>
+                    """,
+                    status_code=500,
+                )
+            except ValidationError as e:
+                logger.error("oauth_validation_error", error=str(e), exc_info=e)
+                self._auth_error = f"Credential validation failed: {e}"
+                self._auth_complete.set()
+                return HTMLResponse(
+                    """
+                    <html>
+                    <head><title>Authentication Failed</title></head>
+                    <body>
+                        <h1>Authentication Failed</h1>
+                        <p>Credential validation failed</p>
+                        <p>You can close this window and try again.</p>
+                        <script>setTimeout(() => window.close(), 3000);</script>
+                    </body>
+                    </html>
+                    """,
+                    status_code=500,
+                )
             except Exception as e:
-                logger.error("Token exchange failed", error=str(e))
+                logger.error(
+                    "oauth_callback_unexpected_error", error=str(e), exc_info=e
+                )
                 self._auth_error = f"Token exchange failed: {e}"
                 self._auth_complete.set()
                 return HTMLResponse(
@@ -289,7 +378,21 @@ class OpenAIOAuthClient:
         app = self._create_callback_app(code_verifier, state)
 
         # Start callback server
-        self._server_task = asyncio.create_task(self._run_callback_server(app))
+        # Try to use managed task if task manager is started, otherwise use regular task
+        from ccproxy.core.async_task_manager import get_task_manager
+
+        task_manager = get_task_manager()
+        if task_manager.is_started:
+            self._server_task = await create_managed_task(
+                self._run_callback_server(app),
+                name="oauth_callback_server",
+                creator="OpenAIOAuthClient",
+            )
+        else:
+            # Fallback to regular asyncio.create_task for CLI usage
+            self._server_task = asyncio.create_task(
+                self._run_callback_server(app), name="oauth_callback_server"
+            )
 
         # Give server time to start
         await asyncio.sleep(1)
@@ -305,8 +408,10 @@ class OpenAIOAuthClient:
             try:
                 webbrowser.open(auth_url)
                 print("Opening browser...")
+            except (OSError, PermissionError) as e:
+                logger.warning("browser_access_failed", error=str(e), exc_info=e)
             except Exception as e:
-                logger.warning("Failed to open browser automatically", error=str(e))
+                logger.warning("browser_open_failed", error=str(e), exc_info=e)
                 print("Please copy and paste the URL above into your browser.")
 
         print("Waiting for authentication to complete...")

@@ -2,14 +2,14 @@
 
 from typing import Any, cast
 
-from ccproxy.claude_sdk.options import OptionsHandler
 from ccproxy.config.claude import ClaudeSettings
 from ccproxy.config.settings import Settings
 from ccproxy.core.async_utils import patched_typing
+from plugins.claude_sdk.options import OptionsHandler
 
 
 with patched_typing():
-    from claude_code_sdk import ClaudeCodeOptions
+    pass
 
 
 class TestOptionsHandler:
@@ -52,12 +52,14 @@ class TestOptionsHandler:
 
     def test_create_options_with_custom_configuration(self):
         """Test that custom configuration overrides defaults."""
-        # Create custom ClaudeCodeOptions with different values
-        custom_code_options = ClaudeCodeOptions(
-            mcp_servers={"custom": {"type": "sse", "url": "http://localhost:9000/mcp"}},
-            permission_prompt_tool_name="custom_permission_tool",
-            max_thinking_tokens=15000,
-        )
+        # Create custom code options dict with different values
+        custom_code_options = {
+            "mcp_servers": {
+                "custom": {"type": "sse", "url": "http://localhost:9000/mcp"}
+            },
+            "permission_prompt_tool_name": "custom_permission_tool",
+            "max_thinking_tokens": 15000,
+        }
 
         claude_settings = ClaudeSettings(code_options=custom_code_options)
         settings = Settings(claude=claude_settings)
@@ -127,8 +129,8 @@ class TestOptionsHandler:
     def test_create_options_preserves_all_configuration_attributes(self):
         """Test that all attributes from configuration are properly copied."""
         # Create comprehensive configuration
-        custom_code_options = ClaudeCodeOptions(
-            mcp_servers={
+        custom_code_options = {
+            "mcp_servers": {
                 "confirmation": {"type": "sse", "url": "http://127.0.0.1:8000/mcp"},
                 "filesystem": {
                     "type": "stdio",
@@ -136,12 +138,12 @@ class TestOptionsHandler:
                     "args": ["@modelcontextprotocol/server-filesystem"],
                 },
             },
-            permission_prompt_tool_name="mcp__confirmation__check_permission",
-            max_thinking_tokens=10000,
-            allowed_tools=["Read", "Write", "Bash"],
-            cwd="/project/root",
-            append_system_prompt="Additional context",
-        )
+            "permission_prompt_tool_name": "mcp__confirmation__check_permission",
+            "max_thinking_tokens": 10000,
+            "allowed_tools": ["Read", "Write", "Bash"],
+            "cwd": "/project/root",
+            "append_system_prompt": "Additional context",
+        }
 
         claude_settings = ClaudeSettings(code_options=custom_code_options)
         settings = Settings(claude=claude_settings)
@@ -164,9 +166,9 @@ class TestOptionsHandler:
 
     def test_model_parameter_always_overrides_settings(self):
         """Test that the model parameter always takes precedence over settings."""
-        custom_code_options = ClaudeCodeOptions(
-            model="claude-3-opus-20240229"  # Different model in settings
-        )
+        custom_code_options = {
+            "model": "claude-3-opus-20240229"  # Different model in settings
+        }
 
         claude_settings = ClaudeSettings(code_options=custom_code_options)
         settings = Settings(claude=claude_settings)

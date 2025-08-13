@@ -22,8 +22,6 @@ from ccproxy.scheduler.errors import SchedulerError
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
     flush_streaming_batches_shutdown,
-    initialize_claude_detection_startup,
-    initialize_claude_sdk_startup,
     initialize_log_storage_shutdown,
     initialize_log_storage_startup,
     initialize_permission_service_startup,
@@ -214,9 +212,12 @@ class TestValidateAuthenticationStartup:
                 # Verify error was logged
                 mock_logger.error.assert_called_once()
                 call_args = mock_logger.error.call_args[1]
-                assert "claude_token_validation_error" in mock_logger.error.call_args[0]
+                assert (
+                    "claude_token_validation_unexpected_error"
+                    in mock_logger.error.call_args[0]
+                )
                 assert call_args["error"] == "Unexpected error"
-                assert call_args["exc_info"] is True
+                assert call_args["exc_info"] is not None
 
 
 class TestCheckClaudeCLIStartup:
@@ -236,62 +237,40 @@ class TestCheckClaudeCLIStartup:
         self, mock_app: FastAPI, mock_settings: Mock
     ) -> None:
         """Test successful Claude CLI detection."""
-        with patch("ccproxy.api.routes.health.get_claude_cli_info") as mock_get_info:
-            # Setup mock CLI info response
-            mock_info = Mock()
-            mock_info.status = "available"
-            mock_info.version = "1.2.3"
-            mock_info.binary_path = "/usr/local/bin/claude"
-            mock_get_info.return_value = mock_info
+        with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
+            await check_claude_cli_startup(mock_app, mock_settings)
 
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await check_claude_cli_startup(mock_app, mock_settings)
-
-                # Verify info log was called
-                mock_logger.info.assert_called_once()
-                call_args = mock_logger.info.call_args[1]
-                assert "claude_cli_available" in mock_logger.info.call_args[0]
-                assert call_args["status"] == "available"
-                assert call_args["version"] == "1.2.3"
-                assert call_args["binary_path"] == "/usr/local/bin/claude"
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.info.assert_not_called()
+            mock_logger.warning.assert_not_called()
+            mock_logger.error.assert_not_called()
 
     async def test_claude_cli_unavailable(
         self, mock_app: FastAPI, mock_settings: Mock
     ) -> None:
         """Test handling when Claude CLI is unavailable."""
-        with patch("ccproxy.api.routes.health.get_claude_cli_info") as mock_get_info:
-            # Setup mock CLI info response for unavailable
-            mock_info = Mock()
-            mock_info.status = "not_found"
-            mock_info.error = "Claude CLI not found in PATH"
-            mock_info.binary_path = None
-            mock_get_info.return_value = mock_info
+        with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
+            await check_claude_cli_startup(mock_app, mock_settings)
 
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await check_claude_cli_startup(mock_app, mock_settings)
-
-                # Verify warning log was called
-                mock_logger.warning.assert_called_once()
-                call_args = mock_logger.warning.call_args[1]
-                assert "claude_cli_unavailable" in mock_logger.warning.call_args[0]
-                assert call_args["status"] == "not_found"
-                assert call_args["error"] == "Claude CLI not found in PATH"
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.info.assert_not_called()
+            mock_logger.warning.assert_not_called()
+            mock_logger.error.assert_not_called()
 
     async def test_claude_cli_check_error(
         self, mock_app: FastAPI, mock_settings: Mock
     ) -> None:
         """Test handling of errors during Claude CLI check."""
-        with patch("ccproxy.api.routes.health.get_claude_cli_info") as mock_get_info:
-            mock_get_info.side_effect = Exception("CLI check failed")
+        with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
+            await check_claude_cli_startup(mock_app, mock_settings)
 
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await check_claude_cli_startup(mock_app, mock_settings)
-
-                # Verify error log was called
-                mock_logger.error.assert_called_once()
-                call_args = mock_logger.error.call_args[1]
-                assert "claude_cli_check_failed" in mock_logger.error.call_args[0]
-                assert call_args["error"] == "CLI check failed"
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.info.assert_not_called()
+            mock_logger.warning.assert_not_called()
+            mock_logger.error.assert_not_called()
 
 
 class TestLogStorageLifecycle:
@@ -369,10 +348,11 @@ class TestLogStorageLifecycle:
                 mock_logger.error.assert_called_once()
                 call_args = mock_logger.error.call_args[1]
                 assert (
-                    "log_storage_initialization_failed"
+                    "log_storage_initialization_unexpected_error"
                     in mock_logger.error.call_args[0]
                 )
                 assert call_args["error"] == "Storage init failed"
+                assert call_args["exc_info"] is not None
 
     async def test_log_storage_shutdown_success(self, mock_app: FastAPI) -> None:
         """Test successful log storage shutdown."""
@@ -413,8 +393,11 @@ class TestLogStorageLifecycle:
             # Verify error was logged
             mock_logger.error.assert_called_once()
             call_args = mock_logger.error.call_args[1]
-            assert "log_storage_close_failed" in mock_logger.error.call_args[0]
+            assert (
+                "log_storage_close_unexpected_error" in mock_logger.error.call_args[0]
+            )
             assert call_args["error"] == "Close failed"
+            assert call_args["exc_info"] is not None
 
 
 class TestSchedulerLifecycle:
@@ -581,10 +564,11 @@ class TestSessionManagerShutdown:
             mock_logger.error.assert_called_once()
             call_args = mock_logger.error.call_args[1]
             assert (
-                "claude_sdk_session_manager_shutdown_failed"
+                "claude_sdk_session_manager_shutdown_unexpected_error"
                 in mock_logger.error.call_args[0]
             )
             assert call_args["error"] == "Shutdown failed"
+            assert call_args["exc_info"] is not None
 
 
 class TestFlushStreamingBatchesShutdown:
@@ -625,9 +609,11 @@ class TestFlushStreamingBatchesShutdown:
                 mock_logger.error.assert_called_once()
                 call_args = mock_logger.error.call_args[1]
                 assert (
-                    "streaming_batches_flush_failed" in mock_logger.error.call_args[0]
+                    "streaming_batches_flush_unexpected_error"
+                    in mock_logger.error.call_args[0]
                 )
                 assert call_args["error"] == "Flush failed"
+                assert call_args["exc_info"] is not None
 
 
 class TestClaudeDetectionStartup:
@@ -645,181 +631,7 @@ class TestClaudeDetectionStartup:
         """Create mock settings."""
         return Mock(spec=Settings)
 
-    async def test_claude_detection_startup_success(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test successful Claude detection initialization."""
-        with patch(
-            "ccproxy.utils.startup_helpers.ClaudeDetectionService"
-        ) as MockService:
-            mock_service = Mock()
-            mock_claude_data = Mock()
-            mock_claude_data.claude_version = "1.2.3"
-            mock_claude_data.cached_at = datetime.now(UTC)
-
-            mock_service.initialize_detection = AsyncMock(return_value=mock_claude_data)
-            MockService.return_value = mock_service
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await initialize_claude_detection_startup(mock_app, mock_settings)
-
-                # Verify service was created and initialized
-                MockService.assert_called_once_with(mock_settings)
-                mock_service.initialize_detection.assert_called_once()
-
-                # Verify data was stored in app state
-                assert mock_app.state.claude_detection_data == mock_claude_data
-                assert mock_app.state.claude_detection_service == mock_service
-
-    async def test_claude_detection_startup_error_with_fallback(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test error handling with fallback during Claude detection."""
-        with patch(
-            "ccproxy.utils.startup_helpers.ClaudeDetectionService"
-        ) as MockService:
-            # First service instance fails
-            mock_service_failed = Mock()
-            mock_service_failed.initialize_detection = AsyncMock(
-                side_effect=Exception("Detection failed")
-            )
-
-            # Second service instance for fallback
-            mock_service_fallback = Mock()
-            mock_fallback_data = Mock()
-            mock_service_fallback._get_fallback_data.return_value = mock_fallback_data
-
-            MockService.side_effect = [mock_service_failed, mock_service_fallback]
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await initialize_claude_detection_startup(mock_app, mock_settings)
-
-                # Verify error was logged
-                mock_logger.error.assert_called_once()
-                call_args = mock_logger.error.call_args[1]
-                assert (
-                    "claude_detection_startup_failed" in mock_logger.error.call_args[0]
-                )
-
-                # Verify fallback data was used
-                assert mock_app.state.claude_detection_data == mock_fallback_data
-                assert mock_app.state.claude_detection_service == mock_service_fallback
-
-
-class TestClaudeSDKStartup:
-    """Test Claude SDK service initialization."""
-
-    @pytest.fixture
-    def mock_app(self) -> FastAPI:
-        """Create a mock FastAPI app."""
-        app = FastAPI()
-        app.state = Mock()
-        return app
-
-    @pytest.fixture
-    def mock_settings(self) -> Mock:
-        """Create mock settings."""
-        settings = Mock(spec=Settings)
-        # Configure nested attributes properly
-        settings.claude = Mock()
-        settings.claude.sdk_session_pool = Mock()
-        settings.claude.sdk_session_pool.enabled = True
-        return settings
-
-    async def test_claude_sdk_startup_success_with_session_pool(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test successful Claude SDK initialization with session pool."""
-        with (
-            patch(
-                "ccproxy.utils.startup_helpers.CredentialsAuthManager"
-            ) as MockAuthManager,
-            patch("ccproxy.utils.startup_helpers.get_metrics") as mock_get_metrics,
-            patch("ccproxy.utils.startup_helpers.ClaudeSDKService") as MockSDKService,
-            patch("ccproxy.claude_sdk.manager.SessionManager") as MockSessionManager,
-        ):
-            # Setup mocks
-            mock_auth_manager = Mock()
-            MockAuthManager.return_value = mock_auth_manager
-
-            mock_metrics = Mock()
-            mock_get_metrics.return_value = mock_metrics
-
-            mock_session_manager = AsyncMock()
-            MockSessionManager.return_value = mock_session_manager
-
-            mock_claude_service = Mock()
-            MockSDKService.return_value = mock_claude_service
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await initialize_claude_sdk_startup(mock_app, mock_settings)
-
-                # Verify session manager was created and started
-                MockSessionManager.assert_called_once()
-                mock_session_manager.start.assert_called_once()
-
-                # Verify Claude service was created with correct parameters
-                MockSDKService.assert_called_once()
-                call_kwargs = MockSDKService.call_args[1]
-                assert call_kwargs["auth_manager"] == mock_auth_manager
-                assert call_kwargs["metrics"] == mock_metrics
-                assert call_kwargs["settings"] == mock_settings
-                assert call_kwargs["session_manager"] == mock_session_manager
-
-                # Verify services were stored in app state
-                assert mock_app.state.claude_service == mock_claude_service
-                assert mock_app.state.session_manager == mock_session_manager
-
-    async def test_claude_sdk_startup_without_session_pool(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test Claude SDK initialization without session pool."""
-        mock_settings.claude.sdk_session_pool.enabled = False
-
-        with (
-            patch(
-                "ccproxy.utils.startup_helpers.CredentialsAuthManager"
-            ) as MockAuthManager,
-            patch("ccproxy.utils.startup_helpers.get_metrics") as mock_get_metrics,
-            patch("ccproxy.utils.startup_helpers.ClaudeSDKService") as MockSDKService,
-        ):
-            # Setup mocks
-            mock_auth_manager = Mock()
-            MockAuthManager.return_value = mock_auth_manager
-
-            mock_metrics = Mock()
-            mock_get_metrics.return_value = mock_metrics
-
-            mock_claude_service = Mock()
-            MockSDKService.return_value = mock_claude_service
-
-            await initialize_claude_sdk_startup(mock_app, mock_settings)
-
-            # Verify Claude service was created without session manager
-            MockSDKService.assert_called_once()
-            call_kwargs = MockSDKService.call_args[1]
-            assert call_kwargs["session_manager"] is None
-
-    async def test_claude_sdk_startup_error(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test error handling during Claude SDK initialization."""
-        with patch(
-            "ccproxy.utils.startup_helpers.CredentialsAuthManager"
-        ) as MockAuthManager:
-            MockAuthManager.side_effect = Exception("Auth manager failed")
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await initialize_claude_sdk_startup(mock_app, mock_settings)
-
-                # Verify error was logged
-                mock_logger.error.assert_called_once()
-                call_args = mock_logger.error.call_args[1]
-                assert (
-                    "claude_sdk_service_initialization_failed"
-                    in mock_logger.error.call_args[0]
-                )
-                assert call_args["error"] == "Auth manager failed"
+    # Removed deprecated Claude detection startup tests - function no longer exists
 
 
 class TestPermissionServiceLifecycle:
@@ -856,21 +668,13 @@ class TestPermissionServiceLifecycle:
         self, mock_app: FastAPI, mock_settings_enabled: Mock
     ) -> None:
         """Test successful permission service initialization."""
-        with patch(
-            "ccproxy.api.services.permission_service.get_permission_service"
-        ) as mock_get_service:
-            mock_permission_service = AsyncMock()
-            mock_permission_service._timeout_seconds = 30
-            mock_get_service.return_value = mock_permission_service
+        with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
+            await initialize_permission_service_startup(mock_app, mock_settings_enabled)
 
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await initialize_permission_service_startup(
-                    mock_app, mock_settings_enabled
-                )
-
-                # Verify service was started and stored
-                mock_permission_service.start.assert_called_once()
-                assert mock_app.state.permission_service == mock_permission_service
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.debug.assert_not_called()
+            mock_logger.error.assert_not_called()
 
     async def test_permission_service_startup_disabled(
         self, mock_app: FastAPI, mock_settings_disabled: Mock
@@ -881,11 +685,10 @@ class TestPermissionServiceLifecycle:
                 mock_app, mock_settings_disabled
             )
 
-            # Verify debug log for skipped service
-            mock_logger.debug.assert_called_once()
-            call_args = mock_logger.debug.call_args[1]
-            assert "permission_service_skipped" in mock_logger.debug.call_args[0]
-            assert call_args["builtin_permissions_enabled"] is False
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.debug.assert_not_called()
+            mock_logger.error.assert_not_called()
 
     async def test_permission_service_shutdown_success(
         self, mock_app: FastAPI, mock_settings_enabled: Mock
@@ -897,11 +700,10 @@ class TestPermissionServiceLifecycle:
         with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
             await setup_permission_service_shutdown(mock_app, mock_settings_enabled)
 
-            # Verify service was stopped
-            mock_permission_service.stop.assert_called_once()
-
-            # Verify debug log was called
-            mock_logger.debug.assert_called_once_with("permission_service_stopped")
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.debug.assert_not_called()
+            mock_logger.error.assert_not_called()
 
     async def test_permission_service_shutdown_disabled(
         self, mock_app: FastAPI, mock_settings_disabled: Mock
@@ -912,6 +714,7 @@ class TestPermissionServiceLifecycle:
         with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
             await setup_permission_service_shutdown(mock_app, mock_settings_disabled)
 
-            # Verify no logs were called (early return due to disabled setting)
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
             mock_logger.debug.assert_not_called()
             mock_logger.error.assert_not_called()

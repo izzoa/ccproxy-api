@@ -13,9 +13,14 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+from pydantic import SecretStr
 from structlog import get_logger
 
-from ccproxy.auth.exceptions import OAuthCallbackError, OAuthLoginError
+from ccproxy.auth.exceptions import (
+    OAuthCallbackError,
+    OAuthLoginError,
+    OAuthTokenRefreshError,
+)
 from ccproxy.auth.models import ClaudeCredentials, OAuthToken, UserProfile
 from ccproxy.auth.oauth.models import OAuthTokenRequest, OAuthTokenResponse
 from ccproxy.config.auth import OAuthSettings
@@ -211,7 +216,6 @@ class OAuthClient:
         """
         from datetime import UTC, datetime
 
-        from ccproxy.auth.exceptions import OAuthTokenRefreshError
         from ccproxy.auth.models import OAuthToken
 
         try:
@@ -226,12 +230,17 @@ class OAuthClient:
 
             return OAuthToken(
                 accessToken=token_response.access_token,
-                refreshToken=token_response.refresh_token or refresh_token,
+                refreshToken=token_response.refresh_token or SecretStr(refresh_token),
                 expiresAt=expires_at_ms,
                 scopes=token_response.scope.split() if token_response.scope else [],
                 subscriptionType="pro",  # Default value
             )
+        except httpx.HTTPError as e:
+            raise OAuthTokenRefreshError(f"Token refresh HTTP error: {e}") from e
+        except OAuthTokenRefreshError:
+            raise  # Re-raise OAuthTokenRefreshError as-is
         except Exception as e:
+            logger.error("token_refresh_unexpected_error", error=str(e), exc_info=e)
             raise OAuthTokenRefreshError(f"Token refresh failed: {e}") from e
 
     async def fetch_user_profile(self, access_token: str) -> UserProfile | None:
@@ -276,6 +285,19 @@ class OAuthClient:
             data = response.json()
             logger.debug("user_profile_fetched", endpoint=self.config.profile_url)
             return UserProfile.model_validate(data)
+
+    async def authenticate(self, open_browser: bool = True) -> ClaudeCredentials:
+        """Perform OAuth authentication flow (protocol-compatible method).
+
+        This is an alias for login() to implement OAuthClientProtocol.
+
+        Args:
+            open_browser: Whether to automatically open browser (currently ignored)
+
+        Returns:
+            ClaudeCredentials with OAuth token
+        """
+        return await self.login()
 
     async def login(self) -> ClaudeCredentials:
         """Perform OAuth login flow.
@@ -470,9 +492,13 @@ class OAuthClient:
                     f"Token exchange failed: {response.status_code} - {error_detail}"
                 )
 
+        except httpx.HTTPError as e:
+            logger.error("oauth_login_http_error", error=str(e), exc_info=e)
+            raise OAuthLoginError(f"OAuth login HTTP error: {e}") from e
+        except (OAuthLoginError, OAuthCallbackError):
+            raise  # Re-raise OAuth exceptions as-is
         except Exception as e:
-            if isinstance(e, OAuthLoginError | OAuthCallbackError):
-                raise
+            logger.error("oauth_login_unexpected_error", error=str(e), exc_info=e)
             raise OAuthLoginError(f"OAuth login failed: {e}") from e
 
         finally:

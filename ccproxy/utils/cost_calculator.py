@@ -4,10 +4,10 @@ This module provides shared cost calculation functionality that can be used
 across different services to ensure consistent pricing calculations.
 """
 
-import structlog
+from ccproxy.core.logging import get_logger
 
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 def calculate_token_cost(
@@ -32,6 +32,9 @@ def calculate_token_cost(
     Returns:
         Cost in USD or None if calculation not possible
     """
+    # Get logger with request context at the start of the function
+    logger = get_logger(__name__)
+    
     if not model or (
         not tokens_input
         and not tokens_output
@@ -113,8 +116,15 @@ def calculate_token_cost(
 
         return total_cost
 
+    except (ValueError, TypeError, ArithmeticError) as e:
+        logger.debug(
+            "cost_calculation_math_error", error=str(e), model=model, exc_info=e
+        )
+        return None
     except Exception as e:
-        logger.debug("cost_calculation_error", error=str(e), model=model)
+        logger.debug(
+            "cost_calculation_unexpected_error", error=str(e), model=model, exc_info=e
+        )
         return None
 
 
@@ -205,6 +215,11 @@ def calculate_cost_breakdown(
             "model": canonical_model,
         }
 
+    except (ValueError, TypeError, ArithmeticError) as e:
+        logger.debug("cost_breakdown_math_error", error=str(e), model=model, exc_info=e)
+        return None
     except Exception as e:
-        logger.debug("cost_breakdown_error", error=str(e), model=model)
+        logger.debug(
+            "cost_breakdown_unexpected_error", error=str(e), model=model, exc_info=e
+        )
         return None

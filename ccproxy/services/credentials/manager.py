@@ -12,7 +12,9 @@ from structlog import get_logger
 from ccproxy.auth.exceptions import (
     CredentialsExpiredError,
     CredentialsNotFoundError,
+    OAuthTokenRefreshError,
 )
+from ccproxy.auth.manager import AuthManager
 from ccproxy.auth.models import (
     ClaudeCredentials,
     OAuthToken,
@@ -28,7 +30,7 @@ from ccproxy.services.credentials.oauth_client import OAuthClient
 logger = get_logger(__name__)
 
 
-class CredentialsManager:
+class CredentialsManager(AuthManager):
     """Manager for Claude credentials with storage and OAuth support."""
 
     # ==================== Initialization ====================
@@ -118,8 +120,20 @@ class CredentialsManager:
         """
         try:
             return await self.storage.load()
+        except FileNotFoundError as e:
+            logger.debug("credentials_file_not_found", error=str(e))
+            return None
+        except json.JSONDecodeError as e:
+            logger.error("credentials_json_decode_error", error=str(e), exc_info=e)
+            return None
+        except PermissionError as e:
+            logger.error("credentials_permission_error", error=str(e), exc_info=e)
+            return None
+        except (ValueError, TypeError) as e:
+            logger.error("credentials_load_value_error", error=str(e), exc_info=e)
+            return None
         except Exception as e:
-            logger.error("credentials_load_failed", error=str(e))
+            logger.error("credentials_load_unexpected_error", error=str(e), exc_info=e)
             return None
 
     async def save(self, credentials: ClaudeCredentials) -> bool:
@@ -133,8 +147,17 @@ class CredentialsManager:
         """
         try:
             return await self.storage.save(credentials)
+        except PermissionError as e:
+            logger.error("credentials_save_permission_error", error=str(e), exc_info=e)
+            return False
+        except OSError as e:
+            logger.error("credentials_save_os_error", error=str(e), exc_info=e)
+            return False
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.error("credentials_save_encoding_error", error=str(e), exc_info=e)
+            return False
         except Exception as e:
-            logger.error("credentials_save_failed", error=str(e))
+            logger.error("credentials_save_unexpected_error", error=str(e), exc_info=e)
             return False
 
     # ==================== OAuth Operations ====================
@@ -155,7 +178,7 @@ class CredentialsManager:
         # Fetch and save user profile after successful login
         try:
             profile = await self._oauth_client.fetch_user_profile(
-                credentials.claude_ai_oauth.access_token
+                credentials.claude_ai_oauth.access_token.get_secret_value()
             )
             if profile:
                 # Save profile data
@@ -172,8 +195,28 @@ class CredentialsManager:
                 logger.debug(
                     "profile_fetch_skipped", context="login", reason="no_profile_data"
                 )
+        except httpx.TimeoutException as e:
+            logger.warning(
+                "profile_fetch_timeout", context="login", error=str(e), exc_info=e
+            )
+            # Continue with login even if profile fetch fails
+        except httpx.HTTPError as e:
+            logger.warning(
+                "profile_fetch_http_error", context="login", error=str(e), exc_info=e
+            )
+            # Continue with login even if profile fetch fails
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "profile_fetch_json_error", context="login", error=str(e), exc_info=e
+            )
+            # Continue with login even if profile fetch fails
         except Exception as e:
-            logger.warning("profile_fetch_failed", context="login", error=str(e))
+            logger.warning(
+                "profile_fetch_unexpected_error",
+                context="login",
+                error=str(e),
+                exc_info=e,
+            )
             # Continue with login even if profile fetch fails
 
         await self.save(credentials)
@@ -218,9 +261,17 @@ class CredentialsManager:
                         credentials = await self._refresh_token_with_profile(
                             credentials
                         )
+                    except OAuthTokenRefreshError as e:
+                        logger.error(
+                            "oauth_token_refresh_failed", error=str(e), exc_info=e
+                        )
+                    except httpx.HTTPError as e:
+                        logger.error(
+                            "token_refresh_http_error", error=str(e), exc_info=e
+                        )
                     except Exception as e:
                         logger.error(
-                            "token_refresh_failed", error=str(e), exc_info=True
+                            "token_refresh_unexpected_error", error=str(e), exc_info=e
                         )
                         if oauth_token.is_expired:
                             raise CredentialsExpiredError(
@@ -245,7 +296,44 @@ class CredentialsManager:
             CredentialsExpiredError: If credentials expired and refresh fails
         """
         credentials = await self.get_valid_credentials()
-        return credentials.claude_ai_oauth.access_token
+        return credentials.claude_ai_oauth.access_token.get_secret_value()
+
+    async def get_credentials(self) -> ClaudeCredentials:
+        """Get valid credentials.
+
+        Returns:
+            Valid credentials
+
+        Raises:
+            CredentialsNotFoundError: If no credentials found
+            CredentialsExpiredError: If credentials expired and refresh fails
+        """
+        return await self.get_valid_credentials()
+
+    async def is_authenticated(self) -> bool:
+        """Check if current authentication is valid.
+
+        Returns:
+            True if authenticated, False otherwise
+        """
+        try:
+            await self.get_valid_credentials()
+            return True
+        except CredentialsNotFoundError:
+            return False
+        except CredentialsExpiredError:
+            return False
+        except Exception as e:
+            logger.debug("auth_check_unexpected_error", error=str(e))
+            return False
+
+    async def get_user_profile(self) -> UserProfile | None:
+        """Get user profile information.
+
+        Returns:
+            UserProfile if available, None otherwise
+        """
+        return await self.fetch_user_profile()
 
     async def refresh_token(self) -> ClaudeCredentials:
         """Refresh the access token without checking expiration.
@@ -280,14 +368,28 @@ class CredentialsManager:
             if self._oauth_client is None:
                 raise RuntimeError("OAuth client not initialized")
             profile = await self._oauth_client.fetch_user_profile(
-                credentials.claude_ai_oauth.access_token,
+                credentials.claude_ai_oauth.access_token.get_secret_value(),
             )
             return profile
+        except httpx.HTTPError as e:
+            logger.error(
+                "user_profile_fetch_http_error",
+                error=str(e),
+                exc_info=e,
+            )
+            return None
+        except json.JSONDecodeError as e:
+            logger.error(
+                "user_profile_fetch_json_error",
+                error=str(e),
+                exc_info=e,
+            )
+            return None
         except Exception as e:
             logger.error(
-                "user_profile_fetch_failed",
+                "user_profile_fetch_unexpected_error",
                 error=str(e),
-                exc_info=True,
+                exc_info=e,
             )
             return None
 
@@ -329,8 +431,18 @@ class CredentialsManager:
             success = await self.storage.delete()
             await self._delete_account_profile()
             return success
+        except PermissionError as e:
+            logger.error(
+                "credentials_delete_permission_error", error=str(e), exc_info=e
+            )
+            return False
+        except OSError as e:
+            logger.error("credentials_delete_os_error", error=str(e), exc_info=e)
+            return False
         except Exception as e:
-            logger.error("credentials_delete_failed", error=str(e), exc_info=True)
+            logger.error(
+                "credentials_delete_unexpected_error", error=str(e), exc_info=e
+            )
             return False
 
     # ==================== Private Helper Methods ====================
@@ -372,8 +484,21 @@ class CredentialsManager:
             logger.debug("account_profile_saved", path=str(account_path))
             return True
 
+        except PermissionError as e:
+            logger.error(
+                "account_profile_save_permission_error", error=str(e), exc_info=e
+            )
+            return False
+        except OSError as e:
+            logger.error("account_profile_save_os_error", error=str(e), exc_info=e)
+            return False
+        except TypeError as e:
+            logger.error("account_profile_save_json_error", error=str(e), exc_info=e)
+            return False
         except Exception as e:
-            logger.error("account_profile_save_failed", error=str(e), exc_info=True)
+            logger.error(
+                "account_profile_save_unexpected_error", error=str(e), exc_info=e
+            )
             return False
 
     async def _load_account_profile(self) -> UserProfile | None:
@@ -394,8 +519,17 @@ class CredentialsManager:
 
             return UserProfile.model_validate(profile_data)
 
+        except FileNotFoundError:
+            logger.debug("account_profile_file_not_found")
+            return None
+        except json.JSONDecodeError as e:
+            logger.debug("account_profile_json_decode_error", error=str(e))
+            return None
+        except PermissionError as e:
+            logger.debug("account_profile_permission_error", error=str(e))
+            return None
         except Exception as e:
-            logger.debug("account_profile_load_failed", error=str(e))
+            logger.debug("account_profile_load_unexpected_error", error=str(e))
             return None
 
     async def _delete_account_profile(self) -> bool:
@@ -410,8 +544,14 @@ class CredentialsManager:
                 account_path.unlink()
                 logger.debug("account_profile_deleted", path=str(account_path))
             return True
+        except PermissionError as e:
+            logger.debug("account_profile_delete_permission_error", error=str(e))
+            return False
+        except OSError as e:
+            logger.debug("account_profile_delete_os_error", error=str(e))
+            return False
         except Exception as e:
-            logger.debug("account_profile_delete_failed", error=str(e))
+            logger.debug("account_profile_delete_unexpected_error", error=str(e))
             return False
 
     def _determine_subscription_type(self, profile: UserProfile) -> str:
@@ -492,7 +632,7 @@ class CredentialsManager:
 
         # Refresh the token
         token_response = await self._oauth_client.refresh_access_token(
-            oauth_token.refresh_token
+            oauth_token.refresh_token.get_secret_value()
         )
 
         # Calculate expires_at from expires_in if provided
@@ -529,7 +669,7 @@ class CredentialsManager:
         # Fetch user profile to update subscription type
         try:
             profile = await self._oauth_client.fetch_user_profile(
-                new_token.access_token
+                new_token.access_token.get_secret_value()
             )
             if profile:
                 # Save profile data
@@ -548,9 +688,28 @@ class CredentialsManager:
                 logger.debug(
                     "profile_fetch_skipped", reason="no_profile_data_available"
                 )
+        except httpx.HTTPError as e:
+            logger.warning(
+                "profile_fetch_http_error",
+                context="token_refresh",
+                error=str(e),
+                exc_info=e,
+            )
+            # Continue with token refresh even if profile fetch fails
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "profile_fetch_json_error",
+                context="token_refresh",
+                error=str(e),
+                exc_info=e,
+            )
+            # Continue with token refresh even if profile fetch fails
         except Exception as e:
             logger.warning(
-                "profile_fetch_failed", context="token_refresh", error=str(e)
+                "profile_fetch_unexpected_error",
+                context="token_refresh",
+                error=str(e),
+                exc_info=e,
             )
             # Continue with token refresh even if profile fetch fails
 
@@ -559,3 +718,162 @@ class CredentialsManager:
 
         logger.info("token_refresh_completed")
         return credentials
+
+    # ==================== AuthManager Interface ====================
+
+    async def get_auth_headers(self) -> dict[str, str]:
+        """Get Anthropic auth headers.
+
+        Returns:
+            Dictionary with Authorization header for Anthropic OAuth API.
+
+        Raises:
+            CredentialsNotFoundError: If no credentials found.
+            CredentialsExpiredError: If credentials expired and refresh fails.
+        """
+        # For Claude/Anthropic OAuth, we use Bearer token authentication
+        access_token = await self.get_access_token()
+        return {"Authorization": f"Bearer {access_token}"}
+
+    async def validate_credentials(self) -> bool:
+        """Check if we have valid Anthropic credentials.
+
+        Returns:
+            True if valid credentials exist, False otherwise.
+        """
+        try:
+            credentials = await self.get_valid_credentials()
+            return bool(credentials and credentials.claude_ai_oauth.access_token)
+        except CredentialsNotFoundError:
+            return False
+        except CredentialsExpiredError:
+            return False
+        except Exception as e:
+            logger.debug("credential_validation_unexpected_error", error=str(e))
+            return False
+
+    def get_provider_name(self) -> str:
+        """Get the provider name for logging.
+
+        Returns:
+            Provider name string.
+        """
+        return "anthropic-claude"
+
+    async def get_auth_status(self) -> dict[str, Any]:
+        """Get detailed authentication status information.
+
+        Returns:
+            Dictionary with auth status details including token info,
+            expiration, account profile, and storage location.
+        """
+        status: dict[str, Any] = {
+            "auth_configured": False,
+            "token_available": False,
+            "storage_location": str(self.storage.storage_path)
+            if hasattr(self.storage, "storage_path")
+            else "Unknown",
+        }
+
+        try:
+            # Check if credentials exist
+            credentials = await self.load()
+            if not credentials:
+                return status
+
+            status["auth_configured"] = True
+
+            # Get OAuth token details
+            if credentials.claude_ai_oauth:
+                token = credentials.claude_ai_oauth
+                status["token_available"] = True
+                token_str = token.access_token.get_secret_value()
+                status["token_preview"] = (
+                    f"{token_str[:12]}..." if len(token_str) > 12 else "[SHORT]"
+                )
+
+                # Check token expiration
+                if token.expires_at:
+                    exp_dt = token.expires_at_datetime
+                    now = datetime.now(UTC)
+                    time_remaining = exp_dt - now
+
+                    days = time_remaining.days
+                    hours = time_remaining.seconds // 3600
+                    minutes = (time_remaining.seconds % 3600) // 60
+
+                    status.update(
+                        {
+                            "token_expired": token.is_expired,
+                            "expires_at": exp_dt.isoformat(),
+                            "time_remaining": (
+                                f"{days} days, {hours} hours, {minutes} minutes"
+                                if not token.is_expired
+                                else "Expired"
+                            ),
+                        }
+                    )
+
+                # Add subscription and scope info
+                if token.subscription_type:
+                    status["subscription_type"] = token.subscription_type
+                if token.scopes:
+                    status["oauth_scopes"] = ", ".join(token.scopes)
+
+            # Check for user profile if it exists (might not be present in ClaudeCredentials)
+            if hasattr(credentials, "user_profile") and credentials.user_profile:
+                profile = credentials.user_profile
+                status.update(
+                    {
+                        "account_profile": "Available",
+                        "login_method": profile.login_method or "Unknown",
+                    }
+                )
+
+                # Add organization details if available
+                if hasattr(profile, "organization") and profile.organization:
+                    org = profile.organization
+                    status.update(
+                        {
+                            "organization": org.name,
+                            "organization_type": getattr(
+                                org, "organization_type", "Unknown"
+                            ),
+                            "billing_type": getattr(org, "billing_type", "Unknown"),
+                            "rate_limit_tier": getattr(
+                                org, "rate_limit_tier", "Unknown"
+                            ),
+                        }
+                    )
+
+                # Add user details
+                if hasattr(profile, "email") and profile.email:
+                    # Redact email for privacy
+                    email_parts = profile.email.split("@")
+                    if len(email_parts) == 2:
+                        status["email_preview"] = (
+                            f"{email_parts[0][:3]}***@{email_parts[1]}"
+                        )
+                    else:
+                        status["email_preview"] = "***"
+
+                if hasattr(profile, "full_name") and profile.full_name:
+                    status["full_name"] = profile.full_name
+                if hasattr(profile, "display_name") and profile.display_name:
+                    status["display_name"] = profile.display_name
+
+                # Add subscription status
+                status["has_claude_pro"] = getattr(profile, "has_claude_pro", False)
+                status["has_claude_max"] = getattr(profile, "has_claude_max", False)
+
+        except CredentialsNotFoundError as e:
+            logger.debug("auth_status_credentials_not_found", error=str(e))
+            status["auth_error"] = "Credentials not found"
+        except CredentialsExpiredError as e:
+            logger.debug("auth_status_credentials_expired", error=str(e))
+            status["auth_error"] = "Credentials expired"
+        except Exception as e:
+            logger.debug("auth_status_unexpected_error", error=str(e))
+            status["auth_error"] = str(e)
+
+        return status
