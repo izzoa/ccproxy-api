@@ -1,6 +1,7 @@
 """OpenAI Codex API routes."""
 
 import json
+import time
 import uuid
 from collections.abc import AsyncIterator
 
@@ -74,11 +75,18 @@ async def codex_responses(
                 status_code=401,
                 detail="No valid OpenAI credentials found. Please authenticate first.",
             )
+    except HTTPException:
+        # Re-raise HTTPExceptions without chaining to avoid stack traces
+        raise
     except Exception as e:
-        logger.error("Failed to get OpenAI access token", error=str(e))
+        logger.debug(
+            "Failed to get OpenAI access token",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(
             status_code=401, detail="Failed to retrieve valid credentials"
-        ) from e
+        ) from None
 
     try:
         # Handle the Codex request
@@ -92,12 +100,12 @@ async def codex_responses(
         )
         return response
     except AuthenticationError as e:
-        raise HTTPException(status_code=401, detail=str(e)) from e
+        raise HTTPException(status_code=401, detail=str(e)) from None
     except ProxyError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        raise HTTPException(status_code=502, detail=str(e)) from None
     except Exception as e:
         logger.error("Unexpected error in codex_responses", error=str(e))
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        raise HTTPException(status_code=500, detail="Internal server error") from None
 
 
 @router.post("/{session_id}/responses", response_model=None)
@@ -122,11 +130,18 @@ async def codex_responses_with_session(
                 status_code=401,
                 detail="No valid OpenAI credentials found. Please authenticate first.",
             )
+    except HTTPException:
+        # Re-raise HTTPExceptions without chaining to avoid stack traces
+        raise
     except Exception as e:
-        logger.error("Failed to get OpenAI access token", error=str(e))
+        logger.debug(
+            "Failed to get OpenAI access token",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(
             status_code=401, detail="Failed to retrieve valid credentials"
-        ) from e
+        ) from None
 
     try:
         # Handle the Codex request with specific session_id
@@ -140,12 +155,12 @@ async def codex_responses_with_session(
         )
         return response
     except AuthenticationError as e:
-        raise HTTPException(status_code=401, detail=str(e)) from e
+        raise HTTPException(status_code=401, detail=str(e)) from None
     except ProxyError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        raise HTTPException(status_code=502, detail=str(e)) from None
     except Exception as e:
         logger.error("Unexpected error in codex_responses_with_session", error=str(e))
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        raise HTTPException(status_code=500, detail="Internal server error") from None
 
 
 @router.post("/chat/completions", response_model=None)
@@ -174,11 +189,18 @@ async def codex_chat_completions(
                 status_code=401,
                 detail="No valid OpenAI credentials found. Please authenticate first.",
             )
+    except HTTPException:
+        # Re-raise HTTPExceptions without chaining to avoid stack traces
+        raise
     except Exception as e:
-        logger.error("Failed to get OpenAI access token", error=str(e))
+        logger.debug(
+            "Failed to get OpenAI access token",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(
             status_code=401, detail="Failed to retrieve valid credentials"
-        ) from e
+        ) from None
 
     try:
         # Create adapter for format conversion
@@ -233,6 +255,9 @@ async def codex_chat_completions(
 
             # Convert Response API SSE stream to Chat Completions format
             response_headers = {}
+            # Generate stream_id and timestamp outside the nested function to avoid closure issues
+            stream_id = f"chatcmpl_{uuid.uuid4().hex[:29]}"
+            created = int(time.time())
 
             async def stream_codex_response() -> AsyncIterator[bytes]:
                 """Stream and convert Response API to Chat Completions format."""
@@ -317,8 +342,6 @@ async def codex_chat_completions(
 
                         chunk_count = 0
                         total_bytes = 0
-                        stream_id = f"chatcmpl_{uuid.uuid4().hex[:29]}"
-                        created = int(time.time())
 
                         # Process SSE events directly without buffering
                         line_count = 0
@@ -951,9 +974,6 @@ async def codex_chat_completions(
 
             # Create a minimal request context if none exists
             if request_context is None:
-                import time
-                import uuid
-
                 request_context = RequestContext(
                     request_id=str(uuid.uuid4()),
                     start_time=time.perf_counter(),
@@ -1159,12 +1179,12 @@ async def codex_chat_completions(
     except HTTPException:
         raise
     except AuthenticationError as e:
-        raise HTTPException(status_code=401, detail=str(e)) from e
+        raise HTTPException(status_code=401, detail=str(e)) from None
     except ProxyError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        raise HTTPException(status_code=502, detail=str(e)) from None
     except Exception as e:
         logger.error("Unexpected error in codex_chat_completions", error=str(e))
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        raise HTTPException(status_code=500, detail="Internal server error") from None
 
 
 # NOTE: Test endpoint commented out after exploration
@@ -1222,10 +1242,10 @@ async def codex_chat_completions(
 #         return response
 #     except AuthenticationError as e:
 #         logger.warning(f"Auth error for path /{path}: {str(e)}")
-#         raise HTTPException(status_code=401, detail=str(e)) from e
+#         raise HTTPException(status_code=401, detail=str(e)) from None from e
 #     except ProxyError as e:
 #         logger.warning(f"Proxy error for path /{path}: {str(e)}")
-#         raise HTTPException(status_code=502, detail=str(e)) from e
+#         raise HTTPException(status_code=502, detail=str(e)) from None from e
 #     except Exception as e:
 #         logger.error(f"Unexpected error testing path /{path}", error=str(e))
 #         raise HTTPException(status_code=500, detail=f"Error testing path: {str(e)}") from e

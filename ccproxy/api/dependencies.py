@@ -7,7 +7,6 @@ from typing import Annotated
 from fastapi import Depends, Request
 from structlog import get_logger
 
-from ccproxy.auth.dependencies import AuthManagerDep
 from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.http import BaseProxyClient
 from ccproxy.observability import PrometheusMetrics, get_metrics
@@ -70,11 +69,8 @@ def get_cached_claude_service(request: Request) -> ClaudeSDKService:
         )
         # Get dependencies manually for fallback
         settings = get_cached_settings(request)
-        # Create a simple auth manager for fallback
-        from ccproxy.auth.credentials_adapter import CredentialsAuthManager
 
-        auth_manager = CredentialsAuthManager()
-        claude_service = get_claude_service(settings, auth_manager)
+        claude_service = get_claude_service(settings)
     return claude_service
 
 
@@ -84,13 +80,11 @@ SettingsDep = Annotated[Settings, Depends(get_cached_settings)]
 
 def get_claude_service(
     settings: SettingsDep,
-    auth_manager: AuthManagerDep,
 ) -> ClaudeSDKService:
     """Get Claude SDK service instance.
 
     Args:
         settings: Application settings dependency
-        auth_manager: Authentication manager dependency
 
     Returns:
         Claude SDK service instance
@@ -114,7 +108,6 @@ def get_claude_service(
         # This dependency function should not create stateful resources
 
     return ClaudeSDKService(
-        auth_manager=auth_manager,
         metrics=metrics,
         settings=settings,
         session_manager=session_manager,

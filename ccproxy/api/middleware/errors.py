@@ -583,13 +583,16 @@ def setup_error_handlers(app: FastAPI) -> None:
         ):
             request.state.context.metadata["status_code"] = exc.status_code
 
-        # Don't log stack trace for 404 errors as they're expected
-        if exc.status_code == 404:
-            logger.debug(
-                "HTTP 404 error",
-                error_type="http_404",
+        # Don't log stack trace for expected errors (404, 401)
+        if exc.status_code in (404, 401):
+            log_level = "debug" if exc.status_code == 404 else "warning"
+            log_func = logger.debug if exc.status_code == 404 else logger.warning
+
+            log_func(
+                f"HTTP {exc.status_code} error",
+                error_type=f"http_{exc.status_code}",
                 error_message=exc.detail,
-                status_code=404,
+                status_code=exc.status_code,
                 request_method=request.method,
                 request_url=str(request.url.path),
             )
@@ -613,7 +616,12 @@ def setup_error_handlers(app: FastAPI) -> None:
 
         # Record error in metrics
         if metrics:
-            error_type = "http_404" if exc.status_code == 404 else "http_error"
+            if exc.status_code == 404:
+                error_type = "http_404"
+            elif exc.status_code == 401:
+                error_type = "http_401"
+            else:
+                error_type = "http_error"
             metrics.record_error(
                 error_type=error_type,
                 endpoint=str(request.url.path),

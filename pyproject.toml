@@ -49,6 +49,9 @@ version-file = "ccproxy/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ccproxy"]
+include = [
+    "ccproxy/data/*.json"
+]
 
 [project.scripts]
 # ccproxy = "ccproxy.cli:app"

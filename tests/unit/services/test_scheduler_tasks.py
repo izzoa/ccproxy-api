@@ -560,13 +560,14 @@ class TestVersionUpdateCheckTask:
             name="version_check_test",
             interval_seconds=3600.0,
             enabled=True,
-            startup_max_age_hours=2.0,
+            version_check_cache_ttl_hours=2.0,
+            skip_first_scheduled_run=False,
         )
 
         assert task.name == "version_check_test"
         assert task.interval_seconds == 3600.0
         assert task.enabled is True
-        assert task.startup_max_age_hours == 2.0
+        assert task.version_check_cache_ttl_hours == 2.0
         assert task._first_run is True
 
     @pytest.mark.asyncio
@@ -592,7 +593,8 @@ class TestVersionUpdateCheckTask:
                 name="version_update_test",
                 interval_seconds=3600.0,
                 enabled=True,
-                startup_max_age_hours=1.0,
+                version_check_cache_ttl_hours=1.0,
+                skip_first_scheduled_run=False,
             )
 
             result = await task.run()
@@ -626,7 +628,8 @@ class TestVersionUpdateCheckTask:
                 name="version_no_update_test",
                 interval_seconds=3600.0,
                 enabled=True,
-                startup_max_age_hours=1.0,
+                version_check_cache_ttl_hours=1.0,
+                skip_first_scheduled_run=False,
             )
 
             result = await task.run()
@@ -654,7 +657,8 @@ class TestVersionUpdateCheckTask:
                 name="version_fetch_fail_test",
                 interval_seconds=3600.0,
                 enabled=True,
-                startup_max_age_hours=1.0,
+                version_check_cache_ttl_hours=1.0,
+                skip_first_scheduled_run=False,
             )
 
             result = await task.run()
@@ -688,7 +692,8 @@ class TestVersionUpdateCheckTask:
                 name="version_skip_test",
                 interval_seconds=3600.0,
                 enabled=True,
-                startup_max_age_hours=1.0,  # 1 hour threshold
+                version_check_cache_ttl_hours=1.0,  # 1 hour threshold
+                skip_first_scheduled_run=False,
             )
 
             result = await task.run()
@@ -731,7 +736,8 @@ class TestVersionUpdateCheckTask:
                 name="version_old_test",
                 interval_seconds=3600.0,
                 enabled=True,
-                startup_max_age_hours=1.0,  # 1 hour threshold
+                version_check_cache_ttl_hours=1.0,  # 1 hour threshold
+                skip_first_scheduled_run=False,
             )
 
             result = await task.run()
@@ -763,7 +769,8 @@ class TestVersionUpdateCheckTask:
                 name="version_second_run_test",
                 interval_seconds=3600.0,
                 enabled=True,
-                startup_max_age_hours=1.0,
+                version_check_cache_ttl_hours=1.0,
+                skip_first_scheduled_run=False,
             )
 
             # First run (startup logic)
@@ -791,7 +798,8 @@ class TestVersionUpdateCheckTask:
                 name="version_error_test",
                 interval_seconds=3600.0,
                 enabled=True,
-                startup_max_age_hours=1.0,
+                version_check_cache_ttl_hours=1.0,
+                skip_first_scheduled_run=False,
             )
 
             result = await task.run()

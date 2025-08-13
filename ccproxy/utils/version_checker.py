@@ -94,6 +94,12 @@ def compare_versions(current: str, latest: str) -> bool:
     try:
         current_parsed = pkg_version.parse(current)
         latest_parsed = pkg_version.parse(latest)
+
+        # For dev versions, compare base version instead
+        if current_parsed.is_devrelease:
+            current_base = pkg_version.parse(current_parsed.base_version)
+            return latest_parsed > current_base
+
         return latest_parsed > current_parsed
     except Exception as e:
         logger.error(

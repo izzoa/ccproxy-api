@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -242,22 +243,10 @@ class CodexDetectionService:
         """Get fallback data when detection fails."""
         logger.warning("using_fallback_codex_data")
 
-        # Use hardcoded values as fallback from req.json
-        fallback_headers = CodexHeaders(
-            session_id="",  # Will be generated per request
-            originator="codex_cli_rs",
-            **{"openai-beta": "responses=experimental"},
-            version="0.21.0",
-            **{"chatgpt-account-id": ""},  # Will be set from auth
+        # Load fallback data from package data file
+        package_data_file = (
+            Path(__file__).parent.parent / "data" / "codex_headers_fallback.json"
         )
-
-        # Use exact instructions from req.json
-        fallback_instructions = CodexInstructionsData(
-            instructions_field='You are a coding agent running in the Codex CLI, a terminal-based coding assistant. Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.\n\nYour capabilities:\n- Receive user prompts and other context provided by the harness, such as files in the workspace.\n- Communicate with the user by streaming thinking & responses, and by making & updating plans.\n- Emit function calls to run terminal commands and apply patches. Depending on how this specific run is configured, you can request that these function calls be escalated to the user for approval before running. More on this in the "Sandbox and approvals" section.\n\nWithin this context, Codex refers to the open-source agentic coding interface (not the old Codex language model built by OpenAI).'
-        )
-
-        return CodexCacheData(
-            codex_version="fallback",
-            headers=fallback_headers,
-            instructions=fallback_instructions,
-        )
+        with package_data_file.open("r") as f:
+            fallback_data_dict = json.load(f)
+            return CodexCacheData.model_validate(fallback_data_dict)

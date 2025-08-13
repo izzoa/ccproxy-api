@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -233,37 +234,10 @@ class ClaudeDetectionService:
         """Get fallback data when detection fails."""
         logger.warning("using_fallback_claude_data")
 
-        # Use existing hardcoded values as fallback
-        fallback_headers = ClaudeCodeHeaders(
-            **{
-                "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
-                "anthropic-version": "2023-06-01",
-                "anthropic-dangerous-direct-browser-access": "true",
-                "x-app": "cli",
-                "User-Agent": "claude-cli/1.0.60 (external, cli)",
-                "X-Stainless-Lang": "js",
-                "X-Stainless-Retry-Count": "0",
-                "X-Stainless-Timeout": "60",
-                "X-Stainless-Package-Version": "0.55.1",
-                "X-Stainless-OS": "Linux",
-                "X-Stainless-Arch": "x64",
-                "X-Stainless-Runtime": "node",
-                "X-Stainless-Runtime-Version": "v24.3.0",
-            }
+        # Load fallback data from package data file
+        package_data_file = (
+            Path(__file__).parent.parent / "data" / "claude_headers_fallback.json"
         )
-
-        fallback_prompt = SystemPromptData(
-            system_field=[
-                {
-                    "type": "text",
-                    "text": "You are Claude Code, Anthropic's official CLI for Claude.",
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]
-        )
-
-        return ClaudeCacheData(
-            claude_version="fallback",
-            headers=fallback_headers,
-            system_prompt=fallback_prompt,
-        )
+        with package_data_file.open("r") as f:
+            fallback_data_dict = json.load(f)
+            return ClaudeCacheData.model_validate(fallback_data_dict)
