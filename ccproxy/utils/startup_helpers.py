@@ -15,6 +15,7 @@ from fastapi import FastAPI
 
 from ccproxy.auth.credentials_adapter import CredentialsAuthManager
 from ccproxy.auth.exceptions import CredentialsNotFoundError
+from ccproxy.auth.openai.credentials import OpenAITokenManager
 from ccproxy.observability import get_metrics
 
 # Note: get_claude_cli_info is imported locally to avoid circular imports
@@ -35,8 +36,10 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 
-async def validate_authentication_startup(app: FastAPI, settings: Settings) -> None:
-    """Validate authentication credentials at startup.
+async def validate_claude_authentication_startup(
+    app: FastAPI, settings: Settings
+) -> None:
+    """Validate Claude authentication credentials at startup.
 
     Args:
         app: FastAPI application instance
@@ -58,36 +61,97 @@ async def validate_authentication_startup(app: FastAPI, settings: Settings) -> N
                     / 3600
                 )
                 logger.debug(
-                    "auth_token_valid",
+                    "claude_token_valid",
                     expires_in_hours=hours_until_expiry,
                     subscription_type=oauth_token.subscription_type,
                     credentials_path=str(validation.path) if validation.path else None,
                 )
             else:
-                logger.debug("auth_token_valid", credentials_path=str(validation.path))
+                logger.debug(
+                    "claude_token_valid", credentials_path=str(validation.path)
+                )
         elif validation.expired:
             logger.warning(
-                "auth_token_expired",
-                message="Authentication token has expired. Please run 'ccproxy auth login' to refresh.",
+                "claude_token_expired",
+                message="Claude authentication token has expired. Please run 'ccproxy auth login' to refresh.",
                 credentials_path=str(validation.path) if validation.path else None,
             )
         else:
             logger.warning(
-                "auth_token_invalid",
-                message="Authentication token is invalid. Please run 'ccproxy auth login'.",
+                "claude_token_invalid",
+                message="Claude authentication token is invalid. Please run 'ccproxy auth login'.",
                 credentials_path=str(validation.path) if validation.path else None,
             )
     except CredentialsNotFoundError:
         logger.warning(
-            "auth_token_not_found",
-            message="No authentication credentials found. Please run 'ccproxy auth login' to authenticate.",
+            "claude_token_not_found",
+            message="No Claude authentication credentials found. Please run 'ccproxy auth login' to authenticate.",
             searched_paths=settings.auth.storage.storage_paths,
         )
     except Exception as e:
         logger.error(
-            "auth_token_validation_error",
+            "claude_token_validation_error",
             error=str(e),
-            message="Failed to validate authentication token. The server will continue without authentication.",
+            message="Failed to validate Claude authentication token. The server will continue without Claude authentication.",
+            exc_info=True,
+        )
+
+
+async def validate_codex_authentication_startup(
+    app: FastAPI, settings: Settings
+) -> None:
+    """Validate Codex (OpenAI) authentication credentials at startup.
+
+    Args:
+        app: FastAPI application instance
+        settings: Application settings
+    """
+    # Skip codex authentication validation if codex is disabled
+    if not settings.codex.enabled:
+        logger.debug("codex_token_validation_skipped", reason="codex_disabled")
+        return
+
+    try:
+        token_manager = OpenAITokenManager()
+        credentials = await token_manager.load_credentials()
+
+        if not credentials:
+            logger.warning(
+                "codex_token_not_found",
+                message="No Codex authentication credentials found. Please run 'ccproxy auth login-openai' to authenticate.",
+                location=token_manager.get_storage_location(),
+            )
+            return
+
+        if not credentials.active:
+            logger.warning(
+                "codex_token_inactive",
+                message="Codex authentication credentials are inactive. Please run 'ccproxy auth login-openai' to refresh.",
+                location=token_manager.get_storage_location(),
+            )
+            return
+
+        if credentials.is_expired():
+            logger.warning(
+                "codex_token_expired",
+                message="Codex authentication token has expired. Please run 'ccproxy auth login-openai' to refresh.",
+                location=token_manager.get_storage_location(),
+                expires_at=credentials.expires_at.isoformat(),
+            )
+        else:
+            hours_until_expiry = int(credentials.expires_in_seconds() / 3600)
+            logger.debug(
+                "codex_token_valid",
+                expires_in_hours=hours_until_expiry,
+                account_id=credentials.account_id,
+                location=token_manager.get_storage_location(),
+            )
+
+    except Exception as e:
+        logger.error(
+            "codex_token_validation_error",
+            error=str(e),
+            message="Failed to validate Codex authentication token. The server will continue without Codex authentication.",
             exc_info=True,
         )
 
@@ -361,7 +425,11 @@ async def initialize_codex_detection_startup(app: FastAPI, settings: Settings) -
 
     codex_info = await get_codex_cli_info()
     if codex_info.status != "available":
-        logger.debug("codex_detection_skipped", reason="codex_cli_not_available", status=codex_info.status)
+        logger.debug(
+            "codex_detection_skipped",
+            reason="codex_cli_not_available",
+            status=codex_info.status,
+        )
         detection_service = CodexDetectionService(settings)
         app.state.codex_detection_data = detection_service._get_fallback_data()
         app.state.codex_detection_service = detection_service

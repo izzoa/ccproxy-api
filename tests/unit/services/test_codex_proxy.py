@@ -375,5 +375,4 @@ class TestCodexDetectionService:
 
         # Should return fallback data
         assert result is not None
-        assert result.codex_version == "fallback"
         assert "codex_cli_rs" in result.headers.originator

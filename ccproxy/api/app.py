@@ -47,7 +47,8 @@ from ccproxy.utils.startup_helpers import (
     setup_scheduler_shutdown,
     setup_scheduler_startup,
     setup_session_manager_shutdown,
-    validate_authentication_startup,
+    validate_claude_authentication_startup,
+    validate_codex_authentication_startup,
 )
 
 
@@ -73,8 +74,13 @@ class ShutdownComponent(TypedDict):
 # Define lifecycle components for startup/shutdown organization
 LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
     {
-        "name": "Authentication",
-        "startup": validate_authentication_startup,
+        "name": "Claude Authentication",
+        "startup": validate_claude_authentication_startup,
+        "shutdown": None,  # One-time validation, no cleanup needed
+    },
+    {
+        "name": "Codex Authentication",
+        "startup": validate_codex_authentication_startup,
         "shutdown": None,  # One-time validation, no cleanup needed
     },
     {

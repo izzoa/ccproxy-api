@@ -235,7 +235,9 @@ class ClaudeDetectionService:
         logger.warning("using_fallback_claude_data")
 
         # Load fallback data from package data file
-        package_data_file = Path(__file__).parent.parent / "data" / "claude_headers_fallback.json"
+        package_data_file = (
+            Path(__file__).parent.parent / "data" / "claude_headers_fallback.json"
+        )
         with package_data_file.open("r") as f:
             fallback_data_dict = json.load(f)
             return ClaudeCacheData.model_validate(fallback_data_dict)

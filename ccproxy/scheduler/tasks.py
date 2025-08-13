@@ -683,7 +683,6 @@ class VersionUpdateCheckTask(BaseScheduledTask):
 
             from ccproxy.utils.version_checker import (
                 VersionCheckState,
-                compare_versions,
                 fetch_latest_github_version,
                 get_current_version,
                 get_version_check_state_path,
@@ -755,6 +754,10 @@ class VersionUpdateCheckTask(BaseScheduledTask):
             # Compare versions and log result
             current_version = get_current_version()
             self._log_version_comparison(current_version, latest_version, source=source)
+
+            # Mark first run as complete
+            if self._first_run:
+                self._first_run = False
 
             return True
 

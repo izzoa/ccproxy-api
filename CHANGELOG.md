@@ -5,7 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.6] - 2025-08-04
+## [0.1.7] - 2025-08-13
+
+### Added
+
+- **Enhanced Authentication Validation**: Implemented separate authentication validation for both Claude and Codex providers at startup
+  - Added `validate_claude_authentication_startup()` function with provider-specific logging messages
+  - Added `validate_codex_authentication_startup()` function for OpenAI/Codex token validation
+  - Updated startup lifecycle to validate both authentication systems independently
+  - Clear differentiation between Claude and Codex authentication status in logs
+- **Package Data Fallback System**: Implemented robust fallback data system using package-embedded JSON files
+  - Added `ccproxy/data/claude_headers_fallback.json` with Claude CLI headers and system prompts
+  - Added `ccproxy/data/codex_headers_fallback.json` with Codex CLI headers and detection data
+  - Updated `pyproject.toml` to include data files in package builds via `[tool.hatch.build.targets.wheel]`
+  - Enhanced detection services to load fallback data from package files instead of hardcoded values
+  - Removed identifying UUIDs from fallback files for privacy protection
+- **Version Update Checking System**: Comprehensive version monitoring with scheduled checks and caching
+  - Automatic version checking against GitHub releases with configurable intervals (default 12 hours)
+  - Startup version checks with graceful degradation when GitHub is unavailable
+  - Intelligent caching system to avoid rate limiting and reduce network requests
+  - Integration with scheduler for periodic background version monitoring
+  - Detailed logging of version check results, cache status, and update availability
+
+### Fixed
+
+- **Authentication Error Logging**: Significantly improved error logging and reduced log noise for authentication failures
+  - HTTP 401 authentication errors now log as warnings instead of errors with stack traces
+  - Removed exception chaining (`from e`) for authentication failures to eliminate verbose stack traces
+  - Updated Codex route exception handling to use `from None` suppression for cleaner logs
+  - Enhanced HTTP exception middleware to treat 401 errors as expected events like 404s
+  - Updated metrics recording to properly categorize HTTP 401 errors as "http_401"
+- **Codex CLI Detection**: Improved Codex header detection reliability and startup behavior
+  - Added CLI availability check before attempting Codex header detection to prevent warnings
+  - Enhanced `initialize_codex_detection_startup()` to skip detection when Codex CLI is unavailable
+  - Improved error handling and fallback behavior when Codex is not installed
+  - Better separation between Codex enabled/disabled states and CLI availability
+- **Codex Streaming Response Handling**: Enhanced streaming behavior and format conversion for Codex endpoints
+  - Fixed streaming response management in `codex_chat_completions` endpoint
+  - Improved Response API to Chat Completions format conversion for both streaming and non-streaming requests
+  - Enhanced error handling for malformed responses and backend communication failures
+  - Better stream chunk processing with proper reasoning block handling and content type detection
+  - Improved non-streaming response collection and conversion from streaming backends
+
+### Changed
+
+- **Startup Lifecycle Architecture**: Enhanced component-based startup system with better error handling
+  - Updated `LIFECYCLE_COMPONENTS` to include separate "Claude Authentication" and "Codex Authentication" components
+  - Improved startup component execution with graceful degradation when individual components fail
+  - Enhanced logging for component startup and shutdown phases with clear component identification
+  - Better separation of concerns between different startup validation tasks
+- **Exception Handling Patterns**: Standardized exception handling across Codex routes
+  - Applied consistent `from None` pattern for all authentication and proxy error handling
+  - Improved error message clarity and reduced stack trace pollution
+  - Enhanced logging levels appropriate for different error types (debug for auth failures, error for unexpected issues)
+- **Detection Service Architecture**: Improved fallback data loading and service initialization
+  - Enhanced `ClaudeDetectionService` and `CodexDetectionService` to use package data files
+  - Better error handling when package data files are missing or corrupted
+  - Improved service initialization with graceful fallback to embedded data
+
+### Infrastructure
+
+- **Package Data Management**: Added proper package data inclusion for distribution
+  - Updated build configuration to include `ccproxy/data/*.json` files in wheel packages
+  - Ensured fallback data is available in both development and packaged installations
+  - Improved data file loading with proper path resolution for packaged deployments
+- **Code Quality**: Enhanced code organization and linting compliance
+  - Fixed all ruff linting issues with proper exception chaining patterns
+  - Improved type safety and eliminated linting warnings
+  - Enhanced code consistency across authentication and error handling modules
+
+This release focuses on improving the reliability and maintainability of the authentication system while providing better user experience through cleaner logs and more robust startup behavior. The version checking system ensures users stay informed about updates, while the improved Codex integration provides a more stable experience when using OpenAI providers.
+
+## [0.1.6] - 2025-08-13
 
 ## Added OpenAI Codex Provider with Full Proxy Support
 

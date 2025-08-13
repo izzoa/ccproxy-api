@@ -31,7 +31,7 @@ from ccproxy.utils.startup_helpers import (
     setup_scheduler_shutdown,
     setup_scheduler_startup,
     setup_session_manager_shutdown,
-    validate_authentication_startup,
+    validate_claude_authentication_startup,
 )
 
 
@@ -87,7 +87,7 @@ class TestValidateAuthenticationStartup:
             MockCredentialsManager.return_value = mock_manager
 
             with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_authentication_startup(mock_app, mock_settings)
+                await validate_claude_authentication_startup(mock_app, mock_settings)
 
                 # Verify credentials manager was created and validated
                 MockCredentialsManager.assert_called_once()
@@ -96,7 +96,7 @@ class TestValidateAuthenticationStartup:
                 # Verify debug log was called with OAuth info
                 mock_logger.debug.assert_called_once()
                 call_args = mock_logger.debug.call_args[1]
-                assert "auth_token_valid" in mock_logger.debug.call_args[0]
+                assert "claude_token_valid" in mock_logger.debug.call_args[0]
                 assert "expires_in_hours" in call_args
                 assert "subscription_type" in call_args
 
@@ -119,11 +119,11 @@ class TestValidateAuthenticationStartup:
             MockCredentialsManager.return_value = mock_manager
 
             with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_authentication_startup(mock_app, mock_settings)
+                await validate_claude_authentication_startup(mock_app, mock_settings)
 
                 # Verify debug log was called without OAuth info
                 mock_logger.debug.assert_called_once_with(
-                    "auth_token_valid", credentials_path="/mock/path"
+                    "claude_token_valid", credentials_path="/mock/path"
                 )
 
     async def test_expired_authentication(
@@ -144,12 +144,12 @@ class TestValidateAuthenticationStartup:
             MockCredentialsManager.return_value = mock_manager
 
             with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_authentication_startup(mock_app, mock_settings)
+                await validate_claude_authentication_startup(mock_app, mock_settings)
 
                 # Verify warning was logged
                 mock_logger.warning.assert_called_once()
                 call_args = mock_logger.warning.call_args[1]
-                assert "auth_token_expired" in mock_logger.warning.call_args[0]
+                assert "claude_token_expired" in mock_logger.warning.call_args[0]
                 assert "credentials_path" in call_args
 
     async def test_invalid_authentication(
@@ -170,12 +170,12 @@ class TestValidateAuthenticationStartup:
             MockCredentialsManager.return_value = mock_manager
 
             with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_authentication_startup(mock_app, mock_settings)
+                await validate_claude_authentication_startup(mock_app, mock_settings)
 
                 # Verify warning was logged
                 mock_logger.warning.assert_called_once()
                 call_args = mock_logger.warning.call_args[1]
-                assert "auth_token_invalid" in mock_logger.warning.call_args[0]
+                assert "claude_token_invalid" in mock_logger.warning.call_args[0]
 
     async def test_credentials_not_found(
         self, mock_app: FastAPI, mock_settings: Mock
@@ -189,12 +189,12 @@ class TestValidateAuthenticationStartup:
             MockCredentialsManager.return_value = mock_manager
 
             with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_authentication_startup(mock_app, mock_settings)
+                await validate_claude_authentication_startup(mock_app, mock_settings)
 
                 # Verify warning was logged with searched paths
                 mock_logger.warning.assert_called_once()
                 call_args = mock_logger.warning.call_args[1]
-                assert "auth_token_not_found" in mock_logger.warning.call_args[0]
+                assert "claude_token_not_found" in mock_logger.warning.call_args[0]
                 assert call_args["searched_paths"] == ["/path1", "/path2"]
 
     async def test_authentication_validation_error(
@@ -209,12 +209,12 @@ class TestValidateAuthenticationStartup:
             MockCredentialsManager.return_value = mock_manager
 
             with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_authentication_startup(mock_app, mock_settings)
+                await validate_claude_authentication_startup(mock_app, mock_settings)
 
                 # Verify error was logged
                 mock_logger.error.assert_called_once()
                 call_args = mock_logger.error.call_args[1]
-                assert "auth_token_validation_error" in mock_logger.error.call_args[0]
+                assert "claude_token_validation_error" in mock_logger.error.call_args[0]
                 assert call_args["error"] == "Unexpected error"
                 assert call_args["exc_info"] is True
 
