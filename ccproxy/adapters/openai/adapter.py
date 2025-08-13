@@ -29,6 +29,7 @@ from .models import (
     generate_openai_system_fingerprint,
 )
 from .streaming import OpenAIStreamProcessor
+from .response_adapter import ResponseAdapter
 
 
 logger = structlog.get_logger(__name__)
@@ -40,6 +41,7 @@ class OpenAIAdapter(APIAdapter):
     def __init__(self, include_sdk_content_as_xml: bool = False) -> None:
         """Initialize the OpenAI adapter."""
         self.include_sdk_content_as_xml = include_sdk_content_as_xml
+        self.response_adapter = ResponseAdapter()
 
     def adapt_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """Convert OpenAI request format to Anthropic format.
@@ -908,6 +910,49 @@ class OpenAIAdapter(APIAdapter):
         }
 
         return mapping.get(stop_reason, "stop")
+
+    # Response API integration methods
+    def adapt_chat_to_response_request(
+        self, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Convert Chat Completions request to Response API format.
+        
+        Args:
+            request: OpenAI Chat Completions request
+            
+        Returns:
+            Response API formatted request as dict
+        """
+        response_request = self.response_adapter.chat_to_response_request(request)
+        return response_request.model_dump()
+
+    def adapt_response_to_chat(
+        self, response_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Convert Response API response to Chat Completions format.
+        
+        Args:
+            response_data: Response API response
+            
+        Returns:
+            Chat Completions formatted response as dict
+        """
+        chat_response = self.response_adapter.response_to_chat_completion(response_data)
+        return chat_response.model_dump()
+
+    async def adapt_response_stream_to_chat(
+        self, response_stream: AsyncIterator[bytes]
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Convert Response API SSE stream to Chat Completions format.
+        
+        Args:
+            response_stream: Async iterator of SSE bytes from Response API
+            
+        Yields:
+            Chat Completions formatted streaming chunks as dicts
+        """
+        async for chunk in self.response_adapter.stream_response_to_chat(response_stream):
+            yield chunk
 
     def adapt_error(self, error_body: dict[str, Any]) -> dict[str, Any]:
         """Convert Anthropic error format to OpenAI error format.
