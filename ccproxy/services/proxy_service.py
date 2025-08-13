@@ -26,12 +26,12 @@ from ccproxy.core.http_transformers import (
 from ccproxy.observability import (
     PrometheusMetrics,
     get_metrics,
-    request_context,
-    timed_operation,
 )
 from ccproxy.observability.access_logger import log_request_access
 from ccproxy.observability.streaming_response import StreamingResponseWithLogging
 from ccproxy.services.credentials.manager import CredentialsManager
+from ccproxy.services.request_processor import RequestProcessor
+from ccproxy.services.streaming_handler import StreamingHandler
 from ccproxy.testing import RealisticMockResponseGenerator
 from ccproxy.utils.simple_request_logger import (
     append_streaming_log,
@@ -129,6 +129,29 @@ class ProxyService:
             os.environ.get("CCPROXY_VERBOSE_API", "false").lower() == "true"
         )
 
+        # Create specialized handlers
+        self.streaming_handler = StreamingHandler(
+            proxy_url=self._proxy_url,
+            ssl_context=self._ssl_context,
+            verbose_streaming=self._verbose_streaming,
+            verbose_api=self._verbose_api,
+        )
+
+        self.request_processor = RequestProcessor(
+            proxy_client=proxy_client,
+            credentials_manager=credentials_manager,
+            streaming_handler=self.streaming_handler,
+            request_transformer=self.request_transformer,
+            response_transformer=self.response_transformer,
+            openai_adapter=self.openai_adapter,
+            mock_generator=self.mock_generator,
+            app_state=app_state,
+            proxy_mode=proxy_mode,
+            target_base_url=target_base_url,
+            metrics=self.metrics,
+            settings=settings,
+        )
+
     def _init_proxy_url(self) -> str | None:
         """Initialize proxy URL from environment variables."""
         # Check for standard proxy environment variables
@@ -191,231 +214,16 @@ class ProxyService:
         Raises:
             HTTPException: If request fails
         """
-        # Extract request metadata
-        model, streaming = self._extract_request_metadata(body)
-        endpoint = path.split("/")[-1] if path else "unknown"
-
-        # Use existing context from request if available, otherwise create new one
-        if request and hasattr(request, "state") and hasattr(request.state, "context"):
-            # Use existing context from middleware
-            ctx = request.state.context
-            # Add service-specific metadata
-            ctx.add_metadata(
-                endpoint=endpoint,
-                model=model,
-                streaming=streaming,
-                service_type="proxy_service",
-            )
-            # Create a context manager that preserves the existing context's lifecycle
-            # This ensures __aexit__ is called for proper access logging
-            from contextlib import asynccontextmanager
-
-            @asynccontextmanager
-            async def existing_context_manager() -> AsyncGenerator[Any, None]:
-                try:
-                    yield ctx
-                finally:
-                    # Let the existing context handle its own lifecycle
-                    # The middleware or parent context will call __aexit__
-                    pass
-
-            context_manager: Any = existing_context_manager()
-        else:
-            # Create new context for observability
-            context_manager = request_context(
-                method=method,
-                path=path,
-                endpoint=endpoint,
-                model=model,
-                streaming=streaming,
-                service_type="proxy_service",
-                metrics=self.metrics,
-            )
-
-        async with context_manager as ctx:
-            try:
-                # 1. Authentication - get access token
-                async with timed_operation("oauth_token", ctx.request_id):
-                    logger.debug("oauth_token_retrieval_start")
-                    access_token = await self._get_access_token()
-
-                # 2. Request transformation
-                async with timed_operation("request_transform", ctx.request_id):
-                    injection_mode = (
-                        self.settings.claude.system_prompt_injection_mode.value
-                    )
-                    logger.debug(
-                        "request_transform_start",
-                        system_prompt_injection_mode=injection_mode,
-                    )
-                    transformed_request = (
-                        await self.request_transformer.transform_proxy_request(
-                            method,
-                            path,
-                            headers,
-                            body,
-                            query_params,
-                            access_token,
-                            self.target_base_url,
-                            self.app_state,
-                            injection_mode,
-                        )
-                    )
-
-                # 3. Check for bypass header to skip upstream forwarding
-                bypass_upstream = (
-                    headers.get("X-CCProxy-Bypass-Upstream", "").lower() == "true"
-                )
-
-                if bypass_upstream:
-                    logger.debug("bypassing_upstream_forwarding_due_to_header")
-                    # Determine message type from request body for realistic response generation
-                    message_type = self._extract_message_type_from_body(body)
-
-                    # Check if this will be a streaming response
-                    should_stream = streaming or self._should_stream_response(
-                        transformed_request["headers"]
-                    )
-
-                    # Determine response format based on original request path
-                    is_openai_format = self.response_transformer._is_openai_request(
-                        path
-                    )
-
-                    if should_stream:
-                        return await self._generate_bypass_streaming_response(
-                            model, is_openai_format, ctx, message_type
-                        )
-                    else:
-                        return await self._generate_bypass_standard_response(
-                            model, is_openai_format, ctx, message_type
-                        )
-
-                # 3. Forward request using proxy client
-                logger.debug("request_forwarding_start", url=transformed_request["url"])
-
-                # Check if this will be a streaming response
-                should_stream = streaming or self._should_stream_response(
-                    transformed_request["headers"]
-                )
-
-                if should_stream:
-                    logger.debug("streaming_response_detected")
-                    return await self._handle_streaming_request(
-                        transformed_request, path, timeout, ctx
-                    )
-                else:
-                    logger.debug("non_streaming_response_detected")
-
-                # Log the outgoing request if verbose API logging is enabled
-                await self._log_verbose_api_request(transformed_request, ctx)
-
-                # Handle regular request
-                async with timed_operation("api_call", ctx.request_id) as api_op:
-                    start_time = time.perf_counter()
-
-                    (
-                        status_code,
-                        response_headers,
-                        response_body,
-                    ) = await self.proxy_client.forward(
-                        method=transformed_request["method"],
-                        url=transformed_request["url"],
-                        headers=transformed_request["headers"],
-                        body=transformed_request["body"],
-                        timeout=timeout,
-                    )
-
-                    end_time = time.perf_counter()
-                    api_duration = end_time - start_time
-                    api_op["duration_seconds"] = api_duration
-
-                # Log the received response if verbose API logging is enabled
-                await self._log_verbose_api_response(
-                    status_code, response_headers, response_body, ctx
-                )
-
-                # 4. Response transformation
-                async with timed_operation("response_transform", ctx.request_id):
-                    logger.debug("response_transform_start")
-                    # For error responses, transform to OpenAI format if needed
-                    transformed_response: ResponseData
-                    if status_code >= 400:
-                        logger.info(
-                            "upstream_error_received",
-                            status_code=status_code,
-                            has_body=bool(response_body),
-                            content_length=len(response_body) if response_body else 0,
-                        )
-
-                        # Use transformer to handle error transformation (including OpenAI format)
-                        transformed_response = (
-                            await self.response_transformer.transform_proxy_response(
-                                status_code,
-                                response_headers,
-                                response_body,
-                                path,
-                                self.proxy_mode,
-                            )
-                        )
-                    else:
-                        transformed_response = (
-                            await self.response_transformer.transform_proxy_response(
-                                status_code,
-                                response_headers,
-                                response_body,
-                                path,
-                                self.proxy_mode,
-                            )
-                        )
-
-                # 5. Extract response metrics using direct JSON parsing
-                tokens_input = tokens_output = cache_read_tokens = (
-                    cache_write_tokens
-                ) = cost_usd = None
-                if transformed_response["body"]:
-                    try:
-                        response_data = json.loads(
-                            transformed_response["body"].decode("utf-8")
-                        )
-                        usage = response_data.get("usage", {})
-                        tokens_input = usage.get("input_tokens")
-                        tokens_output = usage.get("output_tokens")
-                        cache_read_tokens = usage.get("cache_read_input_tokens")
-                        cache_write_tokens = usage.get("cache_creation_input_tokens")
-
-                        # Calculate cost including cache tokens if we have tokens and model
-                        from ccproxy.utils.cost_calculator import calculate_token_cost
-
-                        cost_usd = calculate_token_cost(
-                            tokens_input,
-                            tokens_output,
-                            model,
-                            cache_read_tokens,
-                            cache_write_tokens,
-                        )
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        pass  # Keep all values as None if parsing fails
-
-                # 6. Update context with response data
-                ctx.add_metadata(
-                    status_code=status_code,
-                    tokens_input=tokens_input,
-                    tokens_output=tokens_output,
-                    cache_read_tokens=cache_read_tokens,
-                    cache_write_tokens=cache_write_tokens,
-                    cost_usd=cost_usd,
-                )
-
-                return (
-                    transformed_response["status_code"],
-                    transformed_response["headers"],
-                    transformed_response["body"],
-                )
-
-            except Exception as e:
-                ctx.add_metadata(error=e)
-                raise
+        # Delegate to the request processor for all orchestration logic
+        return await self.request_processor.handle_request(
+            method=method,
+            path=path,
+            headers=headers,
+            body=body,
+            query_params=query_params,
+            timeout=timeout,
+            request=request,
+        )
 
     async def handle_codex_request(
         self,

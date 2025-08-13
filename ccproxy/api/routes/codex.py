@@ -11,12 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from starlette.responses import Response
 
+from ccproxy.adapters.openai.codex_adapter import CodexAdapter
 from ccproxy.adapters.openai.models import (
     OpenAIChatCompletionRequest,
     OpenAIChatCompletionResponse,
 )
 from ccproxy.adapters.openai.response_adapter import ResponseAdapter
-from ccproxy.adapters.openai.codex_adapter import CodexAdapter
 from ccproxy.api.dependencies import ProxyServiceDep
 from ccproxy.auth.openai import OpenAITokenManager
 from ccproxy.config.settings import Settings, get_settings
@@ -262,7 +262,7 @@ async def codex_chat_completions(
 
             # Create codex adapter instance
             codex_adapter = CodexAdapter()
-            
+
             async def stream_codex_response() -> AsyncIterator[bytes]:
                 """Stream and convert Response API to Chat Completions format using CodexAdapter."""
                 async with (
@@ -321,7 +321,9 @@ async def codex_chat_completions(
                                 "code": response.status_code,
                             }
                         }
-                        converted_error = codex_adapter.convert_error_to_chat_format(error_response)
+                        converted_error = codex_adapter.convert_error_to_chat_format(
+                            error_response
+                        )
                         yield f"data: {json.dumps(converted_error)}\n\n".encode()
                         return
 
@@ -334,7 +336,9 @@ async def codex_chat_completions(
 
                     try:
                         # Convert the httpx streaming response to the format expected by CodexAdapter
-                        async for chunk_dict in codex_adapter.convert_response_stream_to_chat(
+                        async for (
+                            chunk_dict
+                        ) in codex_adapter.convert_response_stream_to_chat(
                             response.aiter_bytes()
                         ):
                             # Convert chunk dict to SSE format
