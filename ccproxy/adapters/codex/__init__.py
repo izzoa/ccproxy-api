@@ -1,18 +1,11 @@
 """Codex adapter for format conversion."""
 
-from ccproxy.adapters.codex.adapter import CodexAdapter
-from ccproxy.adapters.codex.models import (
-    CodexMessage,
-    CodexRequest,
-    CodexResponse,
-    CodexResponseChoice,
-)
+from ccproxy.models.requests import CodexMessage, CodexRequest
+from ccproxy.models.responses import CodexResponse
 
 
 __all__ = [
-    "CodexAdapter",
     "CodexMessage",
     "CodexRequest",
     "CodexResponse",
-    "CodexResponseChoice",
 ]

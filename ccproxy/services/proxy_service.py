@@ -529,10 +529,20 @@ class ProxyService:
             # Forward request to ChatGPT backend
             if user_requested_streaming:
                 # Handle streaming request with proper context management
+                # First, collect the response to check for errors
+                collected_chunks = []
+                chunk_count = 0
+                total_bytes = 0
+                response_status_code = 200
+                response_headers = {}
+
                 async def stream_codex_response() -> AsyncGenerator[bytes, None]:
-                    collected_chunks = []
-                    chunk_count = 0
-                    total_bytes = 0
+                    nonlocal \
+                        collected_chunks, \
+                        chunk_count, \
+                        total_bytes, \
+                        response_status_code, \
+                        response_headers
 
                     logger.debug(
                         "proxy_service_streaming_started",
@@ -540,45 +550,53 @@ class ProxyService:
                         session_id=session_id,
                     )
 
-                    async with httpx.AsyncClient(timeout=240.0) as client:
-                        async with client.stream(
+                    async with (
+                        httpx.AsyncClient(timeout=240.0) as client,
+                        client.stream(
                             method=method,
                             url=target_url,
                             headers=headers,
                             content=transformed_body,
-                        ) as response:
-                            # Log response headers for streaming
-                            await self._log_codex_response_headers(
-                                request_id=request_id,
+                        ) as response,
+                    ):
+                        # Capture response info for error checking
+                        response_status_code = response.status_code
+                        response_headers = dict(response.headers)
+
+                        # Log response headers for streaming
+                        await self._log_codex_response_headers(
+                            request_id=request_id,
+                            status_code=response.status_code,
+                            headers=dict(response.headers),
+                            stream_type="codex_sse",
+                        )
+
+                        # Check if upstream actually returned streaming
+                        content_type = response.headers.get("content-type", "")
+                        is_streaming = "text/event-stream" in content_type
+
+                        if not is_streaming:
+                            logger.warning(
+                                "codex_expected_streaming_but_got_regular",
+                                content_type=content_type,
                                 status_code=response.status_code,
-                                headers=dict(response.headers),
-                                stream_type="codex_sse",
                             )
 
-                            # Check if upstream actually returned streaming
-                            content_type = response.headers.get("content-type", "")
-                            if "text/event-stream" not in content_type:
-                                logger.warning(
-                                    "codex_expected_streaming_but_got_regular",
-                                    content_type=content_type,
-                                    status_code=response.status_code,
-                                )
+                        async for chunk in response.aiter_bytes():
+                            chunk_count += 1
+                            chunk_size = len(chunk)
+                            total_bytes += chunk_size
+                            collected_chunks.append(chunk)
 
-                            async for chunk in response.aiter_bytes():
-                                chunk_count += 1
-                                chunk_size = len(chunk)
-                                total_bytes += chunk_size
-                                collected_chunks.append(chunk)
+                            logger.debug(
+                                "proxy_service_streaming_chunk",
+                                request_id=request_id,
+                                chunk_number=chunk_count,
+                                chunk_size=chunk_size,
+                                total_bytes=total_bytes,
+                            )
 
-                                logger.debug(
-                                    "proxy_service_streaming_chunk",
-                                    request_id=request_id,
-                                    chunk_number=chunk_count,
-                                    chunk_size=chunk_size,
-                                    total_bytes=total_bytes,
-                                )
-
-                                yield chunk
+                            yield chunk
 
                     logger.debug(
                         "proxy_service_streaming_complete",
@@ -593,13 +611,57 @@ class ProxyService:
                         chunks=collected_chunks,
                     )
 
-                return StreamingResponse(
-                    stream_codex_response(),
-                    media_type="text/event-stream",
-                    headers={
+                # Execute the stream generator to collect the response
+                generator_chunks = []
+                async for chunk in stream_codex_response():
+                    generator_chunks.append(chunk)
+
+                # Now check if this should be an error response
+                content_type = response_headers.get("content-type", "")
+                if (
+                    response_status_code >= 400
+                    and "text/event-stream" not in content_type
+                ):
+                    # Return error as regular Response with proper status code
+                    error_content = b"".join(collected_chunks)
+                    logger.warning(
+                        "codex_returning_error_as_regular_response",
+                        status_code=response_status_code,
+                        content_type=content_type,
+                        content_preview=error_content[:200].decode(
+                            "utf-8", errors="replace"
+                        ),
+                    )
+                    return Response(
+                        content=error_content,
+                        status_code=response_status_code,
+                        headers=response_headers,
+                    )
+
+                # Return normal streaming response
+                async def replay_stream() -> AsyncGenerator[bytes, None]:
+                    for chunk in generator_chunks:
+                        yield chunk
+
+                # Forward upstream headers but filter out incompatible ones for streaming
+                streaming_headers = dict(response_headers)
+                # Remove headers that conflict with streaming responses
+                streaming_headers.pop("content-length", None)
+                streaming_headers.pop("content-encoding", None)
+                streaming_headers.pop("date", None)
+                # Set streaming-specific headers
+                streaming_headers.update(
+                    {
+                        "content-type": "text/event-stream",
                         "cache-control": "no-cache",
                         "connection": "keep-alive",
-                    },
+                    }
+                )
+
+                return StreamingResponse(
+                    replay_stream(),
+                    media_type="text/event-stream",
+                    headers=streaming_headers,
                 )
             else:
                 # Handle non-streaming request
@@ -660,7 +722,9 @@ class ProxyService:
                                         continue
 
                             if final_json:
-                                response_content = json.dumps(final_json).encode("utf-8")
+                                response_content = json.dumps(final_json).encode(
+                                    "utf-8"
+                                )
                             else:
                                 # Fallback: return the raw content
                                 response_content = full_content

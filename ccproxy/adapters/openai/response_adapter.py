@@ -123,37 +123,37 @@ class ResponseAdapter:
         Returns:
             Chat Completions formatted response
         """
+        # Extract the actual response data
+        response_dict: dict[str, Any]
         if isinstance(response_data, ResponseCompleted):
-            response = response_data.response
-        elif isinstance(response_data, dict):
+            # Convert Pydantic model to dict
+            response_dict = response_data.response.model_dump()
+        else:  # isinstance(response_data, dict)
             if "response" in response_data:
-                response = response_data["response"]
+                response_dict = response_data["response"]
             else:
-                response = response_data
-        else:
-            response = response_data
+                response_dict = response_data
 
         # Extract content from Response API output
         content = ""
-        if isinstance(response, dict):
-            output = response.get("output", [])
-            # Look for message type output (skip reasoning)
-            for output_item in output:
-                if output_item.get("type") == "message":
-                    output_content = output_item.get("content", [])
-                    for content_block in output_content:
-                        if content_block.get("type") in ["output_text", "text"]:
-                            content += content_block.get("text", "")
+        output = response_dict.get("output", [])
+        # Look for message type output (skip reasoning)
+        for output_item in output:
+            if output_item.get("type") == "message":
+                output_content = output_item.get("content", [])
+                for content_block in output_content:
+                    if content_block.get("type") in ["output_text", "text"]:
+                        content += content_block.get("text", "")
 
         # Build Chat Completions response
-        usage_data = response.get("usage") if isinstance(response, dict) else None
+        usage_data = response_dict.get("usage")
         converted_usage = self._convert_usage(usage_data) if usage_data else None
-        
+
         return OpenAIChatCompletionResponse(
-            id=response.get("id", f"resp_{uuid.uuid4().hex}") if isinstance(response, dict) else f"resp_{uuid.uuid4().hex}",
+            id=response_dict.get("id", f"resp_{uuid.uuid4().hex}"),
             object="chat.completion",
-            created=response.get("created_at", int(time.time())) if isinstance(response, dict) else int(time.time()),
-            model=response.get("model", "gpt-5") if isinstance(response, dict) else "gpt-5",
+            created=response_dict.get("created_at", int(time.time())),
+            model=response_dict.get("model", "gpt-5"),
             choices=[
                 OpenAIChoice(
                     index=0,
@@ -164,7 +164,7 @@ class ResponseAdapter:
                 )
             ],
             usage=converted_usage,
-            system_fingerprint=response.get("safety_identifier") if isinstance(response, dict) else None,
+            system_fingerprint=response_dict.get("safety_identifier"),
         )
 
     async def stream_response_to_chat(
@@ -310,12 +310,12 @@ class ResponseAdapter:
                                 {"index": 0, "delta": {}, "finish_reason": "stop"}
                             ],
                         }
-                        
+
                         # Add usage if available
                         converted_usage = self._convert_usage(usage) if usage else None
                         if converted_usage:
                             chunk_data["usage"] = converted_usage.model_dump()
-                            
+
                         yield chunk_data
 
         logger.debug(
