@@ -738,6 +738,8 @@ def openai_info_command() -> None:
         ccproxy auth openai-info
     """
     import asyncio
+    import base64
+    import json
     from datetime import UTC, datetime
 
     from rich import box
@@ -760,10 +762,65 @@ def openai_info_command() -> None:
             console.print("  ccproxy auth login-openai")
             raise typer.Exit(1)
 
+        # Decode JWT token to extract additional information
+        jwt_payload = {}
+        jwt_header = {}
+        if credentials.access_token:
+            try:
+                # Split JWT into parts
+                parts = credentials.access_token.split(".")
+                if len(parts) == 3:
+                    # Decode header and payload (add padding if needed)
+                    header_b64 = parts[0] + "=" * (4 - len(parts[0]) % 4)
+                    payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+
+                    jwt_header = json.loads(base64.urlsafe_b64decode(header_b64))
+                    jwt_payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+            except Exception as decode_error:
+                logger.debug(f"Failed to decode JWT token: {decode_error}")
+
         # Display account section
         console.print("\n[bold]OpenAI Account[/bold]")
         console.print(f"  L Account ID: {credentials.account_id}")
         console.print(f"  L Status: {'Active' if credentials.active else 'Inactive'}")
+
+        # Extract additional info from JWT payload
+        if jwt_payload:
+            # Get OpenAI auth info from the JWT
+            openai_auth = jwt_payload.get("https://api.openai.com/auth", {})
+            if openai_auth:
+                if "email" in jwt_payload:
+                    console.print(f"  L Email: {jwt_payload['email']}")
+                    if jwt_payload.get("email_verified"):
+                        console.print("  L Email Verified: Yes")
+
+                if openai_auth.get("chatgpt_plan_type"):
+                    console.print(
+                        f"  L Plan Type: {openai_auth['chatgpt_plan_type'].upper()}"
+                    )
+
+                if openai_auth.get("chatgpt_user_id"):
+                    console.print(f"  L User ID: {openai_auth['chatgpt_user_id']}")
+
+                # Subscription info
+                if openai_auth.get("chatgpt_subscription_active_start"):
+                    console.print(
+                        f"  L Subscription Start: {openai_auth['chatgpt_subscription_active_start']}"
+                    )
+                if openai_auth.get("chatgpt_subscription_active_until"):
+                    console.print(
+                        f"  L Subscription Until: {openai_auth['chatgpt_subscription_active_until']}"
+                    )
+
+                # Organizations
+                orgs = openai_auth.get("organizations", [])
+                if orgs:
+                    for org in orgs:
+                        if org.get("is_default"):
+                            console.print(
+                                f"  L Organization: {org.get('title', 'Unknown')} ({org.get('role', 'member')})"
+                            )
+                            console.print(f"  L Org ID: {org.get('id', 'Unknown')}")
 
         # Create details table
         console.print()
@@ -771,7 +828,7 @@ def openai_info_command() -> None:
             show_header=True,
             header_style="bold cyan",
             box=box.ROUNDED,
-            title="Credential Details",
+            title="Token Details",
             title_style="bold white",
         )
         table.add_column("Property", style="cyan")
@@ -780,6 +837,13 @@ def openai_info_command() -> None:
         # File location
         storage_location = token_manager.storage.get_location()
         table.add_row("Storage Location", storage_location)
+
+        # Token algorithm and type from JWT header
+        if jwt_header:
+            table.add_row("Algorithm", jwt_header.get("alg", "Unknown"))
+            table.add_row("Token Type", jwt_header.get("typ", "Unknown"))
+            if jwt_header.get("kid"):
+                table.add_row("Key ID", jwt_header["kid"])
 
         # Token status
         table.add_row(
@@ -803,6 +867,30 @@ def openai_info_command() -> None:
             )
         else:
             table.add_row("Time Remaining", "[red]Expired[/red]")
+
+        # JWT timestamps if available
+        if jwt_payload:
+            if "iat" in jwt_payload:
+                iat_dt = datetime.fromtimestamp(jwt_payload["iat"], tz=UTC)
+                table.add_row("Issued At", iat_dt.strftime("%Y-%m-%d %H:%M:%S UTC"))
+
+            if "auth_time" in jwt_payload:
+                auth_dt = datetime.fromtimestamp(jwt_payload["auth_time"], tz=UTC)
+                table.add_row("Auth Time", auth_dt.strftime("%Y-%m-%d %H:%M:%S UTC"))
+
+        # JWT issuer and audience
+        if jwt_payload:
+            if "iss" in jwt_payload:
+                table.add_row("Issuer", jwt_payload["iss"])
+            if "aud" in jwt_payload:
+                audience = jwt_payload["aud"]
+                if isinstance(audience, list):
+                    audience = ", ".join(audience)
+                table.add_row("Audience", audience)
+            if "jti" in jwt_payload:
+                table.add_row("JWT ID", jwt_payload["jti"])
+            if "sid" in jwt_payload:
+                table.add_row("Session ID", jwt_payload["sid"])
 
         # Token preview (first and last 8 chars)
         if credentials.access_token:

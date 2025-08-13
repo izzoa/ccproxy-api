@@ -11,12 +11,14 @@ The server provides two primary modes of operation:
 *   **SDK Mode (`/sdk`):** Routes requests through the local `claude-code-sdk`. This enables access to tools configured in your Claude environment and includes an integrated MCP (Model Context Protocol) server for permission management.
 *   **API Mode (`/api`):** Acts as a direct reverse proxy, injecting the necessary authentication headers. This provides full access to the underlying API features and model settings.
 
-### OpenAI Codex (Experimental)
-Access OpenAI models via your ChatGPT subscription at `chatgpt.com/backend-api/codex`.
+### OpenAI Codex Response API (Experimental)
+Access OpenAI's [Response API](https://platform.openai.com/docs/api-reference/responses) via your ChatGPT Plus subscription. This provides programmatic access to ChatGPT models through the `chatgpt.com/backend-api/codex` endpoint.
 
-*   **Codex Routes (`/codex`):** Direct reverse proxy to ChatGPT backend with session management
-*   **Session Management:** Supports both auto-generated and persistent session IDs
-*   **OpenAI OAuth:** Integrated authentication flow matching Codex CLI
+*   **Response API (`/codex/responses`):** Direct reverse proxy to ChatGPT backend for conversation responses
+*   **Session Management:** Supports both auto-generated and persistent session IDs for conversation continuity
+*   **OpenAI OAuth:** Uses the same OAuth2 PKCE authentication flow as the official Codex CLI
+*   **ChatGPT Plus Required:** Requires an active ChatGPT Plus subscription for API access
+*   **Instruction Prompt:** Automatically injects the Codex instruction prompt into conversations
 
 The server includes a translation layer to support both Anthropic and OpenAI-compatible API formats for requests and responses, including streaming.
 
@@ -74,20 +76,34 @@ The proxy uses different authentication mechanisms depending on the provider and
 
 ### OpenAI Codex Authentication (Experimental)
 
-For OpenAI Codex routes, use the dedicated OpenAI OAuth flow:
+The Codex Response API requires ChatGPT Plus subscription and OAuth2 authentication:
 
 ```bash
 # Enable Codex provider
 ccproxy config codex --enable
 
-# Login with OpenAI OAuth (opens browser)
+# Authentication options:
+
+# Option 1: Use existing Codex CLI credentials (if available)
+# CCProxy will automatically detect and use valid credentials from:
+# - $HOME/.codex/auth.json (Codex CLI credentials)
+# - Automatically renews tokens if expired but refresh token is valid
+
+# Option 2: Login via CCProxy CLI (opens browser)
 ccproxy auth login-openai
+
+# Option 3: Use the official Codex CLI
+codex auth login
 
 # Check authentication status for all providers
 ccproxy auth status
 ```
 
-The OpenAI authentication uses the same OAuth flow as the official Codex CLI, storing credentials in `~/.openai.toml`.
+**Important Notes:**
+- Credentials are stored in `$HOME/.codex/auth.json`
+- CCProxy reuses existing Codex CLI credentials when available
+- If credentials are expired, CCProxy attempts automatic renewal
+- Without valid credentials, users must authenticate using either CCProxy or Codex CLI
 
 ### Authentication Status
 
@@ -134,26 +150,63 @@ export ANTHROPIC_BASE_URL="http://localhost:8000/api"
 export ANTHROPIC_API_KEY="dummy-key"
 ```
 
-**For OpenAI Codex:**
+**For OpenAI Codex Response API:**
 ```bash
-# Direct API calls to Codex endpoints
+# Create a new conversation response (auto-generated session)
 curl -X POST http://localhost:8000/codex/responses \
   -H "Content-Type: application/json" \
-  -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Hello"}]}'
+  -d '{
+    "model": "gpt-4",
+    "messages": [
+      {"role": "user", "content": "Hello, can you help me with Python?"}
+    ]
+  }'
 
-# With specific session ID
+# Continue conversation with persistent session ID
 curl -X POST http://localhost:8000/codex/my_session_123/responses \
   -H "Content-Type: application/json" \
-  -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Hello"}]}'
+  -d '{
+    "model": "gpt-4",
+    "messages": [
+      {"role": "user", "content": "Show me an example of async/await"}
+    ]
+  }'
+
+# Stream responses (SSE format)
+curl -X POST http://localhost:8000/codex/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "Explain quantum computing"}],
+    "stream": true
+  }'
 ```
 
-### Codex Session Management
+**Note:** The Codex instruction prompt is automatically injected into all conversations to maintain compatibility with the ChatGPT backend.
 
-The Codex provider supports flexible session management:
+### Codex Response API Details
 
-- **Auto-generated sessions**: `POST /codex/responses` - New session ID per request
-- **Persistent sessions**: `POST /codex/{session_id}/responses` - Use specific session ID
-- **Header forwarding**: `session_id` header is always forwarded when present
+#### Session Management
+The Codex Response API supports flexible session management for conversation continuity:
+
+- **Auto-generated sessions**: `POST /codex/responses` - Creates a new session ID for each request
+- **Persistent sessions**: `POST /codex/{session_id}/responses` - Maintains conversation context across requests
+- **Header forwarding**: Optional `session_id` header for custom session tracking
+
+#### Instruction Prompt Injection
+**Important:** CCProxy automatically injects the Codex instruction prompt into every conversation. This is required for proper interaction with the ChatGPT backend but affects your token usage:
+
+- The instruction prompt is prepended to your messages
+- This consumes additional tokens in each request
+- The prompt ensures compatibility with ChatGPT's response generation
+- You cannot disable this injection as it's required by the backend
+
+#### Model Differences
+The Response API models differ from standard OpenAI API models:
+- Uses ChatGPT Plus models (e.g., `gpt-4`, `gpt-4-turbo`)
+- Model behavior matches ChatGPT web interface
+- Token limits and pricing follow ChatGPT Plus subscription terms
+- See [OpenAI Response API Documentation](https://platform.openai.com/docs/api-reference/responses) for details
 
 
 ## MCP Server Integration & Permission System
@@ -292,24 +345,38 @@ More examples are available in the `examples/` directory.
 
 ## Endpoints
 
-The proxy exposes endpoints under two prefixes, corresponding to its operating modes.
+The proxy exposes endpoints under multiple prefixes for different providers and modes.
+
+### Claude Endpoints
 
 | Mode | URL Prefix | Description | Use Case |
 |------|------------|-------------|----------|
 | **SDK** | `/sdk/` | Uses `claude-code-sdk` with its configured tools. | Accessing Claude with local tools. |
 | **API** | `/api/` | Direct proxy with header injection. | Full API control, direct access. |
 
-*   **Anthropic:**
+*   **Anthropic Format:**
     *   `POST /sdk/v1/messages`
     *   `POST /api/v1/messages`
-*   **OpenAI-Compatible:**
+*   **OpenAI-Compatible Format:**
     *   `POST /sdk/v1/chat/completions`
     *   `POST /api/v1/chat/completions`
-*   **Utility:**
+
+### OpenAI Codex Endpoints
+
+*   **Response API:**
+    *   `POST /codex/responses` - Create response with auto-generated session
+    *   `POST /codex/{session_id}/responses` - Create response with persistent session
+    *   Supports streaming via SSE when `stream: true` is set
+    *   See [Response API docs](https://platform.openai.com/docs/api-reference/responses)
+
+### Utility Endpoints
+
+*   **Health & Status:**
     *   `GET /health`
     *   `GET /sdk/models`, `GET /api/models`
     *   `GET /sdk/status`, `GET /api/status`
-    *   `GET /oauth/callback`
+*   **Authentication:**
+    *   `GET /oauth/callback` - OAuth callback for both Claude and OpenAI
 *   **MCP & Permissions:**
     *   `POST /mcp/permission/check` - MCP permission checking endpoint
     *   `GET /permissions/stream` - SSE stream for permission requests
@@ -394,9 +461,18 @@ These features are disabled by default and can be enabled via configuration. For
 
 1.  **Authentication Error:** Ensure you're using the correct mode (`/sdk` or `/api`) for your authentication method.
 2.  **Claude Credentials Expired:** Run `ccproxy auth login` to refresh credentials for API mode. Run `claude /login` for SDK mode.
-3.  **Missing API Auth Token:** If you've enabled security, include the token in your request headers.
-4.  **Port Already in Use:** Start the server on a different port: `ccproxy --port 8001`.
-5.  **Model Not Available:** Check that your Claude subscription includes the requested model.
+3.  **OpenAI/Codex Authentication Failed:**
+    - Check if valid credentials exist: `ccproxy auth status`
+    - Ensure you have an active ChatGPT Plus subscription
+    - Try re-authenticating: `ccproxy auth login-openai` or `codex auth login`
+    - Verify credentials in `$HOME/.codex/auth.json`
+4.  **Codex Response API Errors:**
+    - "Instruction prompt injection failed": The backend requires the Codex prompt; this is automatic
+    - "Session not found": Use persistent session IDs for conversation continuity
+    - "Model not available": Ensure you're using ChatGPT Plus compatible models
+5.  **Missing API Auth Token:** If you've enabled security, include the token in your request headers.
+6.  **Port Already in Use:** Start the server on a different port: `ccproxy --port 8001`.
+7.  **Model Not Available:** Check that your subscription includes the requested model.
 
 ## Contributing
 
