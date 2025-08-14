@@ -346,6 +346,9 @@ class StreamingHandler:
         final_headers.pop(
             "date", None
         )  # Remove upstream date header to avoid conflicts
+        # Remove Content-Length header if present (incompatible with streaming)
+        final_headers.pop("content-length", None)
+        final_headers.pop("Content-Length", None)
 
         # Ensure critical headers for streaming
         final_headers["Cache-Control"] = "no-cache"

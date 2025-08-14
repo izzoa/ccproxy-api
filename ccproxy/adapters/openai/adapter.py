@@ -15,7 +15,7 @@ from typing import Any, Literal, cast
 import structlog
 from pydantic import ValidationError
 
-from ccproxy.core.interfaces import APIAdapter
+from ccproxy.adapters.base import APIAdapter
 from ccproxy.utils.model_mapping import map_model_to_claude
 
 from .models import (
@@ -43,7 +43,7 @@ class OpenAIAdapter(APIAdapter):
         self.include_sdk_content_as_xml = include_sdk_content_as_xml
         self.response_adapter = ResponseAdapter()
 
-    def adapt_request(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def adapt_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """Convert OpenAI request format to Anthropic format.
 
         Args:
@@ -320,7 +320,7 @@ class OpenAIAdapter(APIAdapter):
                 openai_req.function_call
             )
 
-    def adapt_response(self, response: dict[str, Any]) -> dict[str, Any]:
+    async def adapt_response(self, response: dict[str, Any]) -> dict[str, Any]:
         """Convert Anthropic response format to OpenAI format.
 
         Args:
@@ -496,7 +496,7 @@ class OpenAIAdapter(APIAdapter):
             + usage_info.get("output_tokens", 0),
         )
 
-    async def adapt_stream(
+    async def adapt_stream(  # type: ignore[override]
         self, stream: AsyncIterator[dict[str, Any]]
     ) -> AsyncIterator[dict[str, Any]]:
         """Convert Anthropic streaming response to OpenAI streaming format.

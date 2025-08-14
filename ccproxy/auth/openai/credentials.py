@@ -7,6 +7,7 @@ import jwt
 import structlog
 from pydantic import BaseModel, Field, field_validator
 
+from ..base import AuthManager
 from .storage import OpenAITokenStorage
 
 
@@ -104,7 +105,7 @@ class OpenAICredentials(BaseModel):
         return cls(**data)
 
 
-class OpenAITokenManager:
+class OpenAITokenManager(AuthManager):
     """Manages OpenAI token storage and refresh operations."""
 
     def __init__(self, storage: OpenAITokenStorage | None = None):
@@ -112,6 +113,7 @@ class OpenAITokenManager:
 
         Args:
             storage: Token storage backend. If None, uses default TOML file storage.
+            device_id: Optional device ID for OpenAI requests.
         """
         self.storage = storage or OpenAITokenStorage()
 
@@ -164,3 +166,26 @@ class OpenAITokenManager:
     def get_storage_location(self) -> str:
         """Get storage location description."""
         return self.storage.get_location()
+
+    async def get_auth_headers(self) -> dict[str, str]:
+        """Get OpenAI auth headers."""
+        from ccproxy.auth.exceptions import AuthenticationError
+
+        token = await self.get_valid_token()
+        if not token:
+            raise AuthenticationError("No valid OpenAI token")
+        return {
+            "authorization": f"Bearer {token}",
+        }
+
+    async def validate_credentials(self) -> bool:
+        """Check if we have valid OpenAI credentials."""
+        try:
+            token = await self.get_valid_token()
+            return bool(token)
+        except Exception:
+            return False
+
+    def get_provider_name(self) -> str:
+        """Get the provider name for logging."""
+        return "openai-codex"

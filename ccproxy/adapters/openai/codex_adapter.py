@@ -11,18 +11,58 @@ from typing import Any
 
 import structlog
 
+from ccproxy.adapters.base import APIAdapter
+
 from .adapter import OpenAIAdapter
 
 
 logger = structlog.get_logger(__name__)
 
 
-class CodexAdapter:
+class CodexAdapter(APIAdapter):
     """Simplified adapter for Codex Response API format conversion."""
 
     def __init__(self) -> None:
         """Initialize the Codex adapter."""
         self.openai_adapter = OpenAIAdapter()
+
+    async def adapt_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Convert a request from OpenAI to Codex format.
+
+        Args:
+            request: The OpenAI format request data
+
+        Returns:
+            The Codex format request data
+        """
+        return self.convert_chat_to_response_request(request)
+
+    async def adapt_response(self, response: dict[str, Any]) -> dict[str, Any]:
+        """Convert a response from Codex to OpenAI format.
+
+        Args:
+            response: The Codex format response data
+
+        Returns:
+            The OpenAI format response data
+        """
+        return self.convert_response_to_chat(response)
+
+    async def adapt_stream(  # type: ignore[override]
+        self, stream: AsyncIterator[dict[str, Any]]
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Convert a streaming response from Codex to OpenAI format.
+
+        Args:
+            stream: The Codex format streaming response
+
+        Yields:
+            The OpenAI format streaming response chunks
+        """
+        # For Codex, the stream is already in the right format
+        # since it's handling SSE data differently
+        async for chunk in stream:
+            yield chunk
 
     def convert_chat_to_response_request(
         self, chat_request: dict[str, Any]

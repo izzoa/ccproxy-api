@@ -58,10 +58,8 @@ class APIAdapter(ABC):
             ValueError: If the stream format is invalid or unsupported
         """
         # This should be implemented as an async generator
-        # async def adapt_stream(self, stream):
-        #     async for item in stream:
-        #         yield transformed_item
-        raise NotImplementedError
+        # Subclasses must override this method
+        ...
 
 
 class BaseAPIAdapter(APIAdapter):

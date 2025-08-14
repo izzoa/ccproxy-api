@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 from structlog import get_logger
 
+from ccproxy.auth.base import AuthManager
 from ccproxy.auth.exceptions import (
     CredentialsExpiredError,
     CredentialsNotFoundError,
@@ -28,7 +29,7 @@ from ccproxy.services.credentials.oauth_client import OAuthClient
 logger = get_logger(__name__)
 
 
-class CredentialsManager:
+class CredentialsManager(AuthManager):
     """Manager for Claude credentials with storage and OAuth support."""
 
     # ==================== Initialization ====================
@@ -559,3 +560,39 @@ class CredentialsManager:
 
         logger.info("token_refresh_completed")
         return credentials
+
+    # ==================== AuthManager Interface ====================
+
+    async def get_auth_headers(self) -> dict[str, str]:
+        """Get Anthropic auth headers.
+
+        Returns:
+            Dictionary with Authorization header for Anthropic OAuth API.
+
+        Raises:
+            CredentialsNotFoundError: If no credentials found.
+            CredentialsExpiredError: If credentials expired and refresh fails.
+        """
+        # For Claude/Anthropic OAuth, we use Bearer token authentication
+        access_token = await self.get_access_token()
+        return {"Authorization": f"Bearer {access_token}"}
+
+    async def validate_credentials(self) -> bool:
+        """Check if we have valid Anthropic credentials.
+
+        Returns:
+            True if valid credentials exist, False otherwise.
+        """
+        try:
+            credentials = await self.get_valid_credentials()
+            return bool(credentials and credentials.claude_ai_oauth.access_token)
+        except Exception:
+            return False
+
+    def get_provider_name(self) -> str:
+        """Get the provider name for logging.
+
+        Returns:
+            Provider name string.
+        """
+        return "anthropic-claude"

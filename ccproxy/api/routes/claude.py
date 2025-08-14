@@ -39,7 +39,7 @@ async def create_openai_chat_completion(
         adapter = OpenAIAdapter()
 
         # Convert entire OpenAI request to Anthropic format using adapter
-        anthropic_request = adapter.adapt_request(openai_request.model_dump())
+        anthropic_request = await adapter.adapt_request(openai_request.model_dump())
 
         # Extract stream parameter
         stream = openai_request.stream or False
@@ -92,7 +92,7 @@ async def create_openai_chat_completion(
                 "Non-streaming response must be MessageResponse"
             )
             response_dict = response.model_dump()
-            openai_response = adapter.adapt_response(response_dict)
+            openai_response = await adapter.adapt_response(response_dict)
             return OpenAIChatCompletionResponse.model_validate(openai_response)
 
     except Exception as e:
@@ -126,7 +126,7 @@ async def create_openai_chat_completion_with_session(
         adapter = OpenAIAdapter()
 
         # Convert entire OpenAI request to Anthropic format using adapter
-        anthropic_request = adapter.adapt_request(openai_request.model_dump())
+        anthropic_request = await adapter.adapt_request(openai_request.model_dump())
 
         # Extract stream parameter
         stream = openai_request.stream or False
@@ -181,7 +181,7 @@ async def create_openai_chat_completion_with_session(
                 "Non-streaming response must be MessageResponse"
             )
             response_dict = response.model_dump()
-            openai_response = adapter.adapt_response(response_dict)
+            openai_response = await adapter.adapt_response(response_dict)
             return OpenAIChatCompletionResponse.model_validate(openai_response)
 
     except Exception as e:

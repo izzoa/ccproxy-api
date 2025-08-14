@@ -16,6 +16,8 @@ from fastapi.responses import StreamingResponse
 from starlette.responses import Response
 from typing_extensions import TypedDict
 
+# Import for unified dispatch
+from ccproxy.adapters.base import APIAdapter
 from ccproxy.config.settings import Settings
 from ccproxy.core.codex_transformers import CodexRequestTransformer
 from ccproxy.core.http import BaseProxyClient
@@ -30,6 +32,7 @@ from ccproxy.observability import (
 from ccproxy.observability.access_logger import log_request_access
 from ccproxy.observability.streaming_response import StreamingResponseWithLogging
 from ccproxy.services.credentials.manager import CredentialsManager
+from ccproxy.services.provider_context import ProviderContext
 from ccproxy.services.request_processor import RequestProcessor
 from ccproxy.services.streaming_handler import StreamingHandler
 from ccproxy.testing import RealisticMockResponseGenerator
@@ -1626,6 +1629,509 @@ class ProxyService:
                 )
 
         return openai_chunks
+
+    # ==================== Unified Dispatch ====================
+
+    async def dispatch_request(
+        self,
+        request: Request,
+        provider_context: Any,  # Will be ProviderContext
+    ) -> Response | StreamingResponse:
+        """
+        Unified request dispatcher for all providers.
+
+        This method orchestrates the complete request lifecycle:
+        1. Authentication
+        2. Request transformation
+        3. HTTP forwarding
+        4. Response adaptation
+        5. Streaming handling
+
+        Args:
+            request: FastAPI request object
+            provider_context: Provider-specific configuration
+
+        Returns:
+            Response or StreamingResponse based on request type
+
+        Raises:
+            HTTPException: For various error conditions
+        """
+        import uuid
+
+        from ccproxy.auth.exceptions import AuthenticationError
+
+        # Start request tracking
+        request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        request_context = getattr(request.state, "context", None)
+
+        logger.info(
+            "dispatch_request_start",
+            provider=provider_context.provider_name,
+            request_id=request_id,
+            path=request.url.path,
+        )
+
+        try:
+            # Step 1: Get authentication headers
+            auth_headers = await provider_context.auth_manager.get_auth_headers()
+
+            logger.info(auth_headers, auth_headers=auth_headers)
+            # Step 2: Read and transform request body
+            original_body = await request.body()
+            transformed_body = await self._transform_request_body(
+                body=original_body,
+                adapter=provider_context.request_adapter,
+                request=request,
+                provider_context=provider_context,
+            )
+
+            # Step 3: Prepare headers
+            headers = await self._prepare_headers(
+                request_headers=dict(request.headers),
+                auth_headers=auth_headers,
+                extra_headers=provider_context.extra_headers,
+                provider_context=provider_context,
+            )
+
+            logger.info("headers", headers=headers)
+            # Step 4: Build target URL
+            target_url = self._build_target_url(
+                base_url=provider_context.target_base_url,
+                path=request.url.path,
+                query=str(request.url.query) if request.url.query else None,
+            )
+
+            # Step 5: Determine if streaming is needed
+            is_streaming = await self._should_stream(
+                request_body=transformed_body,
+                provider_context=provider_context,
+            )
+
+            logger.debug(
+                "dispatch_request", target_url=target_url, is_streaming=is_streaming
+            )
+            # Step 6: Execute request
+            response: Response | StreamingResponse
+            if is_streaming and provider_context.supports_streaming:
+                response = await self._handle_streaming_request_unified(
+                    method=request.method,
+                    url=target_url,
+                    headers=headers,
+                    body=transformed_body,
+                    provider_context=provider_context,
+                    request_context=request_context,
+                )
+            else:
+                response = await self._handle_regular_request(
+                    method=request.method,
+                    url=target_url,
+                    headers=headers,
+                    body=transformed_body,
+                    provider_context=provider_context,
+                    request_context=request_context,
+                )
+
+            logger.info(
+                "dispatch_request_complete",
+                provider=provider_context.provider_name,
+                request_id=request_id,
+                streaming=is_streaming,
+            )
+
+            return response
+
+        except AuthenticationError as e:
+            logger.error(
+                "dispatch_request_auth_error",
+                provider=provider_context.provider_name,
+                error=str(e),
+            )
+            raise HTTPException(status_code=401, detail=str(e)) from e
+        except Exception as e:
+            logger.error(
+                "dispatch_request_error",
+                provider=provider_context.provider_name,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            raise HTTPException(
+                status_code=500, detail=f"Request dispatch failed: {str(e)}"
+            ) from e
+
+    async def _transform_request_body(
+        self,
+        body: bytes,
+        adapter: "APIAdapter | None",
+        request: Request,
+        provider_context: "ProviderContext",
+    ) -> bytes:
+        """Transform request body using adapter and provider-specific transformations."""
+
+        if not body:
+            return body
+
+        # First apply adapter transformation if provided
+        if adapter:
+            try:
+                # Parse JSON body
+                request_json = json.loads(body.decode("utf-8"))
+
+                # Apply adapter transformation
+                transformed_json = await adapter.adapt_request(request_json)
+
+                # Convert back to bytes
+                body = json.dumps(transformed_json).encode("utf-8")
+            except Exception as e:
+                logger.warning(
+                    "adapter_transformation_failed",
+                    error=str(e),
+                    fallback="using_original_body",
+                )
+
+        # Then apply provider-specific transformations
+        from ccproxy.services.transformation_helpers import (
+            apply_claude_transformations,
+            apply_codex_transformations,
+            should_apply_claude_transformations,
+            should_apply_codex_transformations,
+        )
+
+        if should_apply_claude_transformations(provider_context.provider_name):
+            injection_mode = (
+                self.settings.claude.system_prompt_injection_mode.value
+                if self.settings
+                else "minimal"
+            )
+            # Only transform body part (headers handled separately)
+            body, _ = await apply_claude_transformations(
+                body=body,
+                headers={},  # Don't transform headers here
+                access_token="",  # Not needed for body transformation
+                app_state=self.app_state,
+                injection_mode=injection_mode,
+                proxy_mode=self.proxy_mode,
+            )
+        elif should_apply_codex_transformations(provider_context.provider_name):
+            # Apply Codex instructions injection
+            # Note: For Codex, we need to apply transformations even for native format
+            body, _ = await apply_codex_transformations(
+                body=body,
+                headers={},  # Don't transform headers here
+                access_token="",  # Not needed for body transformation
+                session_id=getattr(provider_context, "session_id", "") or "",
+                account_id=getattr(provider_context, "account_id", "") or "",
+                app_state=self.app_state,
+            )
+
+        return body
+
+    async def _prepare_headers(
+        self,
+        request_headers: dict[str, str],
+        auth_headers: dict[str, str],
+        extra_headers: dict[str, str],
+        provider_context: "ProviderContext",
+    ) -> dict[str, str]:
+        """Prepare headers for the outbound request."""
+
+        from ccproxy.services.transformation_helpers import (
+            apply_claude_transformations,
+            apply_codex_transformations,
+            should_apply_claude_transformations,
+            should_apply_codex_transformations,
+        )
+
+        # Extract access token from auth headers
+        # For Claude, we use OAuth Bearer token authentication
+        access_token = ""
+        if "Authorization" in auth_headers:
+            access_token = auth_headers["Authorization"].replace("Bearer ", "")
+        # Note: x-api-key would be for direct API key auth, not OAuth
+
+        # Apply provider-specific transformations
+        if should_apply_claude_transformations(provider_context.provider_name):
+            # Use Claude transformer for complete header preparation
+            _, headers = await apply_claude_transformations(
+                body=b"",  # Not needed for header transformation
+                headers=request_headers,
+                access_token=access_token,  # This is for OAuth Bearer token
+                app_state=self.app_state,
+                proxy_mode=self.proxy_mode,
+            )
+            # Add authentication headers (could be Bearer token OR x-api-key)
+            headers.update(auth_headers)
+        elif should_apply_codex_transformations(provider_context.provider_name):
+            # Use Codex transformer for complete header preparation
+            _, headers = await apply_codex_transformations(
+                body=b"",  # Not needed for header transformation
+                headers=request_headers,
+                access_token=access_token,
+                session_id=getattr(provider_context, "session_id", "") or "",
+                account_id=getattr(provider_context, "account_id", "") or "",
+                app_state=self.app_state,
+            )
+            # Add authentication headers
+            headers.update(auth_headers)
+        else:
+            # Default: start with request headers
+            headers = dict(request_headers)
+            # Add authentication
+            headers.update(auth_headers)
+
+        # IMPORTANT: Always remove hop-by-hop headers and Content-Length for streaming
+        # These headers should never be forwarded as they cause issues with streaming responses
+        for header in [
+            "host",
+            "connection", 
+            "keep-alive",
+            "transfer-encoding",
+            "content-length",
+        ]:
+            headers.pop(header.lower(), None)
+            # Also check for case variations
+            headers.pop(header.title(), None)
+            headers.pop(header.upper(), None)
+
+        # Add extra headers on top (these take precedence)
+        headers.update(extra_headers)
+
+        # Apply request transformer if provided (for custom transformations)
+        if hasattr(provider_context, "request_transformer") and callable(
+            provider_context.request_transformer
+        ):
+            headers = provider_context.request_transformer(headers)
+
+        return headers
+
+    def _build_target_url(
+        self,
+        base_url: str,
+        path: str,
+        query: str | None,
+    ) -> str:
+        """Build the target URL for the request using direct path mappings.
+
+        Route mappings:
+        - /api/v1/chat/completions -> /v1/messages (converted by adapter)
+        - /api/v1/messages -> /v1/messages
+        - /v1/messages -> /v1/messages
+        - /codex/responses -> /backend-api/codex/responses
+        - /codex/{session_id}/responses -> /backend-api/codex/responses (session_id in request body)
+        - /codex/chat/completions -> /backend-api/codex/messages
+        """
+        # Direct path mappings
+        path_mappings = {
+            # Anthropic API mappings
+            "/api/v1/chat/completions": "/v1/messages?beta=true",  # Will be converted by adapter
+            "/api/v1/messages": "/v1/messages?beta=true",
+            "/v1/chat/completions": "/v1/messages",  # Will be converted by adapter
+            "/v1/messages": "/v1/messages",
+            # Codex API mappings
+            "/codex/responses": "/responses",
+            "/codex/chat/completions": "/responses",  # OpenAI format to Codex messages
+        }
+
+        # Check for direct mapping first
+        if path in path_mappings:
+            target_path = path_mappings[path]
+        # Handle dynamic Codex session paths - strip session_id from path
+        elif path.startswith("/codex/") and "/responses" in path:
+            # /codex/{session_id}/responses -> /backend-api/codex/responses
+            # Session ID is passed in request body, not in path
+            target_path = "/backend-api/codex/responses"
+        else:
+            # Use path as-is if no mapping found
+            target_path = path
+
+        # Build URL
+        url = f"{base_url.rstrip('/')}{target_path}"
+        if query:
+            url = f"{url}?{query}"
+
+        return url
+
+    async def _should_stream(
+        self,
+        request_body: bytes,
+        provider_context: "ProviderContext",
+    ) -> bool:
+        """Determine if the request should be streamed."""
+
+        if not provider_context.supports_streaming:
+            return False
+
+        try:
+            body_json = json.loads(request_body.decode("utf-8"))
+            return bool(body_json.get("stream", False))
+        except Exception:
+            return False
+
+    async def _handle_streaming_request_unified(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        provider_context: Any,
+        request_context: Any,
+    ) -> StreamingResponse:
+        """Handle streaming request with response adaptation."""
+
+        async def stream_generator() -> AsyncGenerator[bytes, None]:
+            async with (
+                httpx.AsyncClient(timeout=provider_context.timeout) as client,
+                client.stream(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    content=body,
+                ) as response,
+            ):
+                # Check for errors
+                if response.status_code >= 400:
+                    error_body = await response.aread()
+                    yield self._format_error_response(
+                        status_code=response.status_code,
+                        body=error_body,
+                        provider_context=provider_context,
+                    )
+                    return
+
+                # Stream with adaptation if adapter provided
+                if provider_context.response_adapter:
+                    async for chunk_bytes in response.aiter_bytes():
+                        # Parse SSE chunks and adapt
+                        try:
+                            # Handle SSE format
+                            chunk_str = chunk_bytes.decode("utf-8")
+                            if chunk_str.startswith("data: "):
+                                data_str = chunk_str[6:].strip()
+                                if data_str == "[DONE]":
+                                    yield b"data: [DONE]\n\n"
+                                else:
+                                    chunk_json = json.loads(data_str)
+
+                                    # Create async generator for single chunk
+                                    async def single_chunk_gen(
+                                        data: Any = chunk_json,
+                                    ) -> AsyncGenerator[Any, None]:
+                                        yield data
+
+                                    # Adapt the chunk
+                                    async for (
+                                        adapted_chunk
+                                    ) in provider_context.response_adapter.adapt_stream(
+                                        single_chunk_gen()
+                                    ):
+                                        yield f"data: {json.dumps(adapted_chunk)}\n\n".encode()
+                            else:
+                                # Pass through non-data lines
+                                yield chunk_bytes
+                        except Exception as e:
+                            logger.warning(
+                                "stream_chunk_adaptation_failed", error=str(e)
+                            )
+                            yield chunk_bytes
+                else:
+                    # Pass through raw SSE stream
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+
+        # Return streaming response with logging
+        # Note: We explicitly set headers here and don't pass through Content-Length
+        # from upstream to avoid "Too much data for declared Content-Length" errors
+        # We set content-type via headers instead of media_type to avoid any
+        # automatic Content-Length calculation
+        logger.info("stream")
+        return StreamingResponseWithLogging(
+            content=stream_generator(),
+            request_context=request_context,
+            metrics=self.metrics,
+            status_code=200,
+            headers={
+                "content-type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+            },
+        )
+
+    async def _handle_regular_request(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        provider_context: "ProviderContext",
+        request_context: Any,
+    ) -> Response:
+        """Handle non-streaming request with response adaptation."""
+
+        async with httpx.AsyncClient(timeout=provider_context.timeout) as client:
+            response = await client.request(
+                method=method,
+                url=url,
+                headers=headers,
+                content=body,
+            )
+
+            # Check for errors
+            if response.status_code >= 400:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Request failed with status {response.status_code}: "
+                    f"{response.text[:500]}",
+                )
+
+            # Get response body
+            response_body = response.content
+
+            # Apply response adapter if provided
+            if provider_context.response_adapter:
+                try:
+                    response_json = json.loads(response_body.decode("utf-8"))
+                    adapted_json = (
+                        await provider_context.response_adapter.adapt_response(
+                            response_json
+                        )
+                    )
+                    response_body = json.dumps(adapted_json).encode("utf-8")
+                except Exception as e:
+                    logger.warning(
+                        "response_adaptation_failed",
+                        error=str(e),
+                        fallback="using_original_response",
+                    )
+
+            # Build response
+            return Response(
+                content=response_body,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.headers.get("content-type", "application/json"),
+            )
+
+    def _format_error_response(
+        self,
+        status_code: int,
+        body: bytes,
+        provider_context: "ProviderContext",
+    ) -> bytes:
+        """Format error response based on provider."""
+
+        try:
+            error_json = json.loads(body.decode("utf-8"))
+        except Exception:
+            error_json = {"error": {"message": body.decode("utf-8", errors="replace")}}
+
+        # Apply adapter error formatting if available
+        if provider_context.response_adapter and hasattr(
+            provider_context.response_adapter, "format_error"
+        ):
+            error_json = provider_context.response_adapter.format_error(error_json)
+
+        return f"data: {json.dumps(error_json)}\n\n".encode()
 
     async def close(self) -> None:
         """Close any resources held by the proxy service."""

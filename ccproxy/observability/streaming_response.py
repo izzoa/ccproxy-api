@@ -52,6 +52,7 @@ class StreamingResponseWithLogging(StreamingResponse):
         logged_content = self._wrap_with_logging(
             content, request_context, metrics, status_code
         )
+
         super().__init__(logged_content, status_code=status_code, **kwargs)
 
     async def _wrap_with_logging(

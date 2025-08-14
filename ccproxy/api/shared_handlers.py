@@ -7,8 +7,12 @@ from typing import Any
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from starlette.responses import Response
+from structlog import get_logger
 
 from ccproxy.api.responses import ProxyResponse
+
+
+logger = get_logger()
 
 
 async def parse_request_data(
@@ -63,7 +67,7 @@ def handle_response_errors(
     )
 
 
-def build_streaming_response(
+def burld_streaming_response(
     response_body: bytes, response_headers: dict[str, str]
 ) -> StreamingResponse:
     """Build a streaming response from response body and headers.
@@ -85,6 +89,12 @@ def build_streaming_response(
 
     # Start with the response headers from proxy service
     streaming_headers = response_headers.copy()
+
+    logger.info("build_streaming_response")
+    # Remove Content-Length header if present (incompatible with streaming)
+    # Some upstream servers incorrectly set this for streaming responses
+    streaming_headers.pop("content-length", None)
+    streaming_headers.pop("Content-Length", None)
 
     # Ensure critical headers for streaming
     streaming_headers["Cache-Control"] = "no-cache"
@@ -134,6 +144,7 @@ def build_proxy_response(
             # Keep original body if conversion fails
             pass
 
+    logger.error("proxy response")
     return ProxyResponse(
         content=final_body,
         status_code=status_code,
@@ -187,18 +198,14 @@ async def handle_proxy_request(
                     status_code, response_headers, response_body, request
                 )
 
-            # Check if this is a streaming response based on content-type
-            content_type = response_headers.get("content-type", "")
-            if "text/event-stream" in content_type:
-                return build_streaming_response(response_body, response_headers)
-            else:
-                return build_proxy_response(
-                    status_code,
-                    response_headers,
-                    response_body,
-                    request,
-                    format_converter,
-                )
+            # Always build a proxy response (streaming is handled elsewhere)
+            return build_proxy_response(
+                status_code,
+                response_headers,
+                response_body,
+                request,
+                format_converter,
+            )
 
     except HTTPException:
         # Re-raise HTTPException as-is (including 401 auth errors)
