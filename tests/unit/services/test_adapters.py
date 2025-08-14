@@ -211,6 +211,7 @@ class TestOpenAIAdapter:
 
         assert result["tool_choice"]["type"] == "auto"
 
+    @pytest.mark.skip("Deprecated functions/function_call fields removed")
     def test_adapt_request_functions_conversion(self, adapter: OpenAIAdapter) -> None:
         """Test conversion of deprecated OpenAI functions to tools."""
         openai_request = {
@@ -725,6 +726,7 @@ class TestOpenAIAdapter:
         result = adapter._convert_tool_choice_to_anthropic({"invalid": "format"})
         assert result["type"] == "auto"
 
+    @pytest.mark.skip("_convert_function_call_to_anthropic method removed")
     def test_function_call_edge_cases(self, adapter: OpenAIAdapter) -> None:
         """Test edge cases in function call conversion."""
         # Test unknown string function call

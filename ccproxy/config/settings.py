@@ -127,6 +127,17 @@ class Settings(BaseSettings):
         description="Pricing and cost calculation configuration settings",
     )
 
+    # Plugin settings
+    plugin_dir: str = Field(
+        default="plugins",
+        description="Directory to load plugins from",
+    )
+
+    enable_plugins: bool = Field(
+        default=True,
+        description="Enable plugin system",
+    )
+
     @field_validator("server", mode="before")
     @classmethod
     def validate_server(cls, v: Any) -> Any:

@@ -27,6 +27,7 @@ from ccproxy.api.routes.metrics import (
     prometheus_router,
 )
 from ccproxy.api.routes.permissions import router as permissions_router
+from ccproxy.api.routes.plugins import router as plugins_router
 from ccproxy.api.routes.proxy import router as proxy_router
 from ccproxy.auth.oauth.routes import router as oauth_router
 from ccproxy.config.settings import Settings, get_settings
@@ -43,6 +44,7 @@ from ccproxy.utils.startup_helpers import (
     initialize_log_storage_shutdown,
     initialize_log_storage_startup,
     initialize_permission_service_startup,
+    initialize_proxy_service_startup,
     setup_permission_service_shutdown,
     setup_scheduler_shutdown,
     setup_scheduler_startup,
@@ -128,7 +130,37 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "startup": initialize_permission_service_startup,
         "shutdown": setup_permission_service_shutdown,
     },
+    {
+        "name": "Proxy Service",
+        "startup": initialize_proxy_service_startup,
+        "shutdown": None,  # Cleaned up with app shutdown
+    },
 ]
+
+
+async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
+    """Initialize plugin system during startup."""
+    if not settings.enable_plugins:
+        logger.info("Plugin system disabled by configuration")
+        return
+
+    # Get proxy service from app state if available
+    if hasattr(app.state, "proxy_service"):
+        proxy_service = app.state.proxy_service
+        await proxy_service.initialize_plugins()
+        logger.info(
+            f"Initialized {len(proxy_service.list_active_providers())} providers"
+        )
+
+
+# Add plugin initialization to lifecycle components
+LIFECYCLE_COMPONENTS.append(
+    {
+        "name": "Plugin System",
+        "startup": initialize_plugins_startup,
+        "shutdown": None,  # Plugins cleaned up with proxy service
+    }
+)
 
 # Additional shutdown-only components that need special handling
 SHUTDOWN_ONLY_COMPONENTS: list[ShutdownComponent] = [
@@ -326,6 +358,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             permissions_router, prefix="/permissions", tags=["permissions"]
         )
         setup_mcp(app)
+
+    # Plugin management endpoints (conditional on plugin system)
+    if settings.enable_plugins:
+        app.include_router(plugins_router, prefix="/api", tags=["plugins"])
 
     # Mount static files for dashboard SPA
     from pathlib import Path

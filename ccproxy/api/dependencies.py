@@ -147,6 +147,16 @@ def get_proxy_service(
         Proxy service instance
     """
     logger.debug("get_proxy_service")
+
+    # Check if proxy service is already initialized in app state
+    proxy_service = getattr(request.app.state, "proxy_service", None)
+    if proxy_service:
+        typed_proxy_service: ProxyService = proxy_service
+        return typed_proxy_service
+
+    # Fallback to creating a new instance (for backward compatibility)
+    logger.warning("Proxy service not found in app state, creating new instance")
+
     # Create HTTP client for proxy
     from ccproxy.core.http import HTTPXClient
 

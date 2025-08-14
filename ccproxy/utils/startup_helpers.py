@@ -26,6 +26,7 @@ from ccproxy.services.claude_detection_service import ClaudeDetectionService
 from ccproxy.services.claude_sdk_service import ClaudeSDKService
 from ccproxy.services.codex_detection_service import CodexDetectionService
 from ccproxy.services.credentials.manager import CredentialsManager
+from ccproxy.services.proxy_service import ProxyService
 
 
 # Note: get_permission_service is imported locally to avoid circular imports
@@ -501,6 +502,45 @@ async def initialize_claude_sdk_startup(app: FastAPI, settings: Settings) -> Non
     except Exception as e:
         logger.error("claude_sdk_service_initialization_failed", error=str(e))
         # Continue startup even if ClaudeSDKService fails (graceful degradation)
+
+
+async def initialize_proxy_service_startup(app: FastAPI, settings: Settings) -> None:
+    """Initialize ProxyService and store in app state.
+
+    Args:
+        app: FastAPI application instance
+        settings: Application settings
+    """
+    try:
+        # Create HTTP client for proxy
+        from ccproxy.core.http import BaseProxyClient, HTTPXClient
+
+        http_client = HTTPXClient()
+        proxy_client = BaseProxyClient(http_client)
+
+        # Get global metrics instance
+        metrics = get_metrics()
+
+        # Create credentials manager
+        credentials_manager = CredentialsManager(config=settings.auth)
+
+        # Create ProxyService instance
+        proxy_service = ProxyService(
+            proxy_client=proxy_client,
+            credentials_manager=credentials_manager,
+            settings=settings,
+            proxy_mode="full",
+            target_base_url=settings.reverse_proxy.target_url,
+            metrics=metrics,
+            app_state=app.state,  # Pass app state for detection data access
+        )
+
+        # Store in app state for reuse in dependencies
+        app.state.proxy_service = proxy_service
+        logger.debug("proxy_service_initialized")
+    except Exception as e:
+        logger.error("proxy_service_initialization_failed", error=str(e))
+        # Continue startup even if ProxyService fails (graceful degradation)
 
 
 async def initialize_permission_service_startup(

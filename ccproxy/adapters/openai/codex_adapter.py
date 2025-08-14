@@ -54,14 +54,14 @@ class CodexAdapter(APIAdapter):
         """Convert a streaming response from Codex to OpenAI format.
 
         Args:
-            stream: The Codex format streaming response
+            stream: The Codex format streaming response (Response API SSE events as dicts)
 
         Yields:
-            The OpenAI format streaming response chunks
+            The OpenAI format streaming response chunks (Chat Completions deltas)
         """
-        # For Codex, the stream is already in the right format
-        # since it's handling SSE data differently
-        async for chunk in stream:
+        # Convert Response API streaming dict events to Chat Completions format
+        # The stream contains already-parsed Response API events as dictionaries
+        async for chunk in self._convert_response_stream_dicts_to_chat(stream):
             yield chunk
 
     def convert_chat_to_response_request(
@@ -163,6 +163,145 @@ class CodexAdapter(APIAdapter):
         logger.debug(
             "codex_adapter_stream_conversion_completed",
             total_chunks=chunk_count,
+        )
+
+    async def _convert_response_stream_dicts_to_chat(
+        self, stream: AsyncIterator[dict[str, Any]]
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Convert Response API streaming dict events to Chat Completions format.
+
+        This method handles already-parsed Response API events (as dicts)
+        and converts them to Chat Completions streaming chunks.
+
+        Args:
+            stream: Async iterator of Response API events as dicts
+
+        Yields:
+            Chat Completions formatted streaming chunks as dicts
+        """
+        import time
+        import uuid
+
+        stream_id = f"chatcmpl_{uuid.uuid4().hex[:29]}"
+        created = int(time.time())
+        accumulated_content = ""
+
+        logger.debug("codex_adapter_dict_stream_started", stream_id=stream_id)
+        event_count = 0
+
+        async for event_dict in stream:
+            event_count += 1
+
+            # The event_dict should already be parsed from SSE
+            # It contains the event data directly
+            event_type = event_dict.get("type")
+
+            logger.debug(
+                "codex_adapter_processing_dict_event",
+                event_type=event_type,
+                event_number=event_count,
+                event_keys=list(event_dict.keys()) if event_dict else [],
+            )
+
+            # Handle different Response API event types
+            if event_type in ["response.output.delta", "response.output_text.delta"]:
+                # Extract delta content
+                delta_content = ""
+
+                if event_type == "response.output_text.delta":
+                    # Direct text delta event
+                    delta_content = event_dict.get("delta", "")
+                else:
+                    # Standard output delta with nested structure
+                    output = event_dict.get("output", [])
+                    if output:
+                        for output_item in output:
+                            if output_item.get("type") == "message":
+                                content_blocks = output_item.get("content", [])
+                                for block in content_blocks:
+                                    if block.get("type") in ["output_text", "text"]:
+                                        delta_content += block.get("text", "")
+
+                if delta_content:
+                    accumulated_content += delta_content
+
+                    logger.debug(
+                        "codex_adapter_yielding_dict_delta",
+                        content_length=len(delta_content),
+                        accumulated_length=len(accumulated_content),
+                    )
+
+                    # Create Chat Completions streaming chunk
+                    yield {
+                        "id": stream_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": event_dict.get("model", "gpt-4"),
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": delta_content},
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+
+            elif event_type == "response.completed":
+                # Final chunk with usage info
+                response = event_dict.get("response", {})
+                usage = response.get("usage")
+
+                logger.debug(
+                    "codex_adapter_dict_stream_completed",
+                    total_content_length=len(accumulated_content),
+                    has_usage=usage is not None,
+                )
+
+                chunk_data = {
+                    "id": stream_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": response.get("model", "gpt-4"),
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+
+                # Add usage if available
+                if usage:
+                    from ccproxy.adapters.openai.models import OpenAIUsage
+
+                    converted_usage = OpenAIUsage(
+                        prompt_tokens=usage.get("input_tokens", 0),
+                        completion_tokens=usage.get("output_tokens", 0),
+                        total_tokens=usage.get("total_tokens", 0),
+                    )
+                    chunk_data["usage"] = converted_usage.model_dump()
+
+                yield chunk_data
+
+            elif event_type in ["response.created", "response.in_progress"]:
+                # These events don't produce output in Chat Completions format
+                # Just log them for debugging
+                logger.debug(
+                    "codex_adapter_skipping_event",
+                    event_type=event_type,
+                    event_number=event_count,
+                )
+                continue
+
+            # Handle other potential Response API events
+            elif event_type and "output" in event_type:
+                # Log unexpected output events for debugging
+                logger.debug(
+                    "codex_adapter_unexpected_output_event",
+                    event_type=event_type,
+                    event_data=event_dict,
+                )
+
+        logger.debug(
+            "codex_adapter_dict_stream_finished",
+            stream_id=stream_id,
+            total_events=event_count,
+            final_content_length=len(accumulated_content),
         )
 
     def convert_error_to_chat_format(

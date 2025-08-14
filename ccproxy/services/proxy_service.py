@@ -30,6 +30,8 @@ from ccproxy.observability import (
 )
 from ccproxy.observability.access_logger import log_request_access
 from ccproxy.observability.streaming_response import StreamingResponseWithLogging
+from ccproxy.plugins.registry import PluginRegistry
+from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.provider_context import ProviderContext
 from ccproxy.services.streaming_handler import StreamingHandler
@@ -137,6 +139,13 @@ class ProxyService:
             verbose_api=self._verbose_api,
         )
 
+        # Initialize plugin registry
+        self.plugin_registry = PluginRegistry()
+        self._plugin_adapters: dict[str, BaseAdapter] = {}
+
+        # Initialize plugins on startup (will be called explicitly)
+        self._plugins_initialized = False
+
     def _init_proxy_url(self) -> str | None:
         """Initialize proxy URL from environment variables."""
         # Check for standard proxy environment variables
@@ -211,8 +220,7 @@ class ProxyService:
                 except Exception as e:
                     logger.debug(
                         "credential_check_failed",
-                        error=str(e),
-                        exc_info=True,
+                        exc_info=e,
                     )
 
                 raise HTTPException(
@@ -226,7 +234,7 @@ class ProxyService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error("oauth_token_retrieval_failed", error=str(e), exc_info=True)
+            logger.error("oauth_token_retrieval_failed", exc_info=e)
             raise HTTPException(
                 status_code=401,
                 detail="Authentication failed",
@@ -842,7 +850,7 @@ class ProxyService:
                             )
 
             except Exception as e:
-                logger.exception("streaming_error", error=str(e), exc_info=True)
+                logger.exception("streaming_error", exc_info=e)
                 error_message = f'data: {{"error": "Streaming error: {str(e)}"}}\n\n'
                 yield error_message.encode("utf-8")
 
@@ -1242,7 +1250,6 @@ class ProxyService:
             # Step 1: Get authentication headers
             auth_headers = await provider_context.auth_manager.get_auth_headers()
 
-            logger.info(auth_headers, auth_headers=auth_headers)
             # Step 2: Read and transform request body
             original_body = await request.body()
             transformed_body = await self._transform_request_body(
@@ -1260,7 +1267,6 @@ class ProxyService:
                 provider_context=provider_context,
             )
 
-            logger.info("headers", headers=headers)
             # Step 4: Build target URL
             target_url = self._build_target_url(
                 base_url=provider_context.target_base_url,
@@ -1566,39 +1572,142 @@ class ProxyService:
 
                 # Stream with adaptation if adapter provided
                 if provider_context.response_adapter:
+                    logger.debug(
+                        "stream_adaptation_starting",
+                        provider=provider_context.provider_name,
+                        has_adapter=True,
+                        adapter_type=type(provider_context.response_adapter).__name__,
+                    )
+
+                    buffer = b""  # Buffer for incomplete SSE events
+                    chunk_count = 0
+                    event_count = 0
+
                     async for chunk_bytes in response.aiter_bytes():
-                        # Parse SSE chunks and adapt
-                        try:
-                            # Handle SSE format
-                            chunk_str = chunk_bytes.decode("utf-8")
-                            if chunk_str.startswith("data: "):
-                                data_str = chunk_str[6:].strip()
-                                if data_str == "[DONE]":
-                                    yield b"data: [DONE]\n\n"
-                                else:
-                                    chunk_json = json.loads(data_str)
+                        chunk_count += 1
+                        logger.debug(
+                            "stream_chunk_received",
+                            chunk_number=chunk_count,
+                            chunk_size=len(chunk_bytes),
+                            buffer_size_before=len(buffer),
+                            first_50_bytes=chunk_bytes[:50]
+                            if len(chunk_bytes) > 0
+                            else None,
+                        )
 
-                                    # Create async generator for single chunk
-                                    async def single_chunk_gen(
-                                        data: Any = chunk_json,
-                                    ) -> AsyncGenerator[Any, None]:
-                                        yield data
+                        # Add to buffer
+                        buffer += chunk_bytes
 
-                                    # Adapt the chunk
-                                    async for (
-                                        adapted_chunk
-                                    ) in provider_context.response_adapter.adapt_stream(
-                                        single_chunk_gen()
-                                    ):
-                                        yield f"data: {json.dumps(adapted_chunk)}\n\n".encode()
-                            else:
-                                # Pass through non-data lines
-                                yield chunk_bytes
-                        except Exception as e:
-                            logger.warning(
-                                "stream_chunk_adaptation_failed", error=str(e)
+                        # Process complete SSE events (separated by double newlines)
+                        while b"\n\n" in buffer:
+                            event_count += 1
+                            # Split at the first complete event
+                            event_bytes, buffer = buffer.split(b"\n\n", 1)
+
+                            logger.debug(
+                                "complete_sse_event_found",
+                                event_number=event_count,
+                                event_size=len(event_bytes),
+                                remaining_buffer=len(buffer),
                             )
-                            yield chunk_bytes
+
+                            try:
+                                # Decode the complete event
+                                event_str = event_bytes.decode("utf-8")
+                                logger.debug(
+                                    "event_decoded",
+                                    event_number=event_count,
+                                    event_preview=event_str[:200],
+                                )
+
+                                # Skip empty events
+                                if not event_str.strip():
+                                    continue
+
+                                # Check if this is a data event
+                                if "data: " in event_str:
+                                    # Extract data from the event
+                                    for line in event_str.split("\n"):
+                                        if line.startswith("data: "):
+                                            data_str = line[6:].strip()
+                                            if data_str == "[DONE]":
+                                                logger.debug(
+                                                    "done_marker_found",
+                                                    event_number=event_count,
+                                                )
+                                                yield b"data: [DONE]\n\n"
+                                            else:
+                                                try:
+                                                    chunk_json = json.loads(data_str)
+                                                    logger.debug(
+                                                        "json_parsed",
+                                                        event_number=event_count,
+                                                        json_keys=list(
+                                                            chunk_json.keys()
+                                                        )
+                                                        if isinstance(chunk_json, dict)
+                                                        else None,
+                                                    )
+
+                                                    # Create async generator for single chunk
+                                                    async def single_chunk_gen(
+                                                        data: Any = chunk_json,
+                                                    ) -> AsyncGenerator[Any, None]:
+                                                        yield data
+
+                                                    # Adapt the chunk
+                                                    logger.debug(
+                                                        "adapting_event",
+                                                        event_number=event_count,
+                                                    )
+                                                    async for adapted_chunk in provider_context.response_adapter.adapt_stream(
+                                                        single_chunk_gen()
+                                                    ):
+                                                        adapted_json = json.dumps(
+                                                            adapted_chunk
+                                                        )
+                                                        logger.debug(
+                                                            "event_adapted",
+                                                            event_number=event_count,
+                                                            adapted_size=len(
+                                                                adapted_json
+                                                            ),
+                                                        )
+                                                        yield f"data: {adapted_json}\n\n".encode()
+
+                                                except json.JSONDecodeError as je:
+                                                    logger.debug(
+                                                        "json_decode_error",
+                                                        event_number=event_count,
+                                                        error=str(je),
+                                                        data_preview=data_str[:100],
+                                                    )
+                                                    # Pass through the original event
+                                                    yield event_bytes + b"\n\n"
+                                else:
+                                    # Pass through non-data events
+                                    logger.debug(
+                                        "passing_through_non_data_event",
+                                        event_number=event_count,
+                                    )
+                                    yield event_bytes + b"\n\n"
+
+                            except Exception as e:
+                                logger.warning(
+                                    "stream_event_processing_failed",
+                                    error=str(e),
+                                    event_number=event_count,
+                                )
+                                # Pass through the original event
+                                yield event_bytes + b"\n\n"
+
+                    # Log final state
+                    logger.debug(
+                        "stream_adaptation_completed",
+                        total_chunks=chunk_count,
+                        total_events=event_count,
+                        remaining_buffer_size=len(buffer),
+                    )
                 else:
                     # Pass through raw SSE stream
                     async for chunk in response.aiter_bytes():
@@ -1609,7 +1718,6 @@ class ProxyService:
         # from upstream to avoid "Too much data for declared Content-Length" errors
         # We set content-type via headers instead of media_type to avoid any
         # automatic Content-Length calculation
-        logger.info("stream")
         return StreamingResponseWithLogging(
             content=stream_generator(),
             request_context=request_context,
@@ -1698,6 +1806,60 @@ class ProxyService:
             error_json = provider_context.response_adapter.format_error(error_json)
 
         return f"data: {json.dumps(error_json)}\n\n".encode()
+
+    async def initialize_plugins(self) -> None:
+        """Initialize and load plugins.
+
+        This method should be called during application startup to discover
+        and register all available plugins.
+        """
+        if self._plugins_initialized:
+            logger.debug("Plugins already initialized")
+            return
+
+        logger.info("Initializing plugin system")
+
+        # Get plugin directory from settings or use default
+        plugin_dir = Path(getattr(self.settings, "plugin_dir", "plugins"))
+
+        # Discover and load plugins
+        await self.plugin_registry.discover(plugin_dir)
+
+        # Register plugin adapters
+        for plugin_name in self.plugin_registry.list_plugins():
+            adapter = self.plugin_registry.get_adapter(plugin_name)
+            if adapter:
+                self._plugin_adapters[plugin_name] = adapter
+                logger.info(f"Registered plugin adapter: {plugin_name}")
+
+        self._plugins_initialized = True
+        logger.info(
+            f"Plugin initialization complete. Loaded {len(self._plugin_adapters)} plugins"
+        )
+
+    def get_plugin_adapter(self, name: str) -> BaseAdapter | None:
+        """Get a plugin adapter by name.
+
+        Args:
+            name: Plugin/provider name
+
+        Returns:
+            Plugin adapter or None if not found
+        """
+        return self._plugin_adapters.get(name)
+
+    def list_active_providers(self) -> list[str]:
+        """List all active providers from plugins.
+
+        Returns:
+            List of provider names
+        """
+        providers = []
+
+        # Plugin providers only - no hardcoded built-in providers
+        providers.extend(self._plugin_adapters.keys())
+
+        return providers
 
     async def close(self) -> None:
         """Close any resources held by the proxy service."""
