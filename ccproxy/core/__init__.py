@@ -1,5 +1,6 @@
 """Core abstractions for the CCProxy API."""
 
+from ccproxy.adapters.base import APIAdapter
 from ccproxy.core.async_utils import (
     async_cache_result,
     async_timer,
@@ -84,7 +85,6 @@ from ccproxy.core.http import (
     HTTPXClient,
 )
 from ccproxy.core.interfaces import (
-    APIAdapter,
     MetricExporter,
     StreamTransformer,
     TokenStorage,

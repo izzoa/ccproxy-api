@@ -2,19 +2,25 @@
 
 import os
 import shutil
+import sys
+import typing
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
+import typing_extensions
+
+
+# Apply TypedDict patch for Python < 3.12
+if sys.version_info < (3, 12):
+    typing.TypedDict = typing_extensions.TypedDict
+
 import structlog
+from claude_code_sdk import ClaudeCodeOptions
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from ccproxy.core.async_utils import get_package_dir, patched_typing
+from ccproxy.core.async_utils import get_package_dir
 
-
-# For further information visit https://errors.pydantic.dev/2.11/u/typed-dict-version
-with patched_typing():
-    from claude_code_sdk import ClaudeCodeOptions  # noqa: E402
 
 logger = structlog.get_logger(__name__)
 

@@ -2,11 +2,12 @@
 
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any, TypedDict
+from typing import Any
 
 from fastapi import APIRouter, FastAPI
 from fastapi.staticfiles import StaticFiles
 from structlog import get_logger
+from typing_extensions import TypedDict
 
 from ccproxy import __version__
 from ccproxy.api.middleware.cors import setup_cors_middleware
@@ -17,8 +18,6 @@ from ccproxy.api.middleware.request_content_logging import (
 )
 from ccproxy.api.middleware.request_id import RequestIDMiddleware
 from ccproxy.api.middleware.server_header import ServerHeaderMiddleware
-from ccproxy.api.routes.claude import router as claude_router
-from ccproxy.api.routes.codex import router as codex_router
 from ccproxy.api.routes.health import router as health_router
 from ccproxy.api.routes.mcp import setup_mcp
 from ccproxy.api.routes.metrics import (
@@ -338,12 +337,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.include_router(dashboard_router, tags=["dashboard"])
 
     app.include_router(oauth_router, prefix="/oauth", tags=["oauth"])
-
-    # Codex routes for OpenAI integration
-    app.include_router(codex_router, tags=["codex"])
-
-    # New /sdk/ routes for Claude SDK endpoints
-    app.include_router(claude_router, prefix="/sdk", tags=["claude-sdk"])
 
     # New /api/ routes for proxy endpoints (includes OpenAI-compatible /v1/chat/completions)
     app.include_router(proxy_router, prefix="/api", tags=["proxy-api"])

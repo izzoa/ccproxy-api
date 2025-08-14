@@ -99,7 +99,7 @@ class TestStreamingAccessLogging:  # type: ignore[unreachable]
             # Make streaming request to Anthropic endpoint
             with client.stream(
                 "POST",
-                "/sdk/v1/messages",
+                "/api/v1/messages",
                 json={
                     "model": "claude-3-5-sonnet-20241022",
                     "messages": [{"role": "user", "content": "Hello"}],
@@ -223,7 +223,7 @@ class TestStreamingAccessLogging:  # type: ignore[unreachable]
             # Make streaming request to OpenAI endpoint
             with client.stream(
                 "POST",
-                "/sdk/v1/chat/completions",
+                "/api/v1/chat/completions",
                 json={
                     "model": "claude-3-5-sonnet-20241022",
                     "messages": [{"role": "user", "content": "Hello"}],
@@ -310,7 +310,7 @@ class TestStreamingAccessLogging:  # type: ignore[unreachable]
         ) as mock_log:
             # Make streaming request that will fail
             response = client.post(
-                "/sdk/v1/messages",
+                "/api/v1/messages",
                 json={
                     "model": "invalid-model",
                     "messages": [{"role": "user", "content": "Hello"}],
@@ -397,7 +397,7 @@ class TestStreamingAccessLogging:  # type: ignore[unreachable]
                 # Make streaming request - should still work despite logging failure
                 with client.stream(
                     "POST",
-                    "/sdk/v1/messages",
+                    "/api/v1/messages",
                     json={
                         "model": "claude-3-5-sonnet-20241022",
                         "messages": [{"role": "user", "content": "Hello"}],
@@ -469,7 +469,7 @@ class TestStreamingAccessLogging:  # type: ignore[unreachable]
 
         # Make non-streaming request to Anthropic endpoint
         response = client.post(
-            "/sdk/v1/messages",
+            "/api/v1/messages",
             json={
                 "model": "claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "Hello"}],

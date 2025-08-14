@@ -53,7 +53,7 @@ def mock_streaming_request():
     """Create a mock streaming FastAPI Request."""
     request = AsyncMock(spec=Request)
     request.method = "POST"
-    request.url.path = "/codex/chat/completions"
+    request.url.path = "/api/codex/chat/completions"
     request.url.query = None
     request.headers = {"content-type": "application/json"}
     request.state.request_id = "test-request-123"

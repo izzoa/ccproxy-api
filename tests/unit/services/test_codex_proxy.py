@@ -5,8 +5,8 @@ response conversion, streaming behavior, and authentication integration.
 Uses factory fixtures for flexible test configuration and reduced duplication.
 
 The tests cover:
-- Codex request proxy to OpenAI backend (/codex/responses)
-- Session-based requests (/codex/{session_id}/responses)
+- Codex request proxy to OpenAI backend (/api/codex/responses)
+- Session-based requests (/api/codex/{session_id}/responses)
 - Request/response transformation for Codex format
 - Streaming to non-streaming conversion when user doesn't request streaming
 - OpenAI OAuth authentication integration
@@ -50,7 +50,7 @@ class TestCodexProxyService:
     ) -> None:
         """Test successful Codex request handling."""
         response = client_with_mock_codex.post(
-            "/codex/responses", json=STANDARD_CODEX_REQUEST
+            "/api/codex/responses", json=STANDARD_CODEX_REQUEST
         )
 
         assert response.status_code == 200
@@ -65,7 +65,7 @@ class TestCodexProxyService:
         """Test Codex request with session ID handling."""
         session_id = "test-session-123"
         response = client_with_mock_codex.post(
-            f"/codex/{session_id}/responses", json=CODEX_REQUEST_WITH_SESSION
+            f"/api/codex/{session_id}/responses", json=CODEX_REQUEST_WITH_SESSION
         )
 
         assert response.status_code == 200
@@ -94,7 +94,7 @@ class TestCodexProxyService:
         }
 
         response = client_with_mock_codex.post(
-            "/codex/responses", json=request_without_stream
+            "/api/codex/responses", json=request_without_stream
         )
 
         # Should return 200 when the mock is properly set up
@@ -107,7 +107,7 @@ class TestCodexProxyService:
     ) -> None:
         """Test explicit streaming when user requests it."""
         with client_with_mock_codex_streaming.stream(
-            "POST", "/codex/responses", json=STREAMING_CODEX_REQUEST
+            "POST", "/api/codex/responses", json=STREAMING_CODEX_REQUEST
         ) as response:
             assert response.status_code == 200
             assert_sse_headers(response)
@@ -148,7 +148,7 @@ class TestCodexProxyService:
             }
 
             response = client_with_mock_codex.post(
-                "/codex/responses", json=STANDARD_CODEX_REQUEST
+                "/api/codex/responses", json=STANDARD_CODEX_REQUEST
             )
 
             # Proxy service should be called
@@ -162,7 +162,7 @@ class TestCodexProxyService:
         # Create client without OpenAI credentials
         client = fastapi_client_factory.create_client(auth_enabled=False)
 
-        response = client.post("/codex/responses", json=STANDARD_CODEX_REQUEST)
+        response = client.post("/api/codex/responses", json=STANDARD_CODEX_REQUEST)
 
         # Should return authentication error
         assert response.status_code == 401
@@ -178,7 +178,7 @@ class TestCodexProxyService:
     ) -> None:
         """Test Codex response with invalid model."""
         response = client_with_mock_codex.post(
-            "/codex/responses", json=INVALID_MODEL_CODEX_REQUEST
+            "/api/codex/responses", json=INVALID_MODEL_CODEX_REQUEST
         )
 
         assert response.status_code == 400
@@ -192,7 +192,7 @@ class TestCodexProxyService:
     ) -> None:
         """Test Codex request validation for missing input."""
         response = client_with_mock_codex.post(
-            "/codex/responses", json=MISSING_INPUT_CODEX_REQUEST
+            "/api/codex/responses", json=MISSING_INPUT_CODEX_REQUEST
         )
 
         # Should return 401 for authentication since auth is checked first
@@ -223,7 +223,7 @@ class TestCodexProxyService:
         mock_handle_codex.return_value = mock_response
 
         response = client_with_mock_codex.post(
-            "/codex/responses", json=STANDARD_CODEX_REQUEST
+            "/api/codex/responses", json=STANDARD_CODEX_REQUEST
         )
 
         assert response.status_code == 200
@@ -242,7 +242,7 @@ class TestCodexProxyService:
             mock_handle.side_effect = Exception("Codex service unavailable")
 
             response = client_with_mock_codex.post(
-                "/codex/responses", json=STANDARD_CODEX_REQUEST
+                "/api/codex/responses", json=STANDARD_CODEX_REQUEST
             )
 
             assert response.status_code == 500
@@ -259,7 +259,7 @@ class TestCodexProxyService:
         # Since we can't easily mock the internal call, we test that the endpoint works
         session_id = "test-session"
         response = client_with_mock_codex.post(
-            f"/codex/{session_id}/responses", json=CODEX_REQUEST_WITH_SESSION
+            f"/api/codex/{session_id}/responses", json=CODEX_REQUEST_WITH_SESSION
         )
 
         # Should return 401 due to auth requirements, but endpoint routing should work
@@ -286,7 +286,7 @@ class TestCodexProxyService:
         mock_load_credentials.return_value = mock_credentials
 
         response = client_with_mock_codex.post(
-            "/codex/responses", json=STANDARD_CODEX_REQUEST
+            "/api/codex/responses", json=STANDARD_CODEX_REQUEST
         )
 
         # Should still return 401 because of additional auth requirements in implementation
