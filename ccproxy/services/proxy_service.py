@@ -1488,9 +1488,9 @@ class ProxyService:
         - /api/v1/chat/completions -> /v1/messages (converted by adapter)
         - /api/v1/messages -> /v1/messages
         - /v1/messages -> /v1/messages
-        - /codex/responses -> /backend-api/codex/responses
-        - /codex/{session_id}/responses -> /backend-api/codex/responses (session_id in request body)
-        - /codex/chat/completions -> /backend-api/codex/messages
+        - /codex/responses -> /responses
+        - /codex/{session_id}/responses -> /responses (session_id in request body)
+        - /codex/chat/completions -> /responses
         """
         # Direct path mappings
         path_mappings = {
@@ -1509,9 +1509,9 @@ class ProxyService:
             target_path = path_mappings[path]
         # Handle dynamic Codex session paths - strip session_id from path
         elif path.startswith("/codex/") and "/responses" in path:
-            # /codex/{session_id}/responses -> /backend-api/codex/responses
+            # /codex/{session_id}/responses -> /responses
             # Session ID is passed in request body, not in path
-            target_path = "/backend-api/codex/responses"
+            target_path = "/responses"
         else:
             # Use path as-is if no mapping found
             target_path = path
@@ -1854,7 +1854,7 @@ class ProxyService:
         Returns:
             List of provider names
         """
-        providers = []
+        providers: list[str] = []
 
         # Plugin providers only - no hardcoded built-in providers
         providers.extend(self._plugin_adapters.keys())

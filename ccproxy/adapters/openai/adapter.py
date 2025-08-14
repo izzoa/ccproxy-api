@@ -496,7 +496,7 @@ class OpenAIAdapter(APIAdapter):
             + usage_info.get("output_tokens", 0),
         )
 
-    async def adapt_stream(  # type: ignore[override]
+    async def adapt_stream(  # type: ignore[override,misc]
         self, stream: AsyncIterator[dict[str, Any]]
     ) -> AsyncIterator[dict[str, Any]]:
         """Convert Anthropic streaming response to OpenAI streaming format.

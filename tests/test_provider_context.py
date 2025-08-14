@@ -1,5 +1,7 @@
 """Tests for ProviderContext and unified dispatch architecture."""
 
+from typing import Any
+
 import pytest
 
 from ccproxy.adapters.base import APIAdapter
@@ -26,11 +28,11 @@ class MockAuthManager(AuthManager):
 class MockAdapter(APIAdapter):
     """Mock API adapter for testing."""
 
-    async def adapt_request(self, request: dict) -> dict:
+    async def adapt_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """Mock request adaptation."""
         return {"adapted": True, **request}
 
-    async def adapt_response(self, response: dict) -> dict:
+    async def adapt_response(self, response: dict[str, Any]) -> dict[str, Any]:
         """Mock response adaptation."""
         return {"adapted": True, **response}
 
@@ -121,12 +123,11 @@ async def test_auth_manager_interface():
     assert provider_name == "mock-provider"
 
 
-@pytest.mark.asyncio
-async def test_provider_context_with_transformer():
+def test_provider_context_with_transformer():
     """Test ProviderContext with request transformer."""
     auth = MockAuthManager()
 
-    async def transformer(headers: dict[str, str]) -> dict[str, str]:
+    def transformer(headers: dict[str, str]) -> dict[str, str]:
         """Mock request transformer."""
         headers["x-transformed"] = "true"
         return headers
@@ -142,7 +143,7 @@ async def test_provider_context_with_transformer():
 
     # Test transformer works
     headers = {"x-original": "value"}
-    transformed = await context.request_transformer(headers)
+    transformed = context.request_transformer(headers)
     assert transformed == {"x-original": "value", "x-transformed": "true"}
 
 

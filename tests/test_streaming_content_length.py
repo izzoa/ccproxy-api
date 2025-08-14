@@ -1,17 +1,20 @@
 """Tests for streaming response Content-Length header handling."""
 
 import json
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
+from ccproxy.adapters.base import APIAdapter
+from ccproxy.auth.base import AuthManager
 from ccproxy.services.provider_context import ProviderContext
 from ccproxy.services.proxy_service import ProxyService
 
 
-class MockAuthManager:
+class MockAuthManager(AuthManager):
     """Mock authentication manager for testing."""
 
     async def get_auth_headers(self) -> dict[str, str]:
@@ -40,7 +43,7 @@ def mock_proxy_service():
         credentials_manager=credentials_manager,
         settings=settings,
     )
-    service.metrics = None
+    service.metrics = None  # type: ignore[assignment]
 
     return service
 
@@ -243,7 +246,9 @@ async def test_non_streaming_response_preserves_headers(
         # For non-streaming responses, Response class is used which
         # automatically calculates Content-Length
         assert response.status_code == 200
-        body = json.loads(response.body)
+        response_body = response.body
+        assert isinstance(response_body, bytes)
+        body = json.loads(response_body)
         assert body["id"] == "msg_1"
         assert body["content"] == "Hello response"
 
@@ -256,11 +261,11 @@ async def test_streaming_with_adapter_no_content_length(
     auth_manager = MockAuthManager()
 
     # Create a mock adapter
-    class MockAdapter:
-        async def adapt_request(self, request: dict) -> dict:
+    class MockAdapter(APIAdapter):
+        async def adapt_request(self, request: dict[str, Any]) -> dict[str, Any]:
             return request
 
-        async def adapt_response(self, response: dict) -> dict:
+        async def adapt_response(self, response: dict[str, Any]) -> dict[str, Any]:
             return response
 
         async def adapt_stream(self, stream):

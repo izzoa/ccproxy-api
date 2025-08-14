@@ -102,9 +102,9 @@ async def test_plugin_registry_validation_failure():
 
     # Create a plugin that fails validation
     plugin = MockPlugin()
-    plugin.validate = AsyncMock(return_value=False)
-
-    await registry.register(plugin)
+    # Mock the validate method to return False
+    with patch.object(plugin, "validate", AsyncMock(return_value=False)):
+        await registry.register(plugin)
 
     # Plugin should not be registered
     assert "test_plugin" not in registry.list_plugins()

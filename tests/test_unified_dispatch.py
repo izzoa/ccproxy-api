@@ -1,6 +1,7 @@
 """Integration tests for unified dispatch in ProxyService."""
 
 import json
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -39,11 +40,11 @@ class MockAuthManager(AuthManager):
 class MockAdapter(APIAdapter):
     """Mock API adapter for testing."""
 
-    async def adapt_request(self, request: dict) -> dict:
+    async def adapt_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """Mock request adaptation."""
         return {"adapted_request": True, **request}
 
-    async def adapt_response(self, response: dict) -> dict:
+    async def adapt_response(self, response: dict[str, Any]) -> dict[str, Any]:
         """Mock response adaptation."""
         return {"adapted_response": True, **response}
 
@@ -66,7 +67,7 @@ def mock_proxy_service():
         credentials_manager=credentials_manager,
         settings=settings,
     )
-    service.metrics = None
+    service.metrics = None  # type: ignore[assignment]
 
     return service
 
@@ -116,7 +117,9 @@ async def test_dispatch_request_success(mock_proxy_service, mock_request):
         # Verify response
         assert isinstance(response, Response)
         assert response.status_code == 200
-        assert json.loads(response.body) == {"result": "success"}
+        response_body = response.body
+        assert isinstance(response_body, bytes)
+        assert json.loads(response_body) == {"result": "success"}
 
 
 @pytest.mark.asyncio
@@ -150,7 +153,9 @@ async def test_dispatch_request_with_adapter(mock_proxy_service, mock_request):
 
         # Verify response was adapted
         assert isinstance(response, Response)
-        body = json.loads(response.body)
+        response_body = response.body
+        assert isinstance(response_body, bytes)
+        body = json.loads(response_body)
         assert body["adapted_response"] is True
         assert body["result"] == "success"
 

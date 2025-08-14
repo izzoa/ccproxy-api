@@ -48,7 +48,7 @@ class CodexAdapter(APIAdapter):
         """
         return self.convert_response_to_chat(response)
 
-    async def adapt_stream(  # type: ignore[override]
+    async def adapt_stream(  # type: ignore[override,misc]
         self, stream: AsyncIterator[dict[str, Any]]
     ) -> AsyncIterator[dict[str, Any]]:
         """Convert a streaming response from Codex to OpenAI format.
