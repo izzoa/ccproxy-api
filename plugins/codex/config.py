@@ -62,7 +62,7 @@ class CodexSettings(ProviderConfig):
 
     # Override base_url default for Codex
     base_url: str = Field(
-        default="https://chatgpt.com/backend-api/codex",
+        default="https://chatgpt.com",
         description="OpenAI Codex API base URL",
     )
 

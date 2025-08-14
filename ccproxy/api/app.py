@@ -147,6 +147,23 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
     if hasattr(app.state, "proxy_service"):
         proxy_service = app.state.proxy_service
         await proxy_service.initialize_plugins()
+
+        # Register plugin routes
+        for plugin_name in proxy_service.plugin_registry.list_plugins():
+            plugin = proxy_service.plugin_registry.get_plugin(plugin_name)
+            if plugin and hasattr(plugin, "get_routes"):
+                router = plugin.get_routes()
+                if router:
+                    # Register the plugin's routes with the app
+                    app.include_router(
+                        router,
+                        prefix=plugin.router_prefix,
+                        tags=[f"plugin-{plugin.name}"],
+                    )
+                    logger.info(
+                        f"Registered routes for plugin: {plugin.name} at {plugin.router_prefix}"
+                    )
+
         logger.info(
             f"Initialized {len(proxy_service.list_active_providers())} providers"
         )

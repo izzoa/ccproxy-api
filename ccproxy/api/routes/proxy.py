@@ -46,7 +46,6 @@ async def create_openai_chat_completion(
     return await proxy_service.dispatch_request(request, provider_context)
 
 
-
 @router.post("/v1/messages", response_model=None)
 async def create_anthropic_message(
     request: Request,
@@ -76,5 +75,3 @@ async def create_anthropic_message(
 
     # Dispatch to unified handler
     return await proxy_service.dispatch_request(request, provider_context)
-
-

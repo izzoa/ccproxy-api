@@ -1430,11 +1430,18 @@ class ProxyService:
 
         logger.info("Initializing plugin system")
 
-        # Get plugin directory from settings or use default
-        plugin_dir = Path(getattr(self.settings, "plugin_dir", "plugins"))
+        # Create CoreServices for plugins
+        from httpx import AsyncClient
+        from ccproxy.core.services import CoreServices
 
-        # Discover and load plugins
-        await self.plugin_registry.discover(plugin_dir)
+        # Create a shared HTTP client for plugins
+        async with AsyncClient() as http_client:
+            core_services = CoreServices(
+                http_client=http_client, logger=logger, settings=self.settings
+            )
+
+            # Discover and initialize plugins with core services
+            await self.plugin_registry.discover_and_initialize(core_services)
 
         # Register plugin adapters
         for plugin_name in self.plugin_registry.list_plugins():

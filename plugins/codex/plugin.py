@@ -23,7 +23,7 @@ class Plugin(ProviderPlugin):
     def __init__(self) -> None:
         self._name = "codex"
         self._version = "1.0.0"
-        self._router_prefix = "/codex"
+        self._router_prefix = "/api/codex"
         self._adapter: CodexAdapter | None = None
         self._config: CodexSettings | None = None
         self._services: CoreServices | None = None
@@ -90,10 +90,10 @@ class Plugin(ProviderPlugin):
 
     async def validate(self) -> bool:
         """Check if Codex configuration is valid."""
-        if not self._config:
-            return False
-        # Basic validation - check if base_url is set
-        return bool(self._config.base_url)
+        # Always return True - actual validation happens during initialization
+        # The plugin system calls validate() before initialize(), so we can't
+        # check config here since it hasn't been loaded yet
+        return True
 
     def get_routes(self) -> APIRouter | None:
         """Return Codex-specific routes."""
@@ -114,10 +114,11 @@ class Plugin(ProviderPlugin):
             session_id = header_session_id or str(uuid.uuid4())
 
             # Use plugin dispatch through the codex plugin
+            base_url = self._config.base_url if self._config else "https://chatgpt.com"
             provider_context = ProviderContext(
                 provider_name="codex-native",
                 auth_manager=OpenAITokenManager(),
-                target_base_url=self._config.base_url if self._config else "https://chatgpt.com/backend-api/codex",
+                target_base_url=f"{base_url}/backend-api/codex",
                 request_adapter=None,  # No conversion needed for native API
                 response_adapter=None,  # Pass through
                 session_id=session_id,
@@ -141,10 +142,11 @@ class Plugin(ProviderPlugin):
             from ccproxy.services.provider_context import ProviderContext
 
             # Build provider context with path-provided session_id
+            base_url = self._config.base_url if self._config else "https://chatgpt.com"
             provider_context = ProviderContext(
                 provider_name="codex-native",
                 auth_manager=OpenAITokenManager(),
-                target_base_url=self._config.base_url if self._config else "https://chatgpt.com/backend-api/codex",
+                target_base_url=f"{base_url}/backend-api/codex",
                 request_adapter=None,  # No conversion needed for native API
                 response_adapter=None,  # Pass through
                 session_id=session_id,
@@ -162,35 +164,52 @@ class Plugin(ProviderPlugin):
             proxy_service: ProxyServiceDep,
             auth: ConditionalAuthDep,
         ) -> StreamingResponse | Response:
-            """OpenAI-compatible chat completions endpoint for Codex."""
-            from ccproxy.auth.openai import OpenAITokenManager
-            from ccproxy.services.provider_context import ProviderContext
+            """OpenAI-compatible chat completions endpoint for Codex.
+
+            This endpoint accepts OpenAI-format chat completions requests and
+            converts them to Codex Response API format before forwarding.
+            """
+            import json
+            from starlette.datastructures import Headers
+            from starlette.requests import Request as StarletteRequest
 
             # Get session_id from header if provided, otherwise generate
             header_session_id = request.headers.get("session_id")
             session_id = header_session_id or str(uuid.uuid4())
 
-            # Get the core adapter for ProviderContext (which expects APIAdapter)
-            core_adapter = self._adapter.get_core_adapter() if self._adapter else None
+            # Read the body to check if streaming is requested
+            body = await request.body()
+            is_streaming = False
+            if body:
+                request_data = json.loads(body)
+                is_streaming = request_data.get("stream", False)
 
-            # Build provider context with format conversion
-            provider_context = ProviderContext(
-                provider_name="codex",
-                auth_manager=OpenAITokenManager(),
-                target_base_url=self._config.base_url if self._config else "https://chatgpt.com/backend-api/codex",
-                request_adapter=core_adapter,
-                response_adapter=core_adapter,
-                session_id=session_id,
-                supports_streaming=True,
-                requires_session=True,
-                extra_headers={
-                    "session_id": session_id,
-                    "accept": "text/event-stream",
+            # Create a new request with the body we already read
+            # This is necessary because we consumed the body above
+            async def receive():
+                return {"type": "http.request", "body": body}
+
+            new_request = StarletteRequest(
+                scope={
+                    **request.scope,
+                    "type": "http",
                 },
+                receive=receive,
             )
+            # Copy headers
+            new_request._headers = Headers(raw=request.headers.raw)
 
-            # Dispatch to unified handler
-            return await proxy_service.dispatch_request(request, provider_context)
+            # Use the adapter directly to handle the request with format conversion
+            # The adapter will convert OpenAI format to Codex format and forward to
+            # the correct URL: https://chatgpt.com/backend-api/codex/responses
+            if is_streaming:
+                return await self._adapter.handle_streaming(
+                    new_request, "/responses", session_id=session_id
+                )
+            else:
+                return await self._adapter.handle_request(
+                    new_request, "/responses", "POST", session_id=session_id
+                )
 
         return router
 
