@@ -70,11 +70,9 @@ class CodexAdapter(BaseAdapter):
                 transformed_request = request_data
 
             # Build target URL - Codex API base URL
+            # Session is passed in the request data, not in the URL
             base_url = "https://chatgpt.com"
-            if session_id and "/responses" in endpoint:
-                target_url = f"{base_url}/backend-api/codex/{session_id}/responses"
-            else:
-                target_url = f"{base_url}/backend-api/codex/responses"
+            target_url = f"{base_url}/backend-api/codex/responses"
 
             # Build headers
             headers = dict(request.headers)
@@ -164,11 +162,9 @@ class CodexAdapter(BaseAdapter):
             is_openai_format = False
 
         # Build target URL - Codex API base URL
+        # Session is passed in the request data, not in the URL
         base_url = "https://chatgpt.com"
-        if session_id and "/responses" in endpoint:
-            target_url = f"{base_url}/backend-api/codex/{session_id}/responses"
-        else:
-            target_url = f"{base_url}/backend-api/codex/responses"
+        target_url = f"{base_url}/backend-api/codex/responses"
 
         # Build headers
         headers = dict(request.headers)
