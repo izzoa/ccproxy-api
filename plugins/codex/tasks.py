@@ -60,27 +60,27 @@ class CodexDetectionRefreshTask(BaseScheduledTask):
                 reason="Initial run skipped to avoid duplicate detection at startup",
             )
             return True  # Return success to avoid triggering backoff
-        
+
         self._first_run = False
-        
+
         try:
             logger.info(
                 "codex_detection_refresh_starting",
                 task_name=self.name,
             )
-            
+
             # Refresh the detection data
             detection_data = await self.detection_service.initialize_detection()
-            
+
             logger.info(
                 "codex_detection_refresh_completed",
                 task_name=self.name,
                 version=detection_data.codex_version if detection_data else "unknown",
                 has_cached_data=detection_data is not None,
             )
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(
                 "codex_detection_refresh_failed",

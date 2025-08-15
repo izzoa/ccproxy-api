@@ -1423,7 +1423,7 @@ class ProxyService:
 
         This method should be called during application startup to discover
         and register all available plugins.
-        
+
         Args:
             scheduler: Optional scheduler instance for plugin tasks
         """
@@ -1441,8 +1441,8 @@ class ProxyService:
         # Create a shared HTTP client for plugins
         async with AsyncClient() as http_client:
             core_services = CoreServices(
-                http_client=http_client, 
-                logger=logger, 
+                http_client=http_client,
+                logger=logger,
                 settings=self.settings,
                 scheduler=scheduler,
             )

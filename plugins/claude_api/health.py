@@ -18,11 +18,11 @@ async def claude_api_health_check(
     credentials_manager: CredentialsManager | None = None,
 ) -> HealthCheckResult:
     """Perform health check for Claude API plugin.
-    
+
     Args:
         config: Plugin configuration
         credentials_manager: Credentials manager for OAuth token status
-        
+
     Returns:
         HealthCheckResult with plugin status including OAuth token details
     """
@@ -35,7 +35,7 @@ async def claude_api_health_check(
                 output="Claude API plugin configuration not available",
                 version="1.0.0",
             )
-        
+
         # Check if plugin is enabled
         if not config.enabled:
             return HealthCheckResult(
@@ -46,7 +46,7 @@ async def claude_api_health_check(
                 version="1.0.0",
                 details={"enabled": False},
             )
-        
+
         # Check basic configuration
         if not config.base_url:
             return HealthCheckResult(
@@ -56,7 +56,7 @@ async def claude_api_health_check(
                 output="Claude API base URL not configured",
                 version="1.0.0",
             )
-        
+
         # Get authentication status from credentials manager
         auth_details: dict[str, Any] = {}
         if credentials_manager:
@@ -74,15 +74,19 @@ async def claude_api_health_check(
                 "auth_configured": False,
                 "auth_status": "Credentials manager not available",
             }
-        
+
         # Determine overall status and build output message
         status: Literal["pass", "warn", "fail"]
         output_parts = []
-        
-        if auth_details.get("token_available") and not auth_details.get("token_expired"):
+
+        if auth_details.get("token_available") and not auth_details.get(
+            "token_expired"
+        ):
             output_parts.append("Authenticated")
             if auth_details.get("subscription_type"):
-                output_parts.append(f"Subscription: {auth_details['subscription_type']}")
+                output_parts.append(
+                    f"Subscription: {auth_details['subscription_type']}"
+                )
             if auth_details.get("has_claude_max"):
                 output_parts.append("Claude Max")
             elif auth_details.get("has_claude_pro"):
@@ -97,13 +101,13 @@ async def claude_api_health_check(
         else:
             output_parts.append("Authentication not configured")
             status = "warn"
-        
+
         # Add model info
         if config.models:
             output_parts.append(f"{len(config.models)} models available")
-        
+
         output = "Claude API: " + ", ".join(output_parts)
-        
+
         # Build details dict with non-sensitive information
         details = {
             "base_url": config.base_url,
@@ -112,7 +116,7 @@ async def claude_api_health_check(
             "support_openai_format": config.support_openai_format,
             **auth_details,  # Include all auth details from helper
         }
-        
+
         return HealthCheckResult(
             status=status,
             componentId="plugin-claude-api",
@@ -121,7 +125,7 @@ async def claude_api_health_check(
             version="1.0.0",
             details=details,
         )
-        
+
     except Exception as e:
         logger.error("claude_api_health_check_failed", error=str(e))
         return HealthCheckResult(

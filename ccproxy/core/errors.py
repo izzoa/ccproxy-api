@@ -275,7 +275,7 @@ class PermissionAlreadyResolvedError(PermissionRequestError):
 
 class PluginResourceError(ProxyError):
     """Error raised when a plugin resource is unavailable or misconfigured.
-    
+
     This is a general exception for plugins to use when required resources
     (like configuration, external services, or dependencies) are not available.
     """

@@ -94,7 +94,7 @@ class CodexAdapter(BaseAdapter):
                             "codex_instructions_not_available",
                             reason=str(e),
                             error_type=type(e).__name__,
-                            msg="Proceeding without Codex instructions"
+                            msg="Proceeding without Codex instructions",
                         )
             else:
                 transformed_request = request_data
@@ -273,7 +273,7 @@ class CodexAdapter(BaseAdapter):
                         "codex_instructions_not_available_streaming",
                         reason=str(e),
                         error_type=type(e).__name__,
-                        msg="Proceeding without Codex instructions for streaming"
+                        msg="Proceeding without Codex instructions for streaming",
                     )
 
             is_openai_format = True
@@ -486,10 +486,10 @@ class CodexAdapter(BaseAdapter):
 
     async def _get_codex_instructions(self) -> str:
         """Get Codex CLI instructions from detection service.
-        
+
         Returns:
             str: The Codex instructions
-            
+
         Raises:
             PluginResourceError: If no instructions are available
         """
@@ -499,7 +499,7 @@ class CodexAdapter(BaseAdapter):
                 from ccproxy.services.codex_detection_service import (
                     CodexDetectionService,
                 )
-                
+
                 # For actual CodexDetectionService, do isinstance check
                 if isinstance(self._detection_service, CodexDetectionService):
                     # Get cached data (with automatic fallback handled internally)
@@ -512,13 +512,13 @@ class CodexAdapter(BaseAdapter):
             except ImportError:
                 # If we can't import CodexDetectionService, try generic approach
                 pass
-            
+
             # Try generic approach for mock/test objects
-            if hasattr(self._detection_service, 'get_cached_data'):
+            if hasattr(self._detection_service, "get_cached_data"):
                 cache_data = self._detection_service.get_cached_data()
-                if cache_data and hasattr(cache_data, 'instructions'):
+                if cache_data and hasattr(cache_data, "instructions"):
                     instructions = cache_data.instructions
-                    if hasattr(instructions, 'instructions_field'):
+                    if hasattr(instructions, "instructions_field"):
                         self._logger.debug(
                             "Using Codex instructions from detection service (generic)"
                         )
@@ -526,12 +526,12 @@ class CodexAdapter(BaseAdapter):
 
         # No instructions found - raise exception
         from ccproxy.core.errors import PluginResourceError
-        
+
         raise PluginResourceError(
             message="No Codex instructions available from detection service. "
-                    "Ensure Codex CLI is installed and detection has been initialized.",
+            "Ensure Codex CLI is installed and detection has been initialized.",
             plugin_name="codex",
-            resource_type="instructions"
+            resource_type="instructions",
         )
 
     async def cleanup(self) -> None:

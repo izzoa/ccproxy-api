@@ -130,7 +130,7 @@ class Settings(BaseSettings):
         default=True,
         description="Enable plugin system",
     )
-    
+
     # Plugin configurations
     plugins: dict[str, dict[str, Any]] = Field(
         default_factory=dict,

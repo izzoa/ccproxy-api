@@ -54,7 +54,7 @@ class Plugin(ProviderPlugin):
 
         # Load plugin-specific configuration from plugins dictionary
         plugin_config = getattr(services.settings, "plugins", {}).get(self.name, {})
-        
+
         # If no config provided, use defaults from CodexSettings
         if not plugin_config:
             plugin_config = {
@@ -325,16 +325,16 @@ class Plugin(ProviderPlugin):
         return await codex_health_check(
             self._config, self._detection_service, self._auth_manager
         )
-    
+
     def get_scheduled_tasks(self) -> list[dict] | None:
         """Get scheduled task definitions for Codex plugin.
-        
+
         Returns:
             List with detection refresh task or None if detection service not available
         """
         if not self._detection_service:
             return None
-            
+
         return [
             {
                 "task_name": f"codex_detection_refresh_{self.name}",

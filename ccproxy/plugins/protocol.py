@@ -26,7 +26,7 @@ class HealthCheckResult(BaseModel):
 
 class ScheduledTaskDefinition(TypedDict, total=False):
     """Definition for a scheduled task from a plugin."""
-    
+
     task_name: str  # Required: Unique name for the task instance
     task_type: str  # Required: Type identifier for task registry
     task_class: type["BaseScheduledTask"]  # Required: Task class
@@ -81,10 +81,10 @@ class ProviderPlugin(Protocol):
     async def health_check(self) -> HealthCheckResult:
         """Perform health check following IETF format."""
         ...
-    
+
     def get_scheduled_tasks(self) -> list[ScheduledTaskDefinition] | None:
         """Get scheduled task definitions for this plugin (optional).
-        
+
         Returns:
             List of task definitions or None if no scheduled tasks needed
         """

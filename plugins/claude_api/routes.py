@@ -5,8 +5,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response
 
-from ccproxy.dependencies.auth import ConditionalAuthDep
-from ccproxy.dependencies.proxy import ProxyServiceDep
+from ccproxy.api.dependencies import ProxyServiceDep
+from ccproxy.auth.conditional import ConditionalAuthDep
 from ccproxy.services.provider_context import ProviderContext
 
 
@@ -20,13 +20,13 @@ def create_anthropic_context(
     response_adapter: Any | None = None,
 ) -> ProviderContext:
     """Create provider context for Anthropic API requests.
-    
+
     Args:
         provider_name: Name of the provider for logging
         proxy_service: Proxy service instance
         request_adapter: Optional request adapter for format conversion
         response_adapter: Optional response adapter for format conversion
-        
+
     Returns:
         ProviderContext configured for Anthropic API
     """
@@ -48,7 +48,7 @@ async def create_anthropic_message(
     auth: ConditionalAuthDep,
 ) -> Response:
     """Create a message using Claude AI with native Anthropic format.
-    
+
     This endpoint handles Anthropic API format requests and forwards them
     directly to the Claude API without format conversion.
     """
@@ -59,7 +59,7 @@ async def create_anthropic_message(
         request_adapter=None,  # No conversion needed
         response_adapter=None,  # Pass through
     )
-    
+
     # Dispatch request through proxy service
     return await proxy_service.dispatch_request(request, context)
 
@@ -71,15 +71,15 @@ async def create_openai_chat_completion(
     auth: ConditionalAuthDep,
 ) -> Response:
     """Create a chat completion using Claude AI with OpenAI-compatible format.
-    
+
     This endpoint handles OpenAI format requests and converts them
     to/from Anthropic format transparently.
     """
     # Get OpenAI adapter for format conversion
     from ccproxy.adapters.openai.adapter import OpenAIAdapter
-    
+
     openai_adapter = OpenAIAdapter()
-    
+
     # Create provider context with OpenAI format conversion
     context = create_anthropic_context(
         provider_name="claude-api-openai",
@@ -87,7 +87,7 @@ async def create_openai_chat_completion(
         request_adapter=openai_adapter,
         response_adapter=openai_adapter,
     )
-    
+
     # Dispatch request through proxy service
     return await proxy_service.dispatch_request(request, context)
 
@@ -99,14 +99,14 @@ async def list_models(
     auth: ConditionalAuthDep,
 ) -> dict[str, Any]:
     """List available Claude models.
-    
+
     Returns a list of available models in OpenAI-compatible format.
     """
     # Get configured models from settings
     from ccproxy.config.settings import get_settings
-    
+
     settings = get_settings()
-    
+
     # Build OpenAI-compatible model list
     models = []
     model_list = [
@@ -116,18 +116,20 @@ async def list_models(
         "claude-3-sonnet-20240229",
         "claude-3-haiku-20240307",
     ]
-    
+
     for model_id in model_list:
-        models.append({
-            "id": model_id,
-            "object": "model",
-            "created": 1696000000,  # Placeholder timestamp
-            "owned_by": "anthropic",
-            "permission": [],
-            "root": model_id,
-            "parent": None,
-        })
-    
+        models.append(
+            {
+                "id": model_id,
+                "object": "model",
+                "created": 1696000000,  # Placeholder timestamp
+                "owned_by": "anthropic",
+                "permission": [],
+                "root": model_id,
+                "parent": None,
+            }
+        )
+
     return {
         "object": "list",
         "data": models,
