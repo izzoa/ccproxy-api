@@ -27,7 +27,8 @@ from ccproxy.api.routes.metrics import (
 )
 from ccproxy.api.routes.permissions import router as permissions_router
 from ccproxy.api.routes.plugins import router as plugins_router
-from ccproxy.api.routes.proxy import router as proxy_router
+
+# proxy routes are now handled by plugin system
 from ccproxy.auth.oauth.routes import router as oauth_router
 from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.logging import setup_logging
@@ -333,8 +334,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(oauth_router, prefix="/oauth", tags=["oauth"])
 
-    # New /api/ routes for proxy endpoints (includes OpenAI-compatible /v1/chat/completions)
-    app.include_router(proxy_router, prefix="/api", tags=["proxy-api"])
+    # Proxy routes are now handled by plugin system
 
     # Shared models endpoints for both SDK and proxy APIs
     app.include_router(models_router, prefix="/sdk", tags=["claude-sdk", "models"])

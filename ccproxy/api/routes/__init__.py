@@ -9,7 +9,9 @@ from ccproxy.api.routes.metrics import (
 from ccproxy.api.routes.metrics import (
     prometheus_router as metrics_router,
 )
-from ccproxy.api.routes.proxy import router as proxy_router
+
+
+# proxy routes are now handled by plugin system
 
 
 __all__ = [
@@ -18,5 +20,5 @@ __all__ = [
     "metrics_router",
     "logs_router",
     "dashboard_router",
-    "proxy_router",
+    # "proxy_router", # Removed - handled by plugin system
 ]

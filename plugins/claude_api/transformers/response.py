@@ -104,4 +104,3 @@ class ClaudeAPIResponseTransformer:
         """
         # Pass through response unchanged
         return response_json
-

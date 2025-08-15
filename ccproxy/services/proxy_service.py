@@ -20,10 +20,6 @@ from typing_extensions import TypedDict
 from ccproxy.adapters.base import APIAdapter
 from ccproxy.config.settings import Settings
 from ccproxy.core.http import BaseProxyClient
-from ccproxy.core.http_transformers import (
-    HTTPRequestTransformer,
-    HTTPResponseTransformer,
-)
 from ccproxy.observability import (
     PrometheusMetrics,
     get_metrics,
@@ -106,10 +102,6 @@ class ProxyService:
         self.target_base_url = target_base_url.rstrip("/")
         self.metrics = metrics or get_metrics()
         self.app_state = app_state
-
-        # Create concrete transformers
-        self.request_transformer = HTTPRequestTransformer()
-        self.response_transformer = HTTPResponseTransformer()
 
         # Create OpenAI adapter for stream transformation
         from ccproxy.adapters.openai.adapter import OpenAIAdapter
@@ -973,33 +965,17 @@ class ProxyService:
                     fallback="using_original_body",
                 )
 
-        # Then apply provider-specific transformations
-        from ccproxy.services.transformation_helpers import (
-            apply_claude_transformations,
-            should_apply_claude_transformations,
-        )
-
-        if should_apply_claude_transformations(provider_context.provider_name):
-            injection_mode = (
-                self.settings.claude.system_prompt_injection_mode.value
-                if self.settings
-                else "minimal"
-            )
-            # Only transform body part (headers handled separately)
-            body, _ = await apply_claude_transformations(
-                body=body,
-                headers={},  # Don't transform headers here
-                access_token="",  # Not needed for body transformation
-                app_state=self.app_state,
-                injection_mode=injection_mode,
-                proxy_mode=self.proxy_mode,
-            )
+        # Apply plugin-specific body transformations if available
+        # (System prompt injection and other body transformations are now handled by plugin transformers)
         # Apply request transformer for body transformation if provided
-        if hasattr(provider_context, "request_transformer") and provider_context.request_transformer:
+        if (
+            hasattr(provider_context, "request_transformer")
+            and provider_context.request_transformer
+        ):
             if hasattr(provider_context.request_transformer, "transform_body"):
                 # New object-based transformer can also transform body
                 body = provider_context.request_transformer.transform_body(body)
-        
+
         return body
 
     async def _prepare_headers(
@@ -1011,15 +987,8 @@ class ProxyService:
     ) -> dict[str, str]:
         """Prepare headers for the outbound request."""
 
-        from ccproxy.services.transformation_helpers import (
-            apply_claude_transformations,
-            should_apply_claude_transformations,
-        )
-
-        # Extract access token from auth headers
-        # For Claude, we use OAuth Bearer token authentication
+        # Extract access token from auth headers for plugin transformers
         access_token = ""
-        # Handle both capitalized and lowercase Authorization headers
         auth_header_key = None
         for key in auth_headers:
             if key.lower() == "authorization":
@@ -1027,24 +996,9 @@ class ProxyService:
                 break
         if auth_header_key:
             access_token = auth_headers[auth_header_key].replace("Bearer ", "")
-        # Note: x-api-key would be for direct API key auth, not OAuth
 
-        # Apply provider-specific transformations
-        if should_apply_claude_transformations(provider_context.provider_name):
-            # Use Claude transformer for complete header preparation
-            _, headers = await apply_claude_transformations(
-                body=b"",  # Not needed for header transformation
-                headers=request_headers,
-                access_token=access_token,  # This is for OAuth Bearer token
-                app_state=self.app_state,
-                proxy_mode=self.proxy_mode,
-            )
-            # Don't add auth_headers here - they'll be added later by request_transformer
-        # Codex header transformations are now handled by the plugin itself
-        else:
-            # Default: start with request headers
-            headers = dict(request_headers)
-            # Don't add auth_headers here - they'll be added later by request_transformer
+        # Start with request headers - transformations now handled by plugin system
+        headers = dict(request_headers)
 
         # IMPORTANT: Always remove hop-by-hop headers and Content-Length for streaming
         # These headers should never be forwarded as they cause issues with streaming responses
@@ -1065,26 +1019,22 @@ class ProxyService:
 
         # Apply request transformer if provided (for custom transformations)
         # Pass both headers and auth_headers for proper transformation
-        if hasattr(provider_context, "request_transformer") and provider_context.request_transformer:
-            if callable(provider_context.request_transformer):
-                # Legacy function-based transformer
-                headers.update(auth_headers)
-                headers = provider_context.request_transformer(headers)
-            elif hasattr(provider_context.request_transformer, "transform_headers"):
+        if (
+            hasattr(provider_context, "request_transformer")
+            and provider_context.request_transformer
+        ):
+            # Check if it's an object-based transformer with transform_headers method
+            if hasattr(provider_context.request_transformer, "transform_headers"):
                 # New object-based transformer (for plugin system)
-                session_id = getattr(provider_context, "session_id", None)
-                access_token = None
-                # Handle both capitalized and lowercase Authorization headers
-                auth_header_key = None
-                for key in auth_headers:
-                    if key.lower() == "authorization":
-                        auth_header_key = key
-                        break
-                if auth_header_key:
-                    access_token = auth_headers[auth_header_key].replace("Bearer ", "")
+                session_id = getattr(provider_context, "session_id", "")
+                # Use the already extracted access_token from above
                 headers = provider_context.request_transformer.transform_headers(
                     headers, session_id or "", access_token
                 )
+            elif callable(provider_context.request_transformer):
+                # Legacy function-based transformer
+                headers.update(auth_headers)
+                headers = provider_context.request_transformer(headers)
         else:
             # No transformer, just add auth headers
             headers.update(auth_headers)
@@ -1386,11 +1336,22 @@ class ProxyService:
 
             # Apply response transformer if provided (for header transformation)
             response_headers = dict(response.headers)
-            if hasattr(provider_context, "response_transformer") and provider_context.response_transformer:
+            if (
+                hasattr(provider_context, "response_transformer")
+                and provider_context.response_transformer
+            ):
                 if hasattr(provider_context.response_transformer, "transform_headers"):
-                    response_headers = provider_context.response_transformer.transform_headers(response_headers)
+                    response_headers = (
+                        provider_context.response_transformer.transform_headers(
+                            response_headers
+                        )
+                    )
                 if hasattr(provider_context.response_transformer, "transform_body"):
-                    response_body = provider_context.response_transformer.transform_body(response_body)
+                    response_body = (
+                        provider_context.response_transformer.transform_body(
+                            response_body
+                        )
+                    )
 
             # Build response
             return Response(

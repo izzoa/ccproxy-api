@@ -24,7 +24,7 @@ def claude_api_path_transformer(path: str) -> str:
     # Map OpenAI chat completions to Anthropic messages
     if path == "/v1/chat/completions":
         return "/v1/messages"
-    
+
     # Pass through native Anthropic paths
     return path
 
@@ -51,15 +51,17 @@ def create_anthropic_context(
     # Create transformers with detection service
     request_transformer = None
     response_transformer = None
-    
+
     if detection_service:
         # Use proper transformers that handle both headers and body
         transformer = ClaudeAPIRequestTransformer(detection_service)
-        request_transformer = lambda headers: transformer.transform_headers(headers)
-    
+
+        def request_transformer(headers):
+            return transformer.transform_headers(headers)
+
     # Always use response transformer to preserve server headers
     response_transformer_obj = ClaudeAPIResponseTransformer()
-    
+
     return ProviderContext(
         provider_name=provider_name,
         auth_manager=proxy_service.credentials_manager,
@@ -136,30 +138,31 @@ async def create_openai_chat_completion(
     # Create chained adapter: OpenAI conversion + Claude transformations
     class ChainedAdapter:
         """Chains OpenAI adapter with Claude transformations."""
-        
+
         def __init__(self, openai_adapter: Any, claude_transformer: Any):
             self.openai_adapter = openai_adapter
             self.claude_transformer = claude_transformer
-        
+
         async def adapt_request(self, body: dict[str, Any]) -> dict[str, Any]:
             """Apply OpenAI conversion then Claude transformations."""
             # First convert OpenAI to Anthropic format
             anthropic_body = await self.openai_adapter.adapt_request(body)
-            
+
             # Then apply Claude transformations (system prompt injection)
             if self.claude_transformer:
                 import json
+
                 body_bytes = json.dumps(anthropic_body).encode("utf-8")
                 transformed_bytes = self.claude_transformer.transform_body(body_bytes)
                 if transformed_bytes:
                     return json.loads(transformed_bytes.decode("utf-8"))
-            
+
             return anthropic_body
-        
+
         async def adapt_response(self, body: dict[str, Any]) -> dict[str, Any]:
             """Pass through to OpenAI adapter for response conversion."""
             return await self.openai_adapter.adapt_response(body)
-        
+
         async def adapt_stream(self, stream):
             """Pass through to OpenAI adapter for stream conversion."""
             async for chunk in self.openai_adapter.adapt_stream(stream):

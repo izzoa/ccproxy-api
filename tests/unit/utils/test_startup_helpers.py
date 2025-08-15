@@ -22,7 +22,6 @@ from ccproxy.scheduler.errors import SchedulerError
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
     flush_streaming_batches_shutdown,
-    initialize_claude_detection_startup,
     initialize_claude_sdk_startup,
     initialize_log_storage_shutdown,
     initialize_log_storage_startup,
@@ -645,65 +644,7 @@ class TestClaudeDetectionStartup:
         """Create mock settings."""
         return Mock(spec=Settings)
 
-    async def test_claude_detection_startup_success(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test successful Claude detection initialization."""
-        with patch(
-            "ccproxy.utils.startup_helpers.ClaudeDetectionService"
-        ) as MockService:
-            mock_service = Mock()
-            mock_claude_data = Mock()
-            mock_claude_data.claude_version = "1.2.3"
-            mock_claude_data.cached_at = datetime.now(UTC)
-
-            mock_service.initialize_detection = AsyncMock(return_value=mock_claude_data)
-            MockService.return_value = mock_service
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await initialize_claude_detection_startup(mock_app, mock_settings)
-
-                # Verify service was created and initialized
-                MockService.assert_called_once_with(mock_settings)
-                mock_service.initialize_detection.assert_called_once()
-
-                # Verify data was stored in app state
-                assert mock_app.state.claude_detection_data == mock_claude_data
-                assert mock_app.state.claude_detection_service == mock_service
-
-    async def test_claude_detection_startup_error_with_fallback(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test error handling with fallback during Claude detection."""
-        with patch(
-            "ccproxy.utils.startup_helpers.ClaudeDetectionService"
-        ) as MockService:
-            # First service instance fails
-            mock_service_failed = Mock()
-            mock_service_failed.initialize_detection = AsyncMock(
-                side_effect=Exception("Detection failed")
-            )
-
-            # Second service instance for fallback
-            mock_service_fallback = Mock()
-            mock_fallback_data = Mock()
-            mock_service_fallback._get_fallback_data.return_value = mock_fallback_data
-
-            MockService.side_effect = [mock_service_failed, mock_service_fallback]
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await initialize_claude_detection_startup(mock_app, mock_settings)
-
-                # Verify error was logged
-                mock_logger.error.assert_called_once()
-                call_args = mock_logger.error.call_args[1]
-                assert (
-                    "claude_detection_startup_failed" in mock_logger.error.call_args[0]
-                )
-
-                # Verify fallback data was used
-                assert mock_app.state.claude_detection_data == mock_fallback_data
-                assert mock_app.state.claude_detection_service == mock_service_fallback
+    # Removed deprecated Claude detection startup tests - function no longer exists
 
 
 class TestClaudeSDKStartup:
