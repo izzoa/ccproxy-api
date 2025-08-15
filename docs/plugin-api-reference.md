@@ -15,16 +15,16 @@ from ccproxy.core.services import CoreServices
 
 class CoreServices:
     def __init__(self, http_client: AsyncClient, logger: BoundLogger, settings: Settings)
-    
+
     # Shared HTTP client for all plugins
     http_client: AsyncClient
-    
+
     # Structured logger instance  
     logger: BoundLogger
-    
+
     # Application settings
     settings: Settings
-    
+
     def get_plugin_config(self, plugin_name: str) -> dict[str, Any]
 ```
 
@@ -39,25 +39,25 @@ class ProviderPlugin(Protocol):
     # Required properties
     @property
     def name(self) -> str: ...
-    
+
     @property  
     def version(self) -> str: ...
-    
+
     @property
     def router_prefix(self) -> str: ...  # e.g., "/claude", "/codex"
-    
+
     # Lifecycle methods
     async def initialize(self, services: CoreServices) -> None: ...
     async def shutdown(self) -> None: ...
-    
+
     # Plugin functionality
     def create_adapter(self) -> BaseAdapter: ...
     def create_config(self) -> ProviderConfig: ...
     async def validate(self) -> bool: ...
-    
+
     # Optional route registration
     def get_routes(self) -> APIRouter | None: ...
-    
+
     # Health monitoring
     async def health_check(self) -> HealthCheckResult: ...
 ```
@@ -109,51 +109,51 @@ from .config import ExampleConfig
 class Plugin(ProviderPlugin):  # Must be named "Plugin"
     def __init__(self):
         self._name = "example"
-        self._version = "1.0.0" 
+        self._version = "1.0.0"
         self._router_prefix = "/example"
         self._services = None
         self._config = None
         self._adapter = None
-    
+
     @property
     def name(self) -> str:
         return self._name
-    
+
     @property
     def version(self) -> str:
         return self._version
-        
+
     @property
     def router_prefix(self) -> str:
         return self._router_prefix
-    
+
     async def initialize(self, services: CoreServices) -> None:
         self._services = services
         plugin_config = services.get_plugin_config(self.name)
         self._config = ExampleConfig(**plugin_config)
-        
+
         self._adapter = ExampleAdapter(
             http_client=services.http_client,
             logger=services.logger.bind(plugin=self.name)
         )
-    
+
     async def shutdown(self) -> None:
         if self._adapter:
             await self._adapter.cleanup()
-    
+
     def create_adapter(self) -> BaseAdapter:
         return self._adapter
-    
+
     def create_config(self) -> ExampleConfig:
         return self._config
-    
+
     async def validate(self) -> bool:
         return self._config is not None
-    
+
     def get_routes(self) -> APIRouter | None:
         # Optional: return FastAPI router
         return None
-    
+
     async def health_check(self) -> HealthCheckResult:
         return HealthCheckResult(
             status="pass",
@@ -171,7 +171,7 @@ from ccproxy.models.provider import ProviderConfig
 
 class ExampleConfig(ProviderConfig):
     """Example plugin configuration extending base ProviderConfig."""
-    
+
     api_key: str | None = None
     endpoint: str = "https://api.example.com"
     timeout: int = 30
@@ -206,7 +206,7 @@ await registry.discover_and_initialize(services)
 
 # Get specific plugin/adapter
 plugin = registry.get_plugin("claude_sdk")
-adapter = registry.get_adapter("claude_sdk") 
+adapter = registry.get_adapter("claude_sdk")
 
 # Health checks (runs concurrently with 10s timeout)
 health_results = await registry.get_all_health_checks()

@@ -24,7 +24,7 @@ from structlog import BoundLogger
 
 class CoreServices:
     """Container for shared services passed to plugins."""
-    
+
     def __init__(
         self,
         http_client: AsyncClient,
@@ -62,46 +62,46 @@ class HealthCheckResult(BaseModel):
 @runtime_checkable
 class ProviderPlugin(Protocol):
     """Enhanced protocol for provider plugins."""
-    
+
     @property
     def name(self) -> str:
         """Plugin name."""
         ...
-    
+
     @property
     def version(self) -> str:
         """Plugin version."""
         ...
-    
+
     @property
     def router_prefix(self) -> str:
         """Unique route prefix for this plugin (e.g., '/claude', '/codex')."""
         ...
-    
+
     async def initialize(self, services: CoreServices) -> None:
         """Initialize plugin with shared services. Called once on startup."""
         ...
-    
+
     async def shutdown(self) -> None:
         """Perform graceful shutdown. Called once on app shutdown."""
         ...
-    
+
     def create_adapter(self) -> BaseAdapter:
         """Create adapter instance."""
         ...
-    
+
     def create_config(self) -> ProviderConfig:
         """Create provider configuration from settings."""
         ...
-    
+
     async def validate(self) -> bool:
         """Validate plugin is ready."""
         ...
-    
+
     def get_routes(self) -> APIRouter | None:
         """Get plugin-specific routes (optional)."""
         ...
-    
+
     async def health_check(self) -> HealthCheckResult:
         """Perform health check following IETF format."""
         ...
@@ -116,13 +116,13 @@ The configuration system works hierarchically:
 class Settings(BaseSettings):
     # Core settings
     server: ServerSettings
-    
+
     # Plugin configurations (loaded from env/files)
     plugins: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description="Plugin-specific configurations"
     )
-    
+
     # Example structure in config file:
     # [plugins.claude_sdk]
     # cli_path = "/usr/local/bin/claude"
@@ -220,19 +220,19 @@ from typing import list[ProviderPlugin]
 
 class PluginLoader:
     """Handles plugin discovery and loading."""
-    
+
     async def discover_plugins(self) -> list[ProviderPlugin]:
         """Discover plugins from multiple sources."""
         plugins = []
-        
+
         # 1. Load from entry points (for installed packages)
         plugins.extend(self._load_from_entry_points())
-        
+
         # 2. Load from plugins directory (for development)
         plugins.extend(self._load_from_directory())
-        
+
         return plugins
-    
+
     def _load_from_entry_points(self) -> list[ProviderPlugin]:
         """Load plugins registered via setuptools entry points."""
         plugins = []
@@ -243,16 +243,16 @@ class PluginLoader:
             except Exception as e:
                 logger.error(f"Failed to load plugin {entry_point.name}: {e}")
         return plugins
-    
+
     def _load_from_directory(self) -> list[ProviderPlugin]:
         """Load plugins from the plugins/ directory."""
         plugins = []
         plugin_dir = Path(__file__).parent.parent / 'plugins'
-        
+
         for subdir in plugin_dir.iterdir():
             if not subdir.is_dir() or subdir.name.startswith('_'):
                 continue
-                
+
             try:
                 # Import the plugin module
                 spec = importlib.util.spec_from_file_location(
@@ -262,13 +262,13 @@ class PluginLoader:
                 if spec and spec.loader:
                     module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(module)
-                    
+
                     # Look for Plugin class
                     if hasattr(module, 'Plugin'):
                         plugins.append(module.Plugin())
             except Exception as e:
                 logger.error(f"Failed to load plugin from {subdir}: {e}")
-                
+
         return plugins
 ```
 
@@ -289,7 +289,7 @@ from .routes import router as claude_router
 
 class Plugin(ProviderPlugin):  # Standardized class name for discovery
     """Claude SDK provider plugin."""
-    
+
     def __init__(self):
         self._name = "claude_sdk"
         self._version = "1.0.0"
@@ -297,59 +297,59 @@ class Plugin(ProviderPlugin):  # Standardized class name for discovery
         self._adapter = None
         self._config = None
         self._services = None
-        
+
     @property
     def name(self) -> str:
         return self._name
-    
+
     @property
     def version(self) -> str:
         return self._version
-    
+
     @property
     def router_prefix(self) -> str:
         return self._router_prefix
-    
+
     async def initialize(self, services: CoreServices) -> None:
         """Initialize plugin with shared services."""
         self._services = services
-        
+
         # Load plugin-specific configuration
         plugin_config = services.settings.plugins.get(self.name, {})
         self._config = ClaudeSettings(**plugin_config)
-        
+
         # Initialize adapter with shared HTTP client
         self._adapter = ClaudeSDKAdapter(
             http_client=services.http_client,
             logger=services.logger.bind(plugin=self.name)
         )
-        
+
         # Perform any startup tasks (e.g., CLI detection)
         if self._config.auto_detect_cli:
             await self._detect_cli_headers()
-    
+
     async def shutdown(self) -> None:
         """Cleanup on shutdown."""
         if self._adapter:
             await self._adapter.cleanup()
-    
+
     def create_adapter(self) -> BaseAdapter:
         return self._adapter
-    
+
     def create_config(self) -> ClaudeSettings:
         return self._config
-    
+
     async def validate(self) -> bool:
         """Check if Claude CLI is available."""
         if not self._config:
             return False
         cli_path, _ = self._config.find_claude_cli()
         return cli_path is not None
-    
+
     def get_routes(self) -> APIRouter | None:
         """Return Claude-specific routes."""
         return claude_router
-    
+
     async def health_check(self) -> HealthCheckResult:
         """Perform health check for Claude SDK."""
         return await claude_health_check(self._config)
@@ -365,15 +365,15 @@ from typing import Any
 @router.get("/health")
 async def detailed_health_check(response: Response, request: Request) -> dict[str, Any]:
     """Comprehensive health check including plugin health."""
-    
+
     # ... existing health checks ...
-    
+
     # Collect plugin health checks concurrently
     plugin_health = {}
     if hasattr(request.app.state, "proxy_service"):
         proxy_service = request.app.state.proxy_service
         plugins = proxy_service.plugin_registry.get_all_plugins()
-        
+
         # Create health check tasks
         health_tasks = []
         plugin_names = []
@@ -383,7 +383,7 @@ async def detailed_health_check(response: Response, request: Request) -> dict[st
                     asyncio.create_task(plugin.health_check())
                 )
                 plugin_names.append(plugin.name)
-        
+
         # Execute concurrently with timeout
         if health_tasks:
             try:
@@ -391,7 +391,7 @@ async def detailed_health_check(response: Response, request: Request) -> dict[st
                     asyncio.gather(*health_tasks, return_exceptions=True),
                     timeout=10.0  # 10 second total timeout
                 )
-                
+
                 for name, result in zip(plugin_names, results):
                     if isinstance(result, Exception):
                         plugin_health[f"plugin_{name}"] = [{
@@ -410,13 +410,13 @@ async def detailed_health_check(response: Response, request: Request) -> dict[st
                     "componentType": "system",
                     "output": "Plugin health checks timed out after 10 seconds"
                 }]
-    
+
     # Merge plugin health with existing checks
     all_checks = {
         **existing_checks,  # oauth2, etc.
         **plugin_health
     }
-    
+
     # Determine overall status
     overall_status = "pass"
     for check_list in all_checks.values():
@@ -426,7 +426,7 @@ async def detailed_health_check(response: Response, request: Request) -> dict[st
                 break
             elif check.get("status") == "warn" and overall_status == "pass":
                 overall_status = "warn"
-    
+
     return {
         "status": overall_status,
         "version": __version__,
@@ -446,7 +446,7 @@ from ccproxy.core.services import CoreServices
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager."""
     settings = get_settings()
-    
+
     # Create shared services
     async with AsyncClient() as http_client:
         services = CoreServices(
@@ -454,16 +454,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger=logger,
             settings=settings
         )
-        
+
         # Discover and initialize plugins
         loader = PluginLoader()
         plugins = await loader.discover_plugins()
-        
+
         # Initialize plugins with shared services
         for plugin in plugins:
             try:
                 await plugin.initialize(services)
-                
+
                 # Register plugin routes
                 if plugin.get_routes():
                     app.include_router(
@@ -471,17 +471,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         prefix=plugin.router_prefix,
                         tags=[f"plugin-{plugin.name}"]
                     )
-                    
+
                 logger.info(f"Initialized plugin: {plugin.name} v{plugin.version}")
             except Exception as e:
                 logger.error(f"Failed to initialize plugin {plugin.name}: {e}")
-        
+
         # Store plugins in app state
         app.state.plugins = plugins
         app.state.services = services
-        
+
         yield
-        
+
         # Shutdown plugins
         for plugin in plugins:
             try:
@@ -569,7 +569,7 @@ def test_plugin_contract(plugin):
     assert plugin.version
     assert plugin.router_prefix
     assert plugin.router_prefix.startswith('/')
-    
+
     # Verify no route prefix collisions
     all_plugins = PluginLoader().discover_plugins()
     prefixes = [p.router_prefix for p in all_plugins]
@@ -581,10 +581,10 @@ async def test_plugin_lifecycle(plugin, mock_services):
     """Test plugin initialization and shutdown."""
     await plugin.initialize(mock_services)
     assert await plugin.validate()
-    
+
     health = await plugin.health_check()
     assert health.status in ["pass", "warn", "fail"]
-    
+
     await plugin.shutdown()
 ```
 

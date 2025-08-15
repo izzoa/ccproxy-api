@@ -141,13 +141,11 @@ class Plugin(ProviderPlugin):
         # Define path transformer for Codex routes
         def codex_path_transformer(path: str) -> str:
             """Transform stripped paths to Codex API paths."""
-            # All our routes should map to /responses
-            # path will be like "/responses", "/chat/completions", "/{session_id}/responses"
-            if "/responses" in path or path == "/responses":
-                return "/responses"
+            # Simple transformation - just return the stripped path
+            # The base_url already contains /backend-api/codex
             if path == "/chat/completions":
-                return "/responses"
-            # Default fallback
+                return "/responses"  # Map OpenAI endpoint to Codex endpoint
+            # For everything else, just return as-is
             return path
 
         @router.post("/responses", response_model=None)
@@ -165,11 +163,16 @@ class Plugin(ProviderPlugin):
             session_id = header_session_id or str(uuid.uuid4())
 
             # Use plugin dispatch through the codex plugin
-            base_url = self._config.base_url if self._config else "https://chatgpt.com"
+            base_url = (
+                self._config.base_url
+                if self._config
+                else "https://chatgpt.com/backend-api/codex"
+            )
+
             provider_context = ProviderContext(
                 provider_name="codex-native",
                 auth_manager=OpenAITokenManager(),
-                target_base_url=f"{base_url}/backend-api/codex",
+                target_base_url=base_url,  # This already includes /backend-api/codex
                 route_prefix=self._router_prefix,  # Use plugin's prefix
                 path_transformer=codex_path_transformer,  # Use our transformer
                 request_adapter=None,  # No conversion needed for native API
@@ -195,11 +198,15 @@ class Plugin(ProviderPlugin):
             from ccproxy.services.provider_context import ProviderContext
 
             # Build provider context with path-provided session_id
-            base_url = self._config.base_url if self._config else "https://chatgpt.com"
+            base_url = (
+                self._config.base_url
+                if self._config
+                else "https://chatgpt.com/backend-api/codex"
+            )
             provider_context = ProviderContext(
                 provider_name="codex-native",
                 auth_manager=OpenAITokenManager(),
-                target_base_url=f"{base_url}/backend-api/codex",
+                target_base_url=base_url,  # This already includes /backend-api/codex
                 route_prefix=self._router_prefix,  # Use plugin's prefix
                 path_transformer=codex_path_transformer,  # Use our transformer
                 request_adapter=None,  # No conversion needed for native API

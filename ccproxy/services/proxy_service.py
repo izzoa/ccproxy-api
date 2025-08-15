@@ -1102,12 +1102,15 @@ class ProxyService:
         """
         # First, strip route prefix if provided
         stripped_path = path
-        if provider_context and provider_context.route_prefix and path.startswith(provider_context.route_prefix):
+        if (
+            provider_context
+            and provider_context.route_prefix
+            and path.startswith(provider_context.route_prefix)
+        ):
             stripped_path = path[len(provider_context.route_prefix) :]
             # Ensure path starts with /
             if not stripped_path.startswith("/"):
                 stripped_path = "/" + stripped_path
-
         # Apply path transformer if provided
         if provider_context and provider_context.path_transformer:
             target_path = provider_context.path_transformer(stripped_path)
