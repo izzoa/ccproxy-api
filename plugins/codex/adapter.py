@@ -67,6 +67,23 @@ class CodexAdapter(BaseAdapter):
                 transformed_request = (
                     self._core_adapter.convert_chat_to_response_request(request_data)
                 )
+
+                # Inject Codex instructions if not present
+                if not transformed_request.get("instructions"):
+                    # Use default Codex CLI instructions
+                    transformed_request["instructions"] = (
+                        "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. "
+                        "Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.\n\n"
+                        "The user is interacting with you through a command-line interface.\n\n"
+                        "Key behaviors:\n"
+                        "- Be concise and direct in your responses\n"
+                        "- Focus on practical solutions and code examples\n"
+                        "- Assume the user is a developer looking for technical assistance\n"
+                        "- When providing code, ensure it's properly formatted and ready to use\n"
+                        "- If you need more information to help effectively, ask specific questions\n\n"
+                        "Remember: You are running in a terminal environment, so keep responses clean and well-formatted for terminal display."
+                    )
+                    self._logger.debug("Injected default Codex instructions")
             else:
                 transformed_request = request_data
 
@@ -213,6 +230,24 @@ class CodexAdapter(BaseAdapter):
             transformed_request = self._core_adapter.convert_chat_to_response_request(
                 request_data
             )
+
+            # Inject Codex instructions if not present
+            if not transformed_request.get("instructions"):
+                # Use default Codex CLI instructions
+                transformed_request["instructions"] = (
+                    "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. "
+                    "Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.\n\n"
+                    "The user is interacting with you through a command-line interface.\n\n"
+                    "Key behaviors:\n"
+                    "- Be concise and direct in your responses\n"
+                    "- Focus on practical solutions and code examples\n"
+                    "- Assume the user is a developer looking for technical assistance\n"
+                    "- When providing code, ensure it's properly formatted and ready to use\n"
+                    "- If you need more information to help effectively, ask specific questions\n\n"
+                    "Remember: You are running in a terminal environment, so keep responses clean and well-formatted for terminal display."
+                )
+                self._logger.debug("Injected default Codex instructions for streaming")
+
             is_openai_format = True
         else:
             transformed_request = request_data
