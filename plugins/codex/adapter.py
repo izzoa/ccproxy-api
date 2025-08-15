@@ -27,7 +27,9 @@ class CodexAdapter(BaseAdapter):
     def __init__(self, http_client: httpx.AsyncClient, logger: structlog.BoundLogger):
         """Initialize the Codex adapter."""
         super().__init__()
-        self._http_client = http_client
+        # Create our own HTTP client for streaming
+        # The passed client might be closed or shared
+        self._http_client = httpx.AsyncClient(timeout=60.0)
         self._logger = logger
         self._core_adapter = CoreCodexAdapter()
 
@@ -138,44 +140,45 @@ class CodexAdapter(BaseAdapter):
             has_kwargs=bool(kwargs),
         )
 
+        # Get request body outside of generator
+        body = await request.body()
+        if body:
+            request_data = json.loads(body)
+        else:
+            request_data = {}
+
+        # Get session_id from kwargs or generate
+        session_id = kwargs.get("session_id") or str(__import__("uuid").uuid4())
+
+        # Transform request if it's in OpenAI format
+        if "messages" in request_data:
+            # Convert OpenAI format to Codex format
+            transformed_request = (
+                self._core_adapter.convert_chat_to_response_request(
+                    request_data
+                )
+            )
+            is_openai_format = True
+        else:
+            transformed_request = request_data
+            is_openai_format = False
+
+        # Build target URL - Codex API base URL
+        base_url = "https://chatgpt.com"
+        if session_id and "/responses" in endpoint:
+            target_url = f"{base_url}/backend-api/codex/{session_id}/responses"
+        else:
+            target_url = f"{base_url}/backend-api/codex/responses"
+
+        # Build headers
+        headers = dict(request.headers)
+        headers["session_id"] = session_id
+        headers["accept"] = "text/event-stream"
+        headers.pop("host", None)
+        headers.pop("content-length", None)
+
         async def stream_generator() -> AsyncIterator[bytes]:
             try:
-                # Get request body
-                body = await request.body()
-                if body:
-                    request_data = json.loads(body)
-                else:
-                    request_data = {}
-
-                # Get session_id from kwargs or generate
-                session_id = kwargs.get("session_id") or str(__import__("uuid").uuid4())
-
-                # Transform request if it's in OpenAI format
-                if "messages" in request_data:
-                    # Convert OpenAI format to Codex format
-                    transformed_request = (
-                        self._core_adapter.convert_chat_to_response_request(
-                            request_data
-                        )
-                    )
-                    is_openai_format = True
-                else:
-                    transformed_request = request_data
-                    is_openai_format = False
-
-                # Build target URL - Codex API base URL
-                base_url = "https://chatgpt.com"
-                if session_id and "/responses" in endpoint:
-                    target_url = f"{base_url}/backend-api/codex/{session_id}/responses"
-                else:
-                    target_url = f"{base_url}/backend-api/codex/responses"
-
-                # Build headers
-                headers = dict(request.headers)
-                headers["session_id"] = session_id
-                headers["accept"] = "text/event-stream"
-                headers.pop("host", None)
-                headers.pop("content-length", None)
 
                 # Make the streaming HTTP request
                 async with self._http_client.stream(
@@ -218,7 +221,13 @@ class CodexAdapter(BaseAdapter):
                 yield f"data: {json.dumps(error_msg)}\n\n".encode()
                 yield b"data: [DONE]\n\n"
             except Exception as e:
-                self._logger.error("codex_adapter_streaming_error", error=str(e))
+                import traceback
+                self._logger.error(
+                    "codex_adapter_streaming_error", 
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    traceback=traceback.format_exc()
+                )
                 error_msg = {"error": f"Streaming failed: {str(e)}"}
                 yield f"data: {json.dumps(error_msg)}\n\n".encode()
                 yield b"data: [DONE]\n\n"
@@ -280,7 +289,9 @@ class CodexAdapter(BaseAdapter):
     async def cleanup(self) -> None:
         """Cleanup resources."""
         self._logger.debug("codex_adapter_cleanup")
-        # No special cleanup needed for this adapter
+        # Close our HTTP client
+        if self._http_client:
+            await self._http_client.aclose()
 
     # Additional methods that wrap the core adapter for compatibility
 
