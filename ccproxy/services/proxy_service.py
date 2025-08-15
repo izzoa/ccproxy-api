@@ -948,7 +948,7 @@ class ProxyService:
         body: bytes,
         adapter: "APIAdapter | None",
         request: Request,
-        provider_context: "ProviderContext",
+        provider_context: ProviderContext,
     ) -> bytes:
         """Transform request body using adapter and provider-specific transformations."""
 
@@ -1015,7 +1015,7 @@ class ProxyService:
         request_headers: dict[str, str],
         auth_headers: dict[str, str],
         extra_headers: dict[str, str],
-        provider_context: "ProviderContext",
+        provider_context: ProviderContext,
     ) -> dict[str, str]:
         """Prepare headers for the outbound request."""
 
@@ -1093,7 +1093,7 @@ class ProxyService:
         base_url: str,
         path: str,
         query: str | None,
-        provider_context: "ProviderContext" | None = None,
+        provider_context: ProviderContext | None = None,
     ) -> str:
         """Build the target URL for the request.
 
@@ -1134,7 +1134,7 @@ class ProxyService:
     async def _should_stream(
         self,
         request_body: bytes,
-        provider_context: "ProviderContext",
+        provider_context: ProviderContext,
     ) -> bool:
         """Determine if the request should be streamed."""
 
@@ -1345,7 +1345,7 @@ class ProxyService:
         url: str,
         headers: dict[str, str],
         body: bytes,
-        provider_context: "ProviderContext",
+        provider_context: ProviderContext,
         request_context: Any,
     ) -> Response:
         """Handle non-streaming request with response adaptation."""
@@ -1398,7 +1398,7 @@ class ProxyService:
         self,
         status_code: int,
         body: bytes,
-        provider_context: "ProviderContext",
+        provider_context: ProviderContext,
     ) -> bytes:
         """Format error response based on provider."""
 
