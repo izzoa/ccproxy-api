@@ -72,8 +72,16 @@ class CodexDetectionService:
             self._cached_data = fallback_data
             return fallback_data
 
-    def get_cached_data(self) -> CodexCacheData | None:
-        """Get currently cached detection data."""
+    def get_cached_data(self) -> CodexCacheData:
+        """Get currently cached detection data, with fallback if needed.
+
+        Returns:
+            Cached detection data or fallback data if cache is empty
+        """
+        if self._cached_data is None:
+            # No cached data, return fallback
+            logger.debug("No cached data available, returning fallback")
+            self._cached_data = self._get_fallback_data()
         return self._cached_data
 
     async def _get_codex_version(self) -> str:

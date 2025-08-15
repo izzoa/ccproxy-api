@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
@@ -12,6 +12,10 @@ from starlette.responses import Response, StreamingResponse
 
 from ccproxy.adapters.openai.codex_adapter import CodexAdapter as CoreCodexAdapter
 from ccproxy.services.adapters.base import BaseAdapter
+
+if TYPE_CHECKING:
+    from ccproxy.auth.openai import OpenAITokenManager
+    from ccproxy.services.codex_detection_service import CodexDetectionService
 
 
 logger = structlog.get_logger(__name__)
@@ -32,8 +36,8 @@ class CodexAdapter(BaseAdapter):
         self._http_client = httpx.AsyncClient(timeout=60.0)
         self._logger = logger
         self._core_adapter = CoreCodexAdapter()
-        self._auth_manager = None  # Will be set by plugin
-        self._detection_service = None  # Will be set by plugin
+        self._auth_manager: OpenAITokenManager | None = None  # Will be set by plugin
+        self._detection_service: CodexDetectionService | None = None  # Will be set by plugin
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
@@ -43,6 +47,7 @@ class CodexAdapter(BaseAdapter):
         Makes actual HTTP request to Codex API with proper transformation.
         """
         import json
+        from ccproxy.auth.openai import OpenAITokenManager
 
         self._logger.debug(
             "codex_adapter_handle_request",
@@ -100,8 +105,6 @@ class CodexAdapter(BaseAdapter):
 
             # Add authentication if available
             if self._auth_manager:
-                from ccproxy.auth.openai import OpenAITokenManager
-
                 self._logger.info(
                     "codex_auth_manager_check",
                     has_auth_manager=True,
@@ -131,7 +134,7 @@ class CodexAdapter(BaseAdapter):
                 )
 
             # Log final headers (mask auth token)
-            headers_to_log = {k: v for k, v in headers.items()}
+            headers_to_log = dict(headers.items())
             if "authorization" in headers_to_log:
                 auth_val = headers_to_log["authorization"]
                 if auth_val.startswith("Bearer "):
@@ -213,6 +216,7 @@ class CodexAdapter(BaseAdapter):
         Makes actual streaming HTTP request to Codex API with proper transformation.
         """
         import json
+        from ccproxy.auth.openai import OpenAITokenManager
 
         self._logger.debug(
             "codex_adapter_handle_streaming",
@@ -273,8 +277,6 @@ class CodexAdapter(BaseAdapter):
 
         # Add authentication if available
         if self._auth_manager:
-            from ccproxy.auth.openai import OpenAITokenManager
-
             self._logger.info(
                 "codex_streaming_auth_manager_check",
                 has_auth_manager=True,
@@ -304,7 +306,7 @@ class CodexAdapter(BaseAdapter):
         async def stream_generator() -> AsyncIterator[bytes]:
             try:
                 # Log final headers for streaming (mask auth token)
-                headers_to_log = {k: v for k, v in headers.items()}
+                headers_to_log = dict(headers.items())
                 if "authorization" in headers_to_log:
                     auth_val = headers_to_log["authorization"]
                     if auth_val.startswith("Bearer "):
@@ -458,43 +460,25 @@ class CodexAdapter(BaseAdapter):
         self._detection_service = detection_service
 
     async def _get_codex_instructions(self) -> str:
-        """Get Codex CLI instructions from detection service or fallback."""
+        """Get Codex CLI instructions from detection service."""
         try:
-            # Try to get from detection service if available
             if self._detection_service:
-                from ccproxy.services.codex_detection_service import (
-                    CodexDetectionService,
-                )
-
+                # Import at runtime for isinstance check
+                from ccproxy.services.codex_detection_service import CodexDetectionService
+                
                 if isinstance(self._detection_service, CodexDetectionService):
-                    # Try to get cached data
-                    cache_data = await self._detection_service.get_cached_data()
+                    # Get cached data (with automatic fallback handled internally)
+                    cache_data = self._detection_service.get_cached_data()
                     if cache_data and cache_data.instructions:
-                        self._logger.debug("Using cached Codex instructions")
+                        self._logger.debug(
+                            "Using Codex instructions from detection service"
+                        )
                         return cache_data.instructions.instructions_field
 
-            # Fallback to loading from the data file
-            import json
-            from pathlib import Path
-
-            fallback_file = (
-                Path(__file__).parent.parent.parent
-                / "ccproxy"
-                / "data"
-                / "codex_headers_fallback.json"
+            # No detection service available - use minimal instructions
+            self._logger.warning(
+                "No detection service available, using minimal Codex instructions"
             )
-            if fallback_file.exists():
-                with fallback_file.open("r") as f:
-                    data = json.load(f)
-                    instructions = data.get("instructions", {}).get(
-                        "instructions_field", ""
-                    )
-                    if instructions:
-                        self._logger.debug("Using fallback Codex instructions")
-                        return instructions
-
-            # Last resort - minimal instructions
-            self._logger.warning("Using minimal Codex instructions")
             return (
                 "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. "
                 "Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful."

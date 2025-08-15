@@ -106,7 +106,7 @@ class Plugin(ProviderPlugin):
         # Set up detection service for the adapter
         from ccproxy.services.codex_detection_service import CodexDetectionService
 
-        detection_service = CodexDetectionService()
+        detection_service = CodexDetectionService(services.settings)
         self._adapter.set_detection_service(detection_service)
         services.logger.info(
             "codex_plugin_detection_service_set", adapter_has_detection=True
@@ -209,6 +209,7 @@ class Plugin(ProviderPlugin):
             converts them to Codex Response API format before forwarding.
             """
             import json
+
             from starlette.datastructures import Headers
             from starlette.requests import Request as StarletteRequest
 

@@ -1432,6 +1432,7 @@ class ProxyService:
 
         # Create CoreServices for plugins
         from httpx import AsyncClient
+
         from ccproxy.core.services import CoreServices
 
         # Create a shared HTTP client for plugins
