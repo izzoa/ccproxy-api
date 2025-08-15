@@ -155,6 +155,17 @@ class CodexAdapter(BaseAdapter):
                 method=method,
                 url=target_url,
             )
+            
+            # Log the request body being sent
+            self._logger.info(
+                "codex_request_body",
+                has_instructions="instructions" in transformed_request,
+                has_input="input" in transformed_request,
+                model=transformed_request.get("model"),
+                stream=transformed_request.get("stream", False),
+                body_keys=list(transformed_request.keys()),
+                body_preview=str(transformed_request)[:500] if transformed_request else None,
+            )
 
             # Make the actual HTTP request
             # Note: self._http_client is passed in from the plugin, already instantiated
@@ -320,6 +331,17 @@ class CodexAdapter(BaseAdapter):
                     headers=headers_to_log,
                     has_auth="authorization" in headers,
                     url=target_url,
+                )
+                
+                # Log the request body being sent
+                self._logger.info(
+                    "codex_streaming_request_body",
+                    has_instructions="instructions" in transformed_request,
+                    has_input="input" in transformed_request,
+                    model=transformed_request.get("model"),
+                    stream=transformed_request.get("stream"),
+                    body_keys=list(transformed_request.keys()),
+                    body_preview=str(transformed_request)[:500] if transformed_request else None,
                 )
 
                 # Make the streaming HTTP request
