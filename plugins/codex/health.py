@@ -1,8 +1,12 @@
 """Codex health check implementation."""
 
+from typing import Any, Literal
+
 import structlog
 
+from ccproxy.auth.openai import OpenAITokenManager
 from ccproxy.plugins.protocol import HealthCheckResult
+from ccproxy.services.codex_detection_service import CodexDetectionService
 
 from .config import CodexSettings
 
@@ -10,7 +14,11 @@ from .config import CodexSettings
 logger = structlog.get_logger(__name__)
 
 
-async def codex_health_check(config: CodexSettings | None) -> HealthCheckResult:
+async def codex_health_check(
+    config: CodexSettings | None,
+    detection_service: CodexDetectionService | None = None,
+    auth_manager: OpenAITokenManager | None = None,
+) -> HealthCheckResult:
     """Perform health check for Codex plugin."""
     try:
         if not config:
@@ -39,11 +47,51 @@ async def codex_health_check(config: CodexSettings | None) -> HealthCheckResult:
                 version="1.0.0",
             )
 
+        # Get CLI status if detection service is available
+        cli_details = {}
+        if detection_service:
+            cli_version = detection_service.get_version()
+            cli_path = detection_service.get_binary_path()
+
+            cli_details = {
+                "cli_available": cli_path is not None,
+                "cli_version": cli_version,
+                "cli_path": cli_path,
+            }
+
+        # Get authentication status if auth manager is available
+        auth_details: dict[str, Any] = {}
+        if auth_manager:
+            try:
+                # Use the new helper method to get auth status
+                auth_details = await auth_manager.get_auth_status()
+            except Exception as e:
+                logger.debug("Failed to check auth status", error=str(e))
+                auth_details = {
+                    "auth_configured": False,
+                    "auth_error": str(e),
+                }
+
+        # Determine overall status
+        status: Literal["pass", "warn", "fail"]
+        if cli_details.get("cli_available") and auth_details.get("token_available"):
+            output = f"Codex plugin is healthy (CLI v{cli_details.get('cli_version')} available, authenticated)"
+            status = "pass"
+        elif cli_details.get("cli_available"):
+            output = f"Codex plugin is functional (CLI v{cli_details.get('cli_version')} available, auth missing)"
+            status = "warn"
+        elif auth_details.get("token_available"):
+            output = "Codex plugin is functional (authenticated, CLI not found)"
+            status = "warn"
+        else:
+            output = "Codex plugin is functional but CLI and auth missing"
+            status = "warn"
+
         # Basic health check passes
         return HealthCheckResult(
-            status="pass",
+            status=status,
             componentId="plugin-codex",
-            output="Codex plugin is healthy",
+            output=output,
             version="1.0.0",
             details={
                 "base_url": config.base_url,
@@ -51,6 +99,8 @@ async def codex_health_check(config: CodexSettings | None) -> HealthCheckResult:
                     config.oauth.base_url and config.oauth.client_id
                 ),
                 "verbose_logging": config.verbose_logging,
+                **cli_details,  # Include CLI details if available
+                **auth_details,  # Include auth details if available
             },
         )
 

@@ -1,11 +1,14 @@
 """Core services container for shared services passed to plugins."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from httpx import AsyncClient
 
 from ccproxy.config.settings import Settings
+
+if TYPE_CHECKING:
+    from ccproxy.scheduler.core import Scheduler
 
 
 class CoreServices:
@@ -16,6 +19,7 @@ class CoreServices:
         http_client: AsyncClient,
         logger: structlog.BoundLogger,
         settings: Settings,
+        scheduler: "Scheduler | None" = None,
     ):
         """Initialize core services.
 
@@ -23,10 +27,12 @@ class CoreServices:
             http_client: Shared HTTP client for plugins
             logger: Shared logger instance
             settings: Application settings
+            scheduler: Optional scheduler for plugin tasks
         """
         self.http_client = http_client
         self.logger = logger
         self.settings = settings
+        self.scheduler = scheduler
 
     def get_plugin_config(self, plugin_name: str) -> dict[str, Any]:
         """Get configuration for a specific plugin.

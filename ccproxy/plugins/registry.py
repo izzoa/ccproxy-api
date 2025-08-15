@@ -2,13 +2,13 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 import structlog
 
 from ccproxy.core.services import CoreServices
 from ccproxy.plugins.loader import PluginLoader
 from ccproxy.plugins.protocol import HealthCheckResult, ProviderPlugin
+from ccproxy.scheduler.registry import get_task_registry
 from ccproxy.services.adapters.base import BaseAdapter
 
 
@@ -24,6 +24,7 @@ class PluginRegistry:
         self._adapters: dict[str, BaseAdapter] = {}
         self._initialized_plugins: set[str] = set()
         self._services: CoreServices | None = None
+        self._plugin_tasks: dict[str, list[str]] = {}  # Track tasks per plugin
 
     async def discover_and_initialize(self, services: CoreServices) -> None:
         """Discover and initialize all plugins.
@@ -61,6 +62,9 @@ class PluginRegistry:
             # Create adapter after initialization
             adapter = plugin.create_adapter()
             self._adapters[plugin.name] = adapter
+            
+            # Register scheduled tasks if plugin has them and scheduler is available
+            await self._register_plugin_tasks(plugin)
 
             logger.info(
                 f"Registered and initialized plugin: {plugin.name} v{plugin.version}"
@@ -73,8 +77,82 @@ class PluginRegistry:
             self._adapters.pop(plugin.name, None)
             self._initialized_plugins.discard(plugin.name)
 
+    async def _register_plugin_tasks(self, plugin: ProviderPlugin) -> None:
+        """Register scheduled tasks for a plugin if available.
+        
+        Args:
+            plugin: Plugin to register tasks for
+        """
+        # Check if plugin has scheduled tasks
+        if not hasattr(plugin, "get_scheduled_tasks"):
+            return
+            
+        task_definitions = plugin.get_scheduled_tasks()
+        if not task_definitions:
+            return
+            
+        # Check if scheduler is available
+        if not self._services or not self._services.scheduler:
+            logger.debug(
+                f"Scheduler not available, skipping task registration for {plugin.name}"
+            )
+            return
+            
+        scheduler = self._services.scheduler
+        task_registry = get_task_registry()
+        registered_tasks = []
+        
+        for task_def in task_definitions:
+            try:
+                # Register task class with task registry if needed
+                task_type = task_def["task_type"]
+                task_class = task_def["task_class"]
+                
+                if not task_registry.is_registered(task_type):
+                    task_registry.register(task_type, task_class)
+                    logger.debug(f"Registered task type: {task_type}")
+                
+                # Add task to scheduler
+                task_name = task_def["task_name"]
+                interval_seconds = task_def["interval_seconds"]
+                enabled = task_def.get("enabled", True)
+                
+                # Extract additional kwargs (like detection_service)
+                task_kwargs = {
+                    k: v for k, v in task_def.items() 
+                    if k not in ["task_name", "task_type", "task_class", "interval_seconds", "enabled"]
+                }
+                
+                await scheduler.add_task(
+                    task_name=task_name,
+                    task_type=task_type,
+                    interval_seconds=interval_seconds,
+                    enabled=enabled,
+                    **task_kwargs,
+                )
+                
+                registered_tasks.append(task_name)
+                logger.info(
+                    f"Registered scheduled task '{task_name}' for plugin {plugin.name}",
+                    interval_seconds=interval_seconds,
+                    enabled=enabled,
+                )
+                
+            except Exception as e:
+                logger.error(
+                    f"Failed to register task for plugin {plugin.name}: {e}",
+                    task_def=task_def,
+                )
+        
+        # Track tasks for this plugin for cleanup
+        if registered_tasks:
+            self._plugin_tasks[plugin.name] = registered_tasks
+
     async def shutdown_all(self) -> None:
         """Shutdown all initialized plugins."""
+        # Remove plugin tasks from scheduler first
+        await self._unregister_all_plugin_tasks()
+        
         shutdown_tasks = []
 
         for plugin_name in list(self._initialized_plugins):
@@ -86,6 +164,25 @@ class PluginRegistry:
             await asyncio.gather(*shutdown_tasks, return_exceptions=True)
 
         self._initialized_plugins.clear()
+
+    async def _unregister_all_plugin_tasks(self) -> None:
+        """Unregister all plugin tasks from scheduler."""
+        if not self._services or not self._services.scheduler:
+            return
+            
+        scheduler = self._services.scheduler
+        
+        for plugin_name, task_names in self._plugin_tasks.items():
+            for task_name in task_names:
+                try:
+                    await scheduler.remove_task(task_name)
+                    logger.debug(f"Removed task '{task_name}' for plugin {plugin_name}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to remove task '{task_name}' for plugin {plugin_name}: {e}"
+                    )
+        
+        self._plugin_tasks.clear()
 
     async def _shutdown_plugin(self, plugin: ProviderPlugin) -> None:
         """Shutdown a single plugin.

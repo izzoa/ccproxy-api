@@ -134,7 +134,9 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
     # Get proxy service from app state if available
     if hasattr(app.state, "proxy_service"):
         proxy_service = app.state.proxy_service
-        await proxy_service.initialize_plugins()
+        # Pass scheduler if available
+        scheduler = getattr(app.state, "scheduler", None)
+        await proxy_service.initialize_plugins(scheduler=scheduler)
 
         # Register plugin routes
         for plugin_name in proxy_service.plugin_registry.list_plugins():

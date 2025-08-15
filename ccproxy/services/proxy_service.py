@@ -1418,11 +1418,14 @@ class ProxyService:
 
         return f"data: {json.dumps(error_json)}\n\n".encode()
 
-    async def initialize_plugins(self) -> None:
+    async def initialize_plugins(self, scheduler=None) -> None:
         """Initialize and load plugins.
 
         This method should be called during application startup to discover
         and register all available plugins.
+        
+        Args:
+            scheduler: Optional scheduler instance for plugin tasks
         """
         if self._plugins_initialized:
             logger.debug("Plugins already initialized")
@@ -1438,7 +1441,10 @@ class ProxyService:
         # Create a shared HTTP client for plugins
         async with AsyncClient() as http_client:
             core_services = CoreServices(
-                http_client=http_client, logger=logger, settings=self.settings
+                http_client=http_client, 
+                logger=logger, 
+                settings=self.settings,
+                scheduler=scheduler,
             )
 
             # Discover and initialize plugins with core services

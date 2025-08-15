@@ -3,7 +3,6 @@
 import importlib.metadata
 import importlib.util
 from pathlib import Path
-from typing import Any
 
 import structlog
 

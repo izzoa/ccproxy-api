@@ -189,3 +189,104 @@ class OpenAITokenManager(AuthManager):
     def get_provider_name(self) -> str:
         """Get the provider name for logging."""
         return "openai-codex"
+
+    def _redact_account_id(self, account_id: str) -> str:
+        """Redact account ID for privacy, keeping only the prefix.
+
+        Args:
+            account_id: Full account ID like 'auth0|xxxxxxxxxxxxx'
+
+        Returns:
+            Redacted ID like 'auth0|...'
+        """
+        if "|" in account_id:
+            prefix = account_id.split("|")[0]
+            return f"{prefix}|..."
+        # If no pipe, just show first few chars
+        if len(account_id) > 8:
+            return account_id[:8] + "..."
+        return account_id
+
+    async def get_auth_status(self) -> dict[str, Any]:
+        """Get detailed authentication status information.
+
+        Returns:
+            Dictionary with auth status details including token info,
+            expiration, and storage location.
+        """
+        status: dict[str, Any] = {
+            "auth_configured": False,
+            "token_available": False,
+            "storage_location": self.get_storage_location(),
+        }
+
+        try:
+            # Check if credentials exist
+            has_creds = await self.has_credentials()
+            if not has_creds:
+                return status
+
+            status["auth_configured"] = True
+
+            # Load credentials to get details
+            credentials = await self.load_credentials()
+            if not credentials:
+                return status
+
+            # Get token details
+            token = credentials.access_token
+            if token:
+                status["token_available"] = True
+                status["token_preview"] = (
+                    token[:20] + "..." if len(token) > 20 else "[SHORT]"
+                )
+
+                # Decode token to get claims
+                try:
+                    decoded = jwt.decode(token, options={"verify_signature": False})
+
+                    # Extract expiration and other details
+                    exp_timestamp = decoded.get("exp", 0)
+                    if exp_timestamp:
+                        exp_dt = datetime.fromtimestamp(exp_timestamp, tz=UTC)
+                        now = datetime.now(UTC)
+                        time_remaining = exp_dt - now
+
+                        days = time_remaining.days
+                        hours = time_remaining.seconds // 3600
+                        minutes = (time_remaining.seconds % 3600) // 60
+
+                        status.update(
+                            {
+                                "token_expired": exp_dt < now,
+                                "expires_at": exp_dt.isoformat(),
+                                "time_remaining": (
+                                    f"{days} days, {hours} hours, {minutes} minutes"
+                                    if exp_dt > now
+                                    else "Expired"
+                                ),
+                                "issuer": decoded.get("iss", "Unknown"),
+                                "audience": decoded.get("aud", "Unknown"),
+                                "account_id_preview": self._redact_account_id(
+                                    decoded.get("org_id")
+                                    or decoded.get("sub")
+                                    or "Unknown"
+                                ),
+                            }
+                        )
+
+                    # Add account active status
+                    status["account_active"] = credentials.active
+
+                except Exception as e:
+                    logger.debug("Failed to decode token for status", error=str(e))
+                    # Just add basic info if decoding fails
+                    status["expires_at"] = credentials.expires_at.isoformat()
+                    status["token_expired"] = credentials.is_expired()
+                    status["account_active"] = credentials.active
+
+        except Exception as e:
+            logger.debug("Failed to get auth status", error=str(e))
+            status["auth_error"] = str(e)
+
+        return status

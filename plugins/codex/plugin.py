@@ -17,6 +17,8 @@ from ccproxy.services.adapters.base import BaseAdapter
 from .adapter import CodexAdapter
 from .config import CodexSettings
 from .health import codex_health_check
+from .tasks import CodexDetectionRefreshTask
+
 
 logger = structlog.get_logger(__name__)
 
@@ -31,6 +33,8 @@ class Plugin(ProviderPlugin):
         self._adapter: CodexAdapter | None = None
         self._config: CodexSettings | None = None
         self._services: CoreServices | None = None
+        self._detection_service: Any | None = None  # Will be CodexDetectionService
+        self._auth_manager: Any | None = None  # Will be OpenAITokenManager
 
     @property
     def name(self) -> str:
@@ -104,22 +108,23 @@ class Plugin(ProviderPlugin):
             )
 
         self._adapter.set_auth_manager(auth_manager)
+        self._auth_manager = auth_manager  # Store for health checks
         logger.info("codex_plugin_auth_manager_set", adapter_has_auth=True)
 
         # Set up detection service for the adapter
         from ccproxy.services.codex_detection_service import CodexDetectionService
 
         detection_service = CodexDetectionService(services.settings)
-        
+
         # Initialize detection service to capture Codex CLI headers
         logger.info("codex_plugin_initializing_detection")
         try:
             await detection_service.initialize_detection()
-            
+
             # Log Codex CLI status
             version = detection_service.get_version()
             binary_path = detection_service.get_binary_path()
-            
+
             if binary_path:
                 logger.info(
                     "codex_cli_available",
@@ -133,7 +138,7 @@ class Plugin(ProviderPlugin):
                     status="not_found",
                     msg="Codex CLI not found in PATH or common locations",
                 )
-            
+
             logger.info(
                 "codex_plugin_detection_initialized",
                 has_cached_data=detection_service.get_cached_data() is not None,
@@ -145,11 +150,10 @@ class Plugin(ProviderPlugin):
                 error=str(e),
                 msg="Using fallback Codex instructions",
             )
-        
+
         self._adapter.set_detection_service(detection_service)
-        logger.info(
-            "codex_plugin_detection_service_set", adapter_has_detection=True
-        )
+        self._detection_service = detection_service  # Store for health checks
+        logger.info("codex_plugin_detection_service_set", adapter_has_detection=True)
 
     async def shutdown(self) -> None:
         """Cleanup on shutdown."""
@@ -325,4 +329,27 @@ class Plugin(ProviderPlugin):
 
     async def health_check(self) -> HealthCheckResult:
         """Perform health check for Codex plugin."""
-        return await codex_health_check(self._config)
+        return await codex_health_check(
+            self._config, self._detection_service, self._auth_manager
+        )
+    
+    def get_scheduled_tasks(self) -> list[dict] | None:
+        """Get scheduled task definitions for Codex plugin.
+        
+        Returns:
+            List with detection refresh task or None if detection service not available
+        """
+        if not self._detection_service:
+            return None
+            
+        return [
+            {
+                "task_name": f"codex_detection_refresh_{self.name}",
+                "task_type": "codex_detection_refresh",
+                "task_class": CodexDetectionRefreshTask,
+                "interval_seconds": 3600,  # Refresh every hour
+                "enabled": True,
+                "detection_service": self._detection_service,
+                "skip_initial_run": True,  # Skip first run since we already detect during initialization
+            }
+        ]

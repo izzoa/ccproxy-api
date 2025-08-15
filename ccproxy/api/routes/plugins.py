@@ -124,14 +124,52 @@ async def plugin_health(
     # Check plugin providers
     adapter = proxy.get_plugin_adapter(plugin_name)
     if adapter:
-        # Could implement actual health check on adapter
-        # For now, if adapter exists, consider it healthy
-        return PluginHealthResponse(
-            plugin=plugin_name,
-            status="healthy",
-            adapter_loaded=True,
-            details={"type": "plugin", "active": True},
-        )
+        # Get the plugin and run its health check if available
+        plugin = proxy.plugin_registry.get_plugin(plugin_name)
+        if plugin and hasattr(plugin, "health_check"):
+            try:
+                health_result = await plugin.health_check()
+                # Convert HealthCheckResult to PluginHealthResponse
+                return PluginHealthResponse(
+                    plugin=plugin_name,
+                    status="healthy"
+                    if health_result.status == "pass"
+                    else "unhealthy"
+                    if health_result.status == "fail"
+                    else "unknown",
+                    adapter_loaded=True,
+                    details={
+                        "type": "plugin",
+                        "active": True,
+                        "health_check": {
+                            "status": health_result.status,
+                            "output": health_result.output,
+                            "version": health_result.version,
+                            "details": health_result.details,
+                        },
+                    },
+                )
+            except Exception as e:
+                import structlog
+
+                logger = structlog.get_logger(__name__)
+                logger.error(
+                    "Plugin health check failed", plugin=plugin_name, error=str(e)
+                )
+                return PluginHealthResponse(
+                    plugin=plugin_name,
+                    status="unhealthy",
+                    adapter_loaded=True,
+                    details={"type": "plugin", "active": True, "error": str(e)},
+                )
+        else:
+            # Plugin doesn't have health check, use basic status
+            return PluginHealthResponse(
+                plugin=plugin_name,
+                status="healthy",
+                adapter_loaded=True,
+                details={"type": "plugin", "active": True},
+            )
 
     # Plugin not found
     raise HTTPException(
