@@ -27,6 +27,12 @@ class ProviderContext:
     # Optional request transformer (for headers, etc.)
     request_transformer: Callable[[dict[str, str]], dict[str, str]] | None = None
 
+    # Optional path transformer (for path mapping after prefix stripping)
+    path_transformer: Callable[[str], str] | None = None
+
+    # Optional route prefix to strip from request paths (e.g., "/api/codex")
+    route_prefix: str | None = None
+
     # Provider-specific settings
     session_id: str | None = None
     account_id: str | None = None

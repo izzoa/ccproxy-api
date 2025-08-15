@@ -138,6 +138,18 @@ class Plugin(ProviderPlugin):
         """Return Codex-specific routes."""
         router = APIRouter(tags=[f"plugin-{self.name}"])
 
+        # Define path transformer for Codex routes
+        def codex_path_transformer(path: str) -> str:
+            """Transform stripped paths to Codex API paths."""
+            # All our routes should map to /responses
+            # path will be like "/responses", "/chat/completions", "/{session_id}/responses"
+            if "/responses" in path or path == "/responses":
+                return "/responses"
+            if path == "/chat/completions":
+                return "/responses"
+            # Default fallback
+            return path
+
         @router.post("/responses", response_model=None)
         async def codex_responses(
             request: Request,
@@ -158,6 +170,8 @@ class Plugin(ProviderPlugin):
                 provider_name="codex-native",
                 auth_manager=OpenAITokenManager(),
                 target_base_url=f"{base_url}/backend-api/codex",
+                route_prefix=self._router_prefix,  # Use plugin's prefix
+                path_transformer=codex_path_transformer,  # Use our transformer
                 request_adapter=None,  # No conversion needed for native API
                 response_adapter=None,  # Pass through
                 session_id=session_id,
@@ -186,6 +200,8 @@ class Plugin(ProviderPlugin):
                 provider_name="codex-native",
                 auth_manager=OpenAITokenManager(),
                 target_base_url=f"{base_url}/backend-api/codex",
+                route_prefix=self._router_prefix,  # Use plugin's prefix
+                path_transformer=codex_path_transformer,  # Use our transformer
                 request_adapter=None,  # No conversion needed for native API
                 response_adapter=None,  # Pass through
                 session_id=session_id,

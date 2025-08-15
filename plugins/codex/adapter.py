@@ -13,6 +13,7 @@ from starlette.responses import Response, StreamingResponse
 from ccproxy.adapters.openai.codex_adapter import CodexAdapter as CoreCodexAdapter
 from ccproxy.services.adapters.base import BaseAdapter
 
+
 if TYPE_CHECKING:
     from ccproxy.auth.openai import OpenAITokenManager
     from ccproxy.services.codex_detection_service import CodexDetectionService
@@ -37,7 +38,9 @@ class CodexAdapter(BaseAdapter):
         self._logger = logger
         self._core_adapter = CoreCodexAdapter()
         self._auth_manager: OpenAITokenManager | None = None  # Will be set by plugin
-        self._detection_service: CodexDetectionService | None = None  # Will be set by plugin
+        self._detection_service: CodexDetectionService | None = (
+            None  # Will be set by plugin
+        )
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
@@ -47,6 +50,7 @@ class CodexAdapter(BaseAdapter):
         Makes actual HTTP request to Codex API with proper transformation.
         """
         import json
+
         from ccproxy.auth.openai import OpenAITokenManager
 
         self._logger.debug(
@@ -216,6 +220,7 @@ class CodexAdapter(BaseAdapter):
         Makes actual streaming HTTP request to Codex API with proper transformation.
         """
         import json
+
         from ccproxy.auth.openai import OpenAITokenManager
 
         self._logger.debug(
@@ -464,8 +469,10 @@ class CodexAdapter(BaseAdapter):
         try:
             if self._detection_service:
                 # Import at runtime for isinstance check
-                from ccproxy.services.codex_detection_service import CodexDetectionService
-                
+                from ccproxy.services.codex_detection_service import (
+                    CodexDetectionService,
+                )
+
                 if isinstance(self._detection_service, CodexDetectionService):
                     # Get cached data (with automatic fallback handled internally)
                     cache_data = self._detection_service.get_cached_data()

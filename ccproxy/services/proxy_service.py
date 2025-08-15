@@ -883,6 +883,7 @@ class ProxyService:
                 base_url=provider_context.target_base_url,
                 path=request.url.path,
                 query=str(request.url.query) if request.url.query else None,
+                provider_context=provider_context,
             )
 
             # Step 5: Determine if streaming is needed
@@ -1092,40 +1093,36 @@ class ProxyService:
         base_url: str,
         path: str,
         query: str | None,
+        provider_context: "ProviderContext" | None = None,
     ) -> str:
-        """Build the target URL for the request using direct path mappings.
+        """Build the target URL for the request.
 
-        Route mappings:
-        - /api/v1/chat/completions -> /v1/messages (converted by adapter)
-        - /api/v1/messages -> /v1/messages
-        - /v1/messages -> /v1/messages
-        - /codex/responses -> /responses
-        - /codex/{session_id}/responses -> /responses (session_id in request body)
-        - /codex/chat/completions -> /responses
+        If provider_context has route_prefix and/or path_transformer, use them.
+        Otherwise, use legacy path mappings for backward compatibility.
         """
-        # Direct path mappings
-        path_mappings = {
-            # Anthropic API mappings
-            "/api/v1/chat/completions": "/v1/messages?beta=true",  # Will be converted by adapter
-            "/api/v1/messages": "/v1/messages?beta=true",
-            "/v1/chat/completions": "/v1/messages",  # Will be converted by adapter
-            "/v1/messages": "/v1/messages",
-            # Codex API mappings
-            "/codex/responses": "/responses",
-            "/codex/chat/completions": "/responses",  # OpenAI format to Codex messages
-        }
+        # First, strip route prefix if provided
+        stripped_path = path
+        if provider_context and provider_context.route_prefix and path.startswith(provider_context.route_prefix):
+            stripped_path = path[len(provider_context.route_prefix) :]
+            # Ensure path starts with /
+            if not stripped_path.startswith("/"):
+                stripped_path = "/" + stripped_path
 
-        # Check for direct mapping first
-        if path in path_mappings:
-            target_path = path_mappings[path]
-        # Handle dynamic Codex session paths - strip session_id from path
-        elif path.startswith("/codex/") and "/responses" in path:
-            # /codex/{session_id}/responses -> /responses
-            # Session ID is passed in request body, not in path
-            target_path = "/responses"
+        # Apply path transformer if provided
+        if provider_context and provider_context.path_transformer:
+            target_path = provider_context.path_transformer(stripped_path)
         else:
-            # Use path as-is if no mapping found
-            target_path = path
+            # Legacy path mappings for backward compatibility (core APIs only)
+            path_mappings = {
+                # Anthropic API mappings
+                "/api/v1/chat/completions": "/v1/messages?beta=true",  # Will be converted by adapter
+                "/api/v1/messages": "/v1/messages?beta=true",
+                "/v1/chat/completions": "/v1/messages",  # Will be converted by adapter
+                "/v1/messages": "/v1/messages",
+            }
+
+            # Check for direct mapping or use path as-is
+            target_path = path_mappings.get(stripped_path, stripped_path)
 
         # Build URL
         url = f"{base_url.rstrip('/')}{target_path}"
