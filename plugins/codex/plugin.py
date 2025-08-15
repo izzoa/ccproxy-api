@@ -73,6 +73,12 @@ class Plugin(ProviderPlugin):
             logger=services.logger.bind(plugin=self.name),
         )
 
+        # Set up authentication manager for the adapter
+        from ccproxy.auth.openai import OpenAITokenManager
+
+        auth_manager = OpenAITokenManager()
+        self._adapter.set_auth_manager(auth_manager)
+
     async def shutdown(self) -> None:
         """Cleanup on shutdown."""
         if self._adapter:
@@ -186,7 +192,7 @@ class Plugin(ProviderPlugin):
 
             # Create a new request with the body we already read
             # This is necessary because we consumed the body above
-            async def receive():
+            async def receive() -> dict[str, Any]:
                 return {"type": "http.request", "body": body}
 
             new_request = StarletteRequest(
@@ -202,6 +208,13 @@ class Plugin(ProviderPlugin):
             # Use the adapter directly to handle the request with format conversion
             # The adapter will convert OpenAI format to Codex format and forward to
             # the correct URL: https://chatgpt.com/backend-api/codex/responses
+            if not self._adapter:
+                return Response(
+                    content=json.dumps({"error": "Codex adapter not initialized"}),
+                    status_code=500,
+                    media_type="application/json",
+                )
+
             if is_streaming:
                 return await self._adapter.handle_streaming(
                     new_request, "/responses", session_id=session_id

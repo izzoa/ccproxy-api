@@ -32,6 +32,7 @@ class CodexAdapter(BaseAdapter):
         self._http_client = httpx.AsyncClient(timeout=60.0)
         self._logger = logger
         self._core_adapter = CoreCodexAdapter()
+        self._auth_manager = None  # Will be set by plugin
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
@@ -73,7 +74,7 @@ class CodexAdapter(BaseAdapter):
             # Session is passed in the request data, not in the URL
             base_url = "https://chatgpt.com"
             target_url = f"{base_url}/backend-api/codex/responses"
-            
+
             self._logger.info(
                 "codex_adapter_target_url",
                 target_url=target_url,
@@ -86,6 +87,18 @@ class CodexAdapter(BaseAdapter):
             headers["session_id"] = session_id
             headers.pop("host", None)
             headers.pop("content-length", None)
+
+            # Add authentication if available
+            if self._auth_manager:
+                from ccproxy.auth.openai import OpenAITokenManager
+
+                try:
+                    if isinstance(self._auth_manager, OpenAITokenManager):
+                        auth_headers = await self._auth_manager.get_auth_headers()
+                        headers.update(auth_headers)
+                        self._logger.debug("Added OpenAI authentication headers")
+                except Exception as e:
+                    self._logger.warning(f"Failed to get auth headers: {e}")
 
             # Make the actual HTTP request
             # Note: self._http_client is passed in from the plugin, already instantiated
@@ -158,10 +171,8 @@ class CodexAdapter(BaseAdapter):
         # Transform request if it's in OpenAI format
         if "messages" in request_data:
             # Convert OpenAI format to Codex format
-            transformed_request = (
-                self._core_adapter.convert_chat_to_response_request(
-                    request_data
-                )
+            transformed_request = self._core_adapter.convert_chat_to_response_request(
+                request_data
             )
             is_openai_format = True
         else:
@@ -172,7 +183,7 @@ class CodexAdapter(BaseAdapter):
         # Session is passed in the request data, not in the URL
         base_url = "https://chatgpt.com"
         target_url = f"{base_url}/backend-api/codex/responses"
-        
+
         self._logger.info(
             "codex_adapter_streaming_target_url",
             target_url=target_url,
@@ -187,9 +198,22 @@ class CodexAdapter(BaseAdapter):
         headers.pop("host", None)
         headers.pop("content-length", None)
 
+        # Add authentication if available
+        if self._auth_manager:
+            from ccproxy.auth.openai import OpenAITokenManager
+
+            try:
+                if isinstance(self._auth_manager, OpenAITokenManager):
+                    auth_headers = await self._auth_manager.get_auth_headers()
+                    headers.update(auth_headers)
+                    self._logger.debug(
+                        "Added OpenAI authentication headers for streaming"
+                    )
+            except Exception as e:
+                self._logger.warning(f"Failed to get auth headers for streaming: {e}")
+
         async def stream_generator() -> AsyncIterator[bytes]:
             try:
-
                 # Make the streaming HTTP request
                 async with self._http_client.stream(
                     "POST",
@@ -232,11 +256,12 @@ class CodexAdapter(BaseAdapter):
                 yield b"data: [DONE]\n\n"
             except Exception as e:
                 import traceback
+
                 self._logger.error(
-                    "codex_adapter_streaming_error", 
+                    "codex_adapter_streaming_error",
                     error=str(e),
                     error_type=type(e).__name__,
-                    traceback=traceback.format_exc()
+                    traceback=traceback.format_exc(),
                 )
                 error_msg = {"error": f"Streaming failed: {str(e)}"}
                 yield f"data: {json.dumps(error_msg)}\n\n".encode()
@@ -295,6 +320,14 @@ class CodexAdapter(BaseAdapter):
             has_output=bool(response_data.get("output")),
         )
         return await self._core_adapter.adapt_response(response_data)
+
+    def set_auth_manager(self, auth_manager: Any) -> None:
+        """Set the authentication manager.
+
+        Args:
+            auth_manager: Authentication manager instance (e.g., OpenAITokenManager)
+        """
+        self._auth_manager = auth_manager
 
     async def cleanup(self) -> None:
         """Cleanup resources."""
