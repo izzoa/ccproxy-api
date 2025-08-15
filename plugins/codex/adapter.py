@@ -33,6 +33,7 @@ class CodexAdapter(BaseAdapter):
         self._logger = logger
         self._core_adapter = CoreCodexAdapter()
         self._auth_manager = None  # Will be set by plugin
+        self._detection_service = None  # Will be set by plugin
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
@@ -70,20 +71,12 @@ class CodexAdapter(BaseAdapter):
 
                 # Inject Codex instructions if not present
                 if not transformed_request.get("instructions"):
-                    # Use default Codex CLI instructions
-                    transformed_request["instructions"] = (
-                        "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. "
-                        "Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.\n\n"
-                        "The user is interacting with you through a command-line interface.\n\n"
-                        "Key behaviors:\n"
-                        "- Be concise and direct in your responses\n"
-                        "- Focus on practical solutions and code examples\n"
-                        "- Assume the user is a developer looking for technical assistance\n"
-                        "- When providing code, ensure it's properly formatted and ready to use\n"
-                        "- If you need more information to help effectively, ask specific questions\n\n"
-                        "Remember: You are running in a terminal environment, so keep responses clean and well-formatted for terminal display."
+                    # Try to get instructions from detection service
+                    instructions = await self._get_codex_instructions()
+                    transformed_request["instructions"] = instructions
+                    self._logger.debug(
+                        "Injected Codex instructions", length=len(instructions)
                     )
-                    self._logger.debug("Injected default Codex instructions")
             else:
                 transformed_request = request_data
 
@@ -155,7 +148,7 @@ class CodexAdapter(BaseAdapter):
                 method=method,
                 url=target_url,
             )
-            
+
             # Log the request body being sent
             self._logger.info(
                 "codex_request_body",
@@ -164,7 +157,9 @@ class CodexAdapter(BaseAdapter):
                 model=transformed_request.get("model"),
                 stream=transformed_request.get("stream", False),
                 body_keys=list(transformed_request.keys()),
-                body_preview=str(transformed_request)[:500] if transformed_request else None,
+                body_preview=str(transformed_request)[:500]
+                if transformed_request
+                else None,
             )
 
             # Make the actual HTTP request
@@ -244,20 +239,13 @@ class CodexAdapter(BaseAdapter):
 
             # Inject Codex instructions if not present
             if not transformed_request.get("instructions"):
-                # Use default Codex CLI instructions
-                transformed_request["instructions"] = (
-                    "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. "
-                    "Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.\n\n"
-                    "The user is interacting with you through a command-line interface.\n\n"
-                    "Key behaviors:\n"
-                    "- Be concise and direct in your responses\n"
-                    "- Focus on practical solutions and code examples\n"
-                    "- Assume the user is a developer looking for technical assistance\n"
-                    "- When providing code, ensure it's properly formatted and ready to use\n"
-                    "- If you need more information to help effectively, ask specific questions\n\n"
-                    "Remember: You are running in a terminal environment, so keep responses clean and well-formatted for terminal display."
+                # Try to get instructions from detection service
+                instructions = await self._get_codex_instructions()
+                transformed_request["instructions"] = instructions
+                self._logger.debug(
+                    "Injected Codex instructions for streaming",
+                    length=len(instructions),
                 )
-                self._logger.debug("Injected default Codex instructions for streaming")
 
             is_openai_format = True
         else:
@@ -332,7 +320,7 @@ class CodexAdapter(BaseAdapter):
                     has_auth="authorization" in headers,
                     url=target_url,
                 )
-                
+
                 # Log the request body being sent
                 self._logger.info(
                     "codex_streaming_request_body",
@@ -341,7 +329,9 @@ class CodexAdapter(BaseAdapter):
                     model=transformed_request.get("model"),
                     stream=transformed_request.get("stream"),
                     body_keys=list(transformed_request.keys()),
-                    body_preview=str(transformed_request)[:500] if transformed_request else None,
+                    body_preview=str(transformed_request)[:500]
+                    if transformed_request
+                    else None,
                 )
 
                 # Make the streaming HTTP request
@@ -458,6 +448,64 @@ class CodexAdapter(BaseAdapter):
             auth_manager: Authentication manager instance (e.g., OpenAITokenManager)
         """
         self._auth_manager = auth_manager
+
+    def set_detection_service(self, detection_service: Any) -> None:
+        """Set the detection service.
+
+        Args:
+            detection_service: Detection service instance (e.g., CodexDetectionService)
+        """
+        self._detection_service = detection_service
+
+    async def _get_codex_instructions(self) -> str:
+        """Get Codex CLI instructions from detection service or fallback."""
+        try:
+            # Try to get from detection service if available
+            if self._detection_service:
+                from ccproxy.services.codex_detection_service import (
+                    CodexDetectionService,
+                )
+
+                if isinstance(self._detection_service, CodexDetectionService):
+                    # Try to get cached data
+                    cache_data = await self._detection_service.get_cached_data()
+                    if cache_data and cache_data.instructions:
+                        self._logger.debug("Using cached Codex instructions")
+                        return cache_data.instructions.instructions_field
+
+            # Fallback to loading from the data file
+            import json
+            from pathlib import Path
+
+            fallback_file = (
+                Path(__file__).parent.parent.parent
+                / "ccproxy"
+                / "data"
+                / "codex_headers_fallback.json"
+            )
+            if fallback_file.exists():
+                with fallback_file.open("r") as f:
+                    data = json.load(f)
+                    instructions = data.get("instructions", {}).get(
+                        "instructions_field", ""
+                    )
+                    if instructions:
+                        self._logger.debug("Using fallback Codex instructions")
+                        return instructions
+
+            # Last resort - minimal instructions
+            self._logger.warning("Using minimal Codex instructions")
+            return (
+                "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. "
+                "Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful."
+            )
+        except Exception as e:
+            self._logger.error("Failed to get Codex instructions", error=str(e))
+            # Return minimal instructions on error
+            return (
+                "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. "
+                "Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful."
+            )
 
     async def cleanup(self) -> None:
         """Cleanup resources."""

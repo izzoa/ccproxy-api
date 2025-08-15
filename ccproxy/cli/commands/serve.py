@@ -262,7 +262,7 @@ def _run_local_server(settings: Settings, cli_overrides: dict[str, Any]) -> None
 
     reload_includes = None
     if settings.server.reload:
-        reload_includes = ["ccproxy", "pyproject.toml", "uv.lock"]
+        reload_includes = ["ccproxy", "pyproject.toml", "uv.lock", "plugins"]
 
     # Run uvicorn with our already configured logging
     uvicorn.run(

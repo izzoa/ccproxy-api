@@ -103,6 +103,15 @@ class Plugin(ProviderPlugin):
         self._adapter.set_auth_manager(auth_manager)
         services.logger.info("codex_plugin_auth_manager_set", adapter_has_auth=True)
 
+        # Set up detection service for the adapter
+        from ccproxy.services.codex_detection_service import CodexDetectionService
+
+        detection_service = CodexDetectionService()
+        self._adapter.set_detection_service(detection_service)
+        services.logger.info(
+            "codex_plugin_detection_service_set", adapter_has_detection=True
+        )
+
     async def shutdown(self) -> None:
         """Cleanup on shutdown."""
         if self._adapter:
