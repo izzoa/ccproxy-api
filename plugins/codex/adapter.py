@@ -73,6 +73,13 @@ class CodexAdapter(BaseAdapter):
             # Session is passed in the request data, not in the URL
             base_url = "https://chatgpt.com"
             target_url = f"{base_url}/backend-api/codex/responses"
+            
+            self._logger.info(
+                "codex_adapter_target_url",
+                target_url=target_url,
+                session_id=session_id,
+                endpoint=endpoint,
+            )
 
             # Build headers
             headers = dict(request.headers)
@@ -165,6 +172,13 @@ class CodexAdapter(BaseAdapter):
         # Session is passed in the request data, not in the URL
         base_url = "https://chatgpt.com"
         target_url = f"{base_url}/backend-api/codex/responses"
+        
+        self._logger.info(
+            "codex_adapter_streaming_target_url",
+            target_url=target_url,
+            session_id=session_id,
+            endpoint=endpoint,
+        )
 
         # Build headers
         headers = dict(request.headers)
