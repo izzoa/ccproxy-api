@@ -677,7 +677,7 @@ class TestClaudeSDKStartup:
             ) as MockAuthManager,
             patch("ccproxy.utils.startup_helpers.get_metrics") as mock_get_metrics,
             patch("ccproxy.utils.startup_helpers.ClaudeSDKService") as MockSDKService,
-            patch("ccproxy.claude_sdk.manager.SessionManager") as MockSessionManager,
+            patch("plugins.claude_sdk.manager.SessionManager") as MockSessionManager,
         ):
             # Setup mocks
             mock_auth_manager = Mock()

@@ -7,10 +7,11 @@ from typing import Any
 
 import structlog
 
-from ccproxy.config.claude import SDKMessageMode
 from ccproxy.core.async_utils import patched_typing
 from ccproxy.models import claude_sdk as sdk_models
 from ccproxy.models.messages import MessageResponse
+
+from .config import SDKMessageMode
 
 
 logger = structlog.get_logger(__name__)

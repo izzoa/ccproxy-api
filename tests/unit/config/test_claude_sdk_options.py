@@ -2,10 +2,10 @@
 
 from typing import Any, cast
 
-from ccproxy.claude_sdk.options import OptionsHandler
 from ccproxy.config.claude import ClaudeSettings
 from ccproxy.config.settings import Settings
 from ccproxy.core.async_utils import patched_typing
+from plugins.claude_sdk.options import OptionsHandler
 
 
 with patched_typing():

@@ -1,5 +1,6 @@
 """Simplified Codex adapter using delegation pattern."""
 
+import contextlib
 import json
 import uuid
 from typing import Any
@@ -176,10 +177,8 @@ class CodexAdapter(BaseAdapter):
         body = await request.body()
         request_data = {}
         if body:
-            try:
+            with contextlib.suppress(json.JSONDecodeError):
                 request_data = json.loads(body)
-            except json.JSONDecodeError:
-                pass
 
         # Force streaming
         request_data["stream"] = True

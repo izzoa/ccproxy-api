@@ -887,26 +887,54 @@ class ProxyService:
             logger.debug(
                 "dispatch_request", target_url=target_url, is_streaming=is_streaming
             )
-            # Step 6: Execute request
-            response: Response | StreamingResponse
-            if is_streaming and provider_context.supports_streaming:
-                response = await self._handle_streaming_request_unified(
-                    method=request.method,
-                    url=target_url,
-                    headers=headers,
-                    body=transformed_body,
-                    provider_context=provider_context,
-                    request_context=request_context,
-                )
+
+            # Step 6: Check if this should be handled by a plugin adapter
+            # Parse URL to check for special protocols (like claude-sdk://)
+            from urllib.parse import urlparse
+            parsed_url = urlparse(target_url)
+
+            # If using a special protocol, route to plugin adapter
+            if parsed_url.scheme not in ("http", "https"):
+                plugin_adapter = self.get_plugin_adapter(provider_context.provider_name)
+                if plugin_adapter:
+                    logger.debug(f"Routing to plugin adapter: {provider_context.provider_name}")
+
+                    # Extract just the path for the adapter
+                    endpoint_path = parsed_url.path or request.url.path
+
+                    if is_streaming and provider_context.supports_streaming:
+                        response: Response | StreamingResponse = await plugin_adapter.handle_streaming(
+                            request, endpoint_path
+                        )
+                    else:
+                        response = await plugin_adapter.handle_request(
+                            request, endpoint_path, request.method
+                        )
+                else:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"No adapter available for provider: {provider_context.provider_name}"
+                    )
             else:
-                response = await self._handle_regular_request(
-                    method=request.method,
-                    url=target_url,
-                    headers=headers,
-                    body=transformed_body,
-                    provider_context=provider_context,
-                    request_context=request_context,
-                )
+                # Step 6: Execute regular HTTP request
+                if is_streaming and provider_context.supports_streaming:
+                    response = await self._handle_streaming_request_unified(
+                        method=request.method,
+                        url=target_url,
+                        headers=headers,
+                        body=transformed_body,
+                        provider_context=provider_context,
+                        request_context=request_context,
+                    )
+                else:
+                    response = await self._handle_regular_request(
+                        method=request.method,
+                        url=target_url,
+                        headers=headers,
+                        body=transformed_body,
+                        provider_context=provider_context,
+                        request_context=request_context,
+                    )
 
             logger.info(
                 "dispatch_request_complete",
@@ -971,10 +999,9 @@ class ProxyService:
         if (
             hasattr(provider_context, "request_transformer")
             and provider_context.request_transformer
-        ):
-            if hasattr(provider_context.request_transformer, "transform_body"):
-                # New object-based transformer can also transform body
-                body = provider_context.request_transformer.transform_body(body)
+        ) and hasattr(provider_context.request_transformer, "transform_body"):
+            # New object-based transformer can also transform body
+            body = provider_context.request_transformer.transform_body(body)
 
         return body
 

@@ -16,10 +16,12 @@ from typing import Any, TypeAlias
 import structlog
 from claude_code_sdk import ClaudeCodeOptions
 
-from ccproxy.claude_sdk.session_client import SessionClient
-from ccproxy.claude_sdk.session_pool import SessionPool
 from ccproxy.config.settings import Settings
 from ccproxy.core.errors import ClaudeProxyError
+
+from .config import SessionPoolSettings
+from .session_client import SessionClient
+from .session_pool import SessionPool
 
 
 logger = structlog.get_logger(__name__)
@@ -62,7 +64,25 @@ class SessionManager:
         )
 
         if session_pool_enabled:
-            self._session_pool = SessionPool(settings.claude.sdk_session_pool)
+            # Convert core settings to plugin settings
+            core_pool_settings = settings.claude.sdk_session_pool
+            plugin_pool_settings = SessionPoolSettings(
+                enabled=core_pool_settings.enabled,
+                session_ttl=core_pool_settings.session_ttl,
+                max_sessions=core_pool_settings.max_sessions,
+                cleanup_interval=getattr(core_pool_settings, "cleanup_interval", 300),
+                idle_threshold=getattr(core_pool_settings, "idle_threshold", 300),
+                connection_recovery=getattr(
+                    core_pool_settings, "connection_recovery", True
+                ),
+                stream_first_chunk_timeout=getattr(
+                    core_pool_settings, "stream_first_chunk_timeout", 8
+                ),
+                stream_ongoing_timeout=getattr(
+                    core_pool_settings, "stream_ongoing_timeout", 60
+                ),
+            )
+            self._session_pool = SessionPool(plugin_pool_settings)
             logger.info(
                 "session_manager_session_pool_initialized",
                 session_ttl=self._session_pool.config.session_ttl,

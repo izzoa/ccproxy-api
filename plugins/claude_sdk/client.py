@@ -8,15 +8,17 @@ from typing import Any, TypeVar, cast
 import structlog
 from pydantic import BaseModel
 
-from ccproxy.claude_sdk.exceptions import ClaudeSDKError, StreamTimeoutError
-from ccproxy.claude_sdk.manager import SessionManager
-from ccproxy.claude_sdk.stream_handle import StreamHandle
 from ccproxy.config.settings import Settings
 from ccproxy.core.async_utils import patched_typing
 from ccproxy.core.errors import ClaudeProxyError, ServiceUnavailableError
 from ccproxy.models import claude_sdk as sdk_models
 from ccproxy.models.claude_sdk import SDKMessage
 from ccproxy.observability import timed_operation
+
+from .config import SessionPoolSettings
+from .exceptions import ClaudeSDKError, StreamTimeoutError
+from .manager import SessionManager
+from .stream_handle import StreamHandle
 
 
 with patched_typing():
@@ -285,14 +287,33 @@ class ClaudeSDKClient:
         """Create stream handle for direct query (no session pool)."""
         message_iterator = self._query(message, options, request_id, session_id)
 
+        # Convert core settings to plugin settings if available
+        plugin_session_config = None
+        if self._settings and self._settings.claude.sdk_session_pool:
+            core_pool_settings = self._settings.claude.sdk_session_pool
+            plugin_session_config = SessionPoolSettings(
+                enabled=core_pool_settings.enabled,
+                session_ttl=core_pool_settings.session_ttl,
+                max_sessions=core_pool_settings.max_sessions,
+                cleanup_interval=getattr(core_pool_settings, "cleanup_interval", 300),
+                idle_threshold=getattr(core_pool_settings, "idle_threshold", 300),
+                connection_recovery=getattr(
+                    core_pool_settings, "connection_recovery", True
+                ),
+                stream_first_chunk_timeout=getattr(
+                    core_pool_settings, "stream_first_chunk_timeout", 8
+                ),
+                stream_ongoing_timeout=getattr(
+                    core_pool_settings, "stream_ongoing_timeout", 60
+                ),
+            )
+
         return StreamHandle(
             message_iterator=message_iterator,
             session_id=session_id,
             request_id=request_id,
             session_client=None,
-            session_config=self._settings.claude.sdk_session_pool
-            if self._settings
-            else None,  # StreamHandle will use defaults
+            session_config=plugin_session_config,  # StreamHandle will use defaults if None
         )
 
     async def _create_session_pool_stream_handle(

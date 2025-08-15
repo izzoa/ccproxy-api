@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from claude_code_sdk import ClaudeCodeOptions
 
-from ccproxy.claude_sdk.session_client import SessionClient, SessionStatus
-from ccproxy.config.claude import SessionPoolSettings
 from ccproxy.core.errors import ClaudeProxyError, ServiceUnavailableError
+
+from .config import SessionPoolSettings
+from .session_client import SessionClient, SessionStatus
 
 
 if TYPE_CHECKING:

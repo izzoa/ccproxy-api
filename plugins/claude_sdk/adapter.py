@@ -1,15 +1,19 @@
-"""Claude SDK provider plugin."""
+"""Claude SDK adapter implementation."""
 
 import json
+import time
+import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
 import structlog
 from fastapi import HTTPException, Request
+from httpx import AsyncClient
 from starlette.responses import Response, StreamingResponse
 
-from ccproxy.models.provider import ProviderConfig
 from ccproxy.services.adapters.base import BaseAdapter
+
+from .detection_service import ClaudeSDKDetectionService
 
 
 logger = structlog.get_logger(__name__)
@@ -18,15 +22,38 @@ logger = structlog.get_logger(__name__)
 class ClaudeSDKAdapter(BaseAdapter):
     """Claude SDK adapter implementation.
 
-    This plugin provides access to Claude through the Claude Code SDK,
+    This adapter provides access to Claude through the Claude Code SDK,
     enabling MCP tools and other SDK-specific features.
     """
 
-    def __init__(self) -> None:
-        """Initialize the Claude SDK adapter."""
-        self.claude_service = None
-        self.adapter = None
+    def __init__(
+        self,
+        http_client: AsyncClient,
+        logger: structlog.BoundLogger,
+    ) -> None:
+        """Initialize the Claude SDK adapter.
+
+        Args:
+            http_client: Shared HTTP client (unused for SDK)
+            logger: Bound logger for this adapter
+        """
+        super().__init__()
+        self.http_client = http_client  # Not used but required by protocol
+        self.logger = logger
+        self.claude_service: Any = None
+        self.adapter: Any = None
+        self._detection_service: ClaudeSDKDetectionService | None = None
         self._initialized = False
+
+    def set_detection_service(
+        self, detection_service: ClaudeSDKDetectionService
+    ) -> None:
+        """Set the detection service for this adapter.
+
+        Args:
+            detection_service: Claude CLI detection service
+        """
+        self._detection_service = detection_service
 
     def _lazy_init(self) -> None:
         """Lazy initialization to avoid import issues during plugin discovery."""
@@ -54,11 +81,13 @@ class ClaudeSDKAdapter(BaseAdapter):
             self.adapter = OpenAIAdapter()
 
             self._initialized = True
+            self.logger.info("claude_sdk_adapter_initialized")
+
         except Exception as e:
-            logger.error(f"Failed to initialize Claude SDK adapter: {e}")
+            self.logger.error(f"Failed to initialize Claude SDK adapter: {e}")
             raise HTTPException(
                 status_code=503, detail=f"Claude SDK initialization failed: {str(e)}"
-            )
+            ) from e
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
@@ -81,8 +110,10 @@ class ClaudeSDKAdapter(BaseAdapter):
 
         try:
             request_data = json.loads(body) if body else {}
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid JSON in request body")
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=400, detail="Invalid JSON in request body"
+            ) from e
 
         # Get request context
         request_context = getattr(request.state, "context", None)
@@ -90,7 +121,11 @@ class ClaudeSDKAdapter(BaseAdapter):
             # Create a minimal context if not available
             from ccproxy.observability.context import RequestContext
 
-            request_context = RequestContext()
+            request_context = RequestContext(
+                request_id=str(uuid.uuid4()),
+                start_time=time.perf_counter(),
+                logger=self.logger,
+            )
 
         # Route to appropriate SDK method based on endpoint
         if endpoint == "/v1/messages" and method == "POST":
@@ -170,8 +205,10 @@ class ClaudeSDKAdapter(BaseAdapter):
 
         try:
             request_data = json.loads(body) if body else {}
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid JSON in request body")
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=400, detail="Invalid JSON in request body"
+            ) from e
 
         # Check if streaming is requested
         if not request_data.get("stream", False):
@@ -187,7 +224,11 @@ class ClaudeSDKAdapter(BaseAdapter):
         if request_context is None:
             from ccproxy.observability.context import RequestContext
 
-            request_context = RequestContext()
+            request_context = RequestContext(
+                request_id=str(uuid.uuid4()),
+                start_time=time.perf_counter(),
+                logger=self.logger,
+            )
 
         async def stream_generator() -> AsyncGenerator[bytes, None]:
             """Generate streaming response from Claude SDK."""
@@ -257,67 +298,8 @@ class ClaudeSDKAdapter(BaseAdapter):
             },
         )
 
-
-class ClaudeSDKPlugin:
-    """Claude SDK provider plugin.
-
-    This plugin provides integration with Claude through the Claude Code SDK,
-    enabling advanced features like MCP tools, system messages, and session management.
-    """
-
-    @property
-    def name(self) -> str:
-        """Plugin name."""
-        return "claude-sdk"
-
-    @property
-    def version(self) -> str:
-        """Plugin version."""
-        return "1.0.0"
-
-    def create_adapter(self) -> BaseAdapter:
-        """Create adapter instance."""
-        return ClaudeSDKAdapter()
-
-    def create_config(self) -> ProviderConfig:
-        """Create provider configuration."""
-        return ProviderConfig(
-            name="claude-sdk",
-            base_url="claude-sdk://local",  # Special URL for SDK
-            supports_streaming=True,
-            requires_auth=False,  # SDK handles auth internally
-            auth_type=None,
-            models=[
-                "claude-3-5-sonnet-20241022",
-                "claude-3-5-haiku-20241022",
-                "claude-3-opus-20240229",
-                "claude-3-sonnet-20240229",
-                "claude-3-haiku-20240307",
-            ],
-        )
-
-    async def validate(self) -> bool:
-        """Validate plugin is ready.
-
-        Checks that Claude CLI is available.
-        """
-        # Simple check for Claude CLI
-        import shutil
-        from pathlib import Path
-
-        # Check common locations for Claude CLI
-        claude_paths = [
-            Path.home() / ".cache" / ".bun" / "bin" / "claude",
-            Path.home() / ".local" / "bin" / "claude",
-            shutil.which("claude"),
-        ]
-
-        for path in claude_paths:
-            if path and Path(str(path)).exists():
-                logger.info(
-                    f"Claude SDK plugin validation successful: CLI found at {path}"
-                )
-                return True
-
-        logger.warning("Claude SDK plugin validation failed: Claude CLI not found")
-        return False
+    async def cleanup(self) -> None:
+        """Clean up adapter resources."""
+        if self.claude_service:
+            await self.claude_service.close()
+        self.logger.info("claude_sdk_adapter_cleanup_completed")

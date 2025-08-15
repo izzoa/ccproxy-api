@@ -7,13 +7,6 @@ import structlog
 from claude_code_sdk import ClaudeCodeOptions
 
 from ccproxy.auth.manager import AuthManager
-from ccproxy.claude_sdk.client import ClaudeSDKClient
-from ccproxy.claude_sdk.converter import MessageConverter
-from ccproxy.claude_sdk.exceptions import StreamTimeoutError
-from ccproxy.claude_sdk.manager import SessionManager
-from ccproxy.claude_sdk.options import OptionsHandler
-from ccproxy.claude_sdk.streaming import ClaudeStreamProcessor
-from ccproxy.config.claude import SDKMessageMode
 from ccproxy.config.settings import Settings
 from ccproxy.core.errors import (
     ClaudeProxyError,
@@ -26,9 +19,29 @@ from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.utils.model_mapping import map_model_to_claude
 from ccproxy.utils.simple_request_logger import write_request_log
+from plugins.claude_sdk.client import ClaudeSDKClient
+from plugins.claude_sdk.config import SDKMessageMode
+from plugins.claude_sdk.converter import MessageConverter
+from plugins.claude_sdk.exceptions import StreamTimeoutError
+from plugins.claude_sdk.manager import SessionManager
+from plugins.claude_sdk.options import OptionsHandler
+from plugins.claude_sdk.streaming import ClaudeStreamProcessor
 
 
 logger = structlog.get_logger(__name__)
+
+
+def _convert_sdk_message_mode(core_mode: Any) -> SDKMessageMode:
+    """Convert core SDKMessageMode to plugin SDKMessageMode."""
+    if hasattr(core_mode, 'value'):
+        # Convert enum value to plugin enum
+        if core_mode.value == "forward":
+            return SDKMessageMode.FORWARD
+        elif core_mode.value == "ignore":
+            return SDKMessageMode.IGNORE
+        elif core_mode.value == "formatted":
+            return SDKMessageMode.FORMATTED
+    return SDKMessageMode.FORWARD  # Default fallback
 
 
 class ClaudeSDKService:
@@ -327,7 +340,7 @@ class ClaudeSDKService:
 
         logger.debug("claude_sdk_completion_received")
         mode = (
-            self.settings.claude.sdk_message_mode
+            _convert_sdk_message_mode(self.settings.claude.sdk_message_mode)
             if self.settings
             else SDKMessageMode.FORWARD
         )
@@ -439,7 +452,7 @@ class ClaudeSDKService:
         """
         request_id = ctx.request_id
         sdk_message_mode = (
-            self.settings.claude.sdk_message_mode
+            _convert_sdk_message_mode(self.settings.claude.sdk_message_mode)
             if self.settings
             else SDKMessageMode.FORWARD
         )

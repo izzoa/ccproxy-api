@@ -10,14 +10,15 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from ccproxy.claude_sdk.exceptions import StreamTimeoutError
-from ccproxy.claude_sdk.message_queue import MessageQueue
 from ccproxy.models import claude_sdk as sdk_models
+
+from .exceptions import StreamTimeoutError
+from .message_queue import MessageQueue
 
 
 if TYPE_CHECKING:
-    from ccproxy.claude_sdk.session_client import SessionClient
-    from ccproxy.claude_sdk.stream_handle import StreamHandle
+    from .session_client import SessionClient
+    from .stream_handle import StreamHandle
 
 logger = structlog.get_logger(__name__)
 

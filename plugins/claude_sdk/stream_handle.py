@@ -10,10 +10,10 @@ from typing import Any
 
 import structlog
 
-from ccproxy.claude_sdk.message_queue import QueueListener
-from ccproxy.claude_sdk.session_client import SessionClient
-from ccproxy.claude_sdk.stream_worker import StreamWorker, WorkerStatus
-from ccproxy.config.claude import SessionPoolSettings
+from .config import SessionPoolSettings
+from .message_queue import QueueListener
+from .session_client import SessionClient
+from .stream_worker import StreamWorker, WorkerStatus
 
 
 logger = structlog.get_logger(__name__)

@@ -303,7 +303,7 @@ async def initialize_claude_sdk_startup(app: FastAPI, settings: Settings) -> Non
         # Initialize session manager if session pool is enabled
         session_manager = None
         if use_session_pool:
-            from ccproxy.claude_sdk.manager import SessionManager
+            from plugins.claude_sdk.manager import SessionManager
 
             # Create SessionManager with dependency injection
             session_manager = SessionManager(

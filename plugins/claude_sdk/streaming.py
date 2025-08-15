@@ -6,11 +6,12 @@ from uuid import uuid4
 
 import structlog
 
-from ccproxy.claude_sdk.converter import MessageConverter
-from ccproxy.config.claude import SDKMessageMode
 from ccproxy.models import claude_sdk as sdk_models
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
+
+from .config import SDKMessageMode
+from .converter import MessageConverter
 
 
 logger = structlog.get_logger(__name__)
