@@ -3,6 +3,7 @@
 import uuid
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
 
@@ -16,6 +17,8 @@ from ccproxy.services.adapters.base import BaseAdapter
 from .adapter import CodexAdapter
 from .config import CodexSettings
 from .health import codex_health_check
+
+logger = structlog.get_logger(__name__)
 
 
 class Plugin(ProviderPlugin):
@@ -71,14 +74,14 @@ class Plugin(ProviderPlugin):
         # Initialize adapter with shared HTTP client
         self._adapter = CodexAdapter(
             http_client=services.http_client,
-            logger=services.logger.bind(plugin=self.name),
+            logger=logger.bind(plugin=self.name),
         )
 
         # Set up authentication manager for the adapter
         from ccproxy.auth.openai import OpenAITokenManager
 
         auth_manager = OpenAITokenManager()
-        services.logger.info(
+        logger.info(
             "codex_plugin_auth_setup",
             auth_manager_type=type(auth_manager).__name__,
             storage_location=auth_manager.get_storage_location(),
@@ -88,20 +91,20 @@ class Plugin(ProviderPlugin):
         has_creds = await auth_manager.has_credentials()
         if has_creds:
             token = await auth_manager.get_valid_token()
-            services.logger.info(
+            logger.info(
                 "codex_plugin_auth_status",
                 has_credentials=True,
                 has_valid_token=bool(token),
                 token_preview=token[:20] + "..." if token else None,
             )
         else:
-            services.logger.warning(
+            logger.warning(
                 "codex_plugin_no_auth",
                 msg="No OpenAI credentials found. Run 'ccproxy auth login --provider openai' to authenticate.",
             )
 
         self._adapter.set_auth_manager(auth_manager)
-        services.logger.info("codex_plugin_auth_manager_set", adapter_has_auth=True)
+        logger.info("codex_plugin_auth_manager_set", adapter_has_auth=True)
 
         # Set up detection service for the adapter
         from ccproxy.services.codex_detection_service import CodexDetectionService
@@ -109,22 +112,22 @@ class Plugin(ProviderPlugin):
         detection_service = CodexDetectionService(services.settings)
         
         # Initialize detection service to capture Codex CLI headers
-        services.logger.info("codex_plugin_initializing_detection")
+        logger.info("codex_plugin_initializing_detection")
         try:
             await detection_service.initialize_detection()
-            services.logger.info(
+            logger.info(
                 "codex_plugin_detection_initialized",
                 has_cached_data=detection_service.get_cached_data() is not None,
             )
         except Exception as e:
-            services.logger.warning(
+            logger.warning(
                 "codex_plugin_detection_initialization_failed",
                 error=str(e),
                 msg="Using fallback Codex instructions",
             )
         
         self._adapter.set_detection_service(detection_service)
-        services.logger.info(
+        logger.info(
             "codex_plugin_detection_service_set", adapter_has_detection=True
         )
 
