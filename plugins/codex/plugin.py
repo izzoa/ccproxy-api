@@ -326,7 +326,7 @@ class Plugin(ProviderPlugin):
             self._config, self._detection_service, self._auth_manager
         )
 
-    def get_scheduled_tasks(self) -> list[dict] | None:
+    def get_scheduled_tasks(self) -> list[dict[str, Any]] | None:
         """Get scheduled task definitions for Codex plugin.
 
         Returns:

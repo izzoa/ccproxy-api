@@ -13,6 +13,8 @@ from starlette.responses import Response, StreamingResponse
 from ccproxy.adapters.openai.adapter import OpenAIAdapter
 from ccproxy.services.adapters.base import BaseAdapter
 
+from .transformers import CodexRequestTransformer, CodexResponseTransformer
+
 
 if TYPE_CHECKING:
     from ccproxy.auth.openai import OpenAITokenManager
@@ -38,6 +40,11 @@ class CodexAdapter(BaseAdapter):
         self._http_client = httpx.AsyncClient(timeout=60.0)
         self._logger = logger
         self._core_adapter = OpenAIAdapter()
+        
+        # Initialize transformers
+        self._request_transformer = CodexRequestTransformer()
+        self._response_transformer = CodexResponseTransformer()
+        
         self._auth_manager: OpenAITokenManager | None = None  # Will be set by plugin
         self._detection_service: CodexDetectionService | None = (
             None  # Will be set by plugin
@@ -72,33 +79,31 @@ class CodexAdapter(BaseAdapter):
             # Get session_id from kwargs or generate
             session_id = kwargs.get("session_id") or str(__import__("uuid").uuid4())
 
-            # Transform request if it's in OpenAI format
+            # Get Codex instructions if available
+            codex_instructions = None
+            try:
+                codex_instructions = await self._get_codex_instructions()
+            except Exception as e:
+                self._logger.warning(
+                    "codex_instructions_not_available",
+                    reason=str(e),
+                    error_type=type(e).__name__,
+                    msg="Proceeding without Codex instructions",
+                )
+            
+            # Transform request using the request transformer
             if "messages" in request_data:
                 # Convert OpenAI format to Codex format
-                transformed_request = (
-                    self._core_adapter.adapt_chat_to_response_request(request_data)
+                transformed_request = self._request_transformer.transform_chat_to_codex(
+                    request_data,
+                    codex_instructions=codex_instructions,
                 )
-
-                # Inject Codex instructions if not present
-                if not transformed_request.get("instructions"):
-                    try:
-                        # Try to get instructions from detection service
-                        instructions = await self._get_codex_instructions()
-                        transformed_request["instructions"] = instructions
-                        self._logger.debug(
-                            "Injected Codex instructions", length=len(instructions)
-                        )
-                    except Exception as e:
-                        # No instructions available - proceed without them
-                        # This catches both PluginResourceError and any other exceptions
-                        self._logger.warning(
-                            "codex_instructions_not_available",
-                            reason=str(e),
-                            error_type=type(e).__name__,
-                            msg="Proceeding without Codex instructions",
-                        )
             else:
-                transformed_request = request_data
+                # Native Codex format - just validate/enhance
+                transformed_request = self._request_transformer.validate_codex_request(
+                    request_data,
+                    codex_instructions=codex_instructions,
+                )
 
             # Build target URL - Codex API base URL
             # Session is passed in the request data, not in the URL
@@ -112,13 +117,8 @@ class CodexAdapter(BaseAdapter):
                 endpoint=endpoint,
             )
 
-            # Build headers
-            headers = dict(request.headers)
-            headers["session_id"] = session_id
-            headers.pop("host", None)
-            headers.pop("content-length", None)
-
-            # Add authentication if available
+            # Prepare headers using transformer
+            auth_headers = {}
             if self._auth_manager:
                 self._logger.info(
                     "codex_auth_manager_check",
@@ -131,7 +131,6 @@ class CodexAdapter(BaseAdapter):
                 try:
                     if isinstance(self._auth_manager, OpenAITokenManager):
                         auth_headers = await self._auth_manager.get_auth_headers()
-                        headers.update(auth_headers)
                         self._logger.info(
                             "codex_auth_headers_added",
                             auth_header_keys=list(auth_headers.keys()),
@@ -147,6 +146,13 @@ class CodexAdapter(BaseAdapter):
                 self._logger.warning(
                     "codex_auth_manager_missing", msg="No auth manager set"
                 )
+            
+            # Use transformer to prepare headers
+            headers = self._request_transformer.prepare_headers(
+                dict(request.headers),
+                session_id=session_id,
+                auth_headers=auth_headers,
+            )
 
             # Log final headers (mask auth token)
             headers_to_log = dict(headers.items())
@@ -196,9 +202,7 @@ class CodexAdapter(BaseAdapter):
             # Transform response back if needed
             if response.status_code == 200 and "messages" in request_data:
                 response_json = json.loads(response_body)
-                adapted_json = self._core_adapter.adapt_response_to_chat(
-                    response_json
-                )
+                adapted_json = self._response_transformer.transform_codex_to_chat(response_json)
                 response_body = json.dumps(adapted_json).encode()
 
             return Response(
@@ -250,37 +254,32 @@ class CodexAdapter(BaseAdapter):
         # Get session_id from kwargs or generate
         session_id = kwargs.get("session_id") or str(__import__("uuid").uuid4())
 
-        # Transform request if it's in OpenAI format
-        if "messages" in request_data:
-            # Convert OpenAI format to Codex format
-            transformed_request = self._core_adapter.adapt_chat_to_response_request(
-                request_data
+        # Get Codex instructions if available
+        codex_instructions = None
+        try:
+            codex_instructions = await self._get_codex_instructions()
+        except Exception as e:
+            self._logger.warning(
+                "codex_instructions_not_available_streaming",
+                reason=str(e),
+                error_type=type(e).__name__,
+                msg="Proceeding without Codex instructions for streaming",
             )
-
-            # Inject Codex instructions if not present
-            if not transformed_request.get("instructions"):
-                try:
-                    # Try to get instructions from detection service
-                    instructions = await self._get_codex_instructions()
-                    transformed_request["instructions"] = instructions
-                    self._logger.debug(
-                        "Injected Codex instructions for streaming",
-                        length=len(instructions),
-                    )
-                except Exception as e:
-                    # No instructions available - proceed without them
-                    # This catches both PluginResourceError and any other exceptions
-                    self._logger.warning(
-                        "codex_instructions_not_available_streaming",
-                        reason=str(e),
-                        error_type=type(e).__name__,
-                        msg="Proceeding without Codex instructions for streaming",
-                    )
-
-            is_openai_format = True
+        
+        # Transform request using the request transformer
+        is_openai_format = "messages" in request_data
+        if is_openai_format:
+            # Convert OpenAI format to Codex format
+            transformed_request = self._request_transformer.transform_chat_to_codex(
+                request_data,
+                codex_instructions=codex_instructions,
+            )
         else:
-            transformed_request = request_data
-            is_openai_format = False
+            # Native Codex format - just validate/enhance
+            transformed_request = self._request_transformer.validate_codex_request(
+                request_data,
+                codex_instructions=codex_instructions,
+            )
 
         # Build target URL - Codex API base URL
         # Session is passed in the request data, not in the URL
@@ -294,14 +293,8 @@ class CodexAdapter(BaseAdapter):
             endpoint=endpoint,
         )
 
-        # Build headers
-        headers = dict(request.headers)
-        headers["session_id"] = session_id
-        headers["accept"] = "text/event-stream"
-        headers.pop("host", None)
-        headers.pop("content-length", None)
-
-        # Add authentication if available
+        # Prepare headers using transformer
+        auth_headers = {}
         if self._auth_manager:
             self._logger.info(
                 "codex_streaming_auth_manager_check",
@@ -312,7 +305,6 @@ class CodexAdapter(BaseAdapter):
             try:
                 if isinstance(self._auth_manager, OpenAITokenManager):
                     auth_headers = await self._auth_manager.get_auth_headers()
-                    headers.update(auth_headers)
                     self._logger.info(
                         "codex_streaming_auth_headers_added",
                         auth_header_keys=list(auth_headers.keys()),
@@ -328,6 +320,13 @@ class CodexAdapter(BaseAdapter):
             self._logger.warning(
                 "codex_streaming_auth_manager_missing", msg="No auth manager set"
             )
+        
+        # Use transformer to prepare streaming headers
+        headers = self._request_transformer.prepare_streaming_headers(
+            dict(request.headers),
+            session_id=session_id,
+            auth_headers=auth_headers,
+        )
 
         async def stream_generator() -> AsyncIterator[bytes]:
             try:
@@ -382,20 +381,12 @@ class CodexAdapter(BaseAdapter):
                         return
 
                     # Stream and transform response if needed
-                    if is_openai_format:
-                        # Convert Codex SSE stream to OpenAI format
-                        response_stream = response.aiter_bytes()
-                        async for (
-                            chunk_dict
-                        ) in self._core_adapter.adapt_response_stream_to_chat(
-                            response_stream
-                        ):
-                            yield f"data: {json.dumps(chunk_dict)}\n\n".encode()
-                        yield b"data: [DONE]\n\n"
-                    else:
-                        # Pass through raw SSE stream
-                        async for chunk_bytes in response.aiter_bytes():
-                            yield chunk_bytes
+                    response_stream = response.aiter_bytes()
+                    async for chunk in self._response_transformer.process_streaming_response(
+                        response_stream,
+                        transform_to_openai=is_openai_format,
+                    ):
+                        yield chunk
 
             except httpx.HTTPError as e:
                 self._logger.error("codex_adapter_streaming_http_error", error=str(e))

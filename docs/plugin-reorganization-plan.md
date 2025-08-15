@@ -349,14 +349,14 @@ class Plugin(ProviderPlugin):  # Standardized class name for discovery
 
         # Initialize detection service
         from ccproxy.services.claude_detection_service import ClaudeDetectionService
-        
+
         self._detection_service = ClaudeDetectionService(services.settings)
         await self._detection_service.initialize_detection()
-        
+
         # Log CLI status
         version = self._detection_service.get_version()
         cli_path = self._detection_service.get_cli_path()
-        
+
         if cli_path:
             services.logger.info(
                 "claude_cli_available",
@@ -370,7 +370,7 @@ class Plugin(ProviderPlugin):  # Standardized class name for discovery
                 status="not_found",
                 msg="Claude CLI not found in PATH or common locations",
             )
-        
+
         # Set detection service on adapter
         self._adapter.set_detection_service(self._detection_service)
 
@@ -401,15 +401,15 @@ class Plugin(ProviderPlugin):  # Standardized class name for discovery
     async def health_check(self) -> HealthCheckResult:
         """Perform health check for Claude SDK."""
         return await claude_health_check(
-            self._config, 
+            self._config,
             self._detection_service
         )
-    
+
     def get_scheduled_tasks(self) -> list[dict] | None:
         """Get scheduled task definitions."""
         if not self._detection_service:
             return None
-        
+
         return [
             {
                 "task_name": f"claude_detection_refresh_{self.name}",
@@ -601,20 +601,20 @@ class ClaudeDetectionRefreshTask(BaseScheduledTask):
             self._first_run = False
             logger.debug(f"Skipping initial run for {self.name}")
             return True
-        
+
         self._first_run = False
-        
+
         try:
             logger.info(f"Starting Claude detection refresh for {self.name}")
             detection_data = await self.detection_service.initialize_detection()
-            
+
             logger.info(
                 "claude_detection_refresh_completed",
                 task_name=self.name,
                 version=detection_data.claude_version if detection_data else "unknown",
             )
             return True
-            
+
         except Exception as e:
             logger.error(f"Claude detection refresh failed: {e}")
             return False
@@ -833,19 +833,19 @@ async def initialize(self, services: CoreServices) -> None:
     # Get configuration
     plugin_config = services.get_plugin_config(self.name)
     self._config = YourSettings.model_validate(plugin_config)
-    
+
     # Initialize adapter
     self._adapter = YourAdapter(
         http_client=services.http_client,
         logger=services.logger.bind(plugin=self.name)
     )
-    
+
     # Set up detection service (if applicable)
     if hasattr(self, "_detection_service"):
         detection_service = YourDetectionService(services.settings)
         await detection_service.initialize_detection()
         self._adapter.set_detection_service(detection_service)
-    
+
     # Set up auth manager (if needed)
     if self._config.requires_auth:
         auth_manager = YourAuthManager()
@@ -857,19 +857,19 @@ async def initialize(self, services: CoreServices) -> None:
 async def health_check(self) -> HealthCheckResult:
     # Check multiple aspects
     checks = []
-    
+
     # Detection service status
     if self._detection_service:
         version = self._detection_service.get_version()
         checks.append(f"CLI: {version or 'not found'}")
-    
+
     # Auth status
     if self._auth_manager:
         has_creds = await self._auth_manager.has_credentials()
         checks.append(f"Auth: {'configured' if has_creds else 'not configured'}")
-    
+
     status = "pass" if all_good else "warn" if partial else "fail"
-    
+
     return HealthCheckResult(
         status=status,
         componentId=f"plugin-{self.name}",
@@ -884,7 +884,7 @@ async def health_check(self) -> HealthCheckResult:
 def get_scheduled_tasks(self) -> list[dict] | None:
     if not self._detection_service:
         return None
-    
+
     return [{
         "task_name": f"{self.name}_refresh",
         "task_type": f"{self.name}_detection_refresh",
@@ -900,12 +900,12 @@ def get_scheduled_tasks(self) -> list[dict] | None:
 ```python
 def get_routes(self) -> APIRouter | None:
     router = APIRouter(tags=[f"plugin-{self.name}"])
-    
+
     # Define path transformer
     def path_transformer(path: str) -> str:
         # Transform paths as needed
         return path
-    
+
     @router.post("/your-endpoint")
     async def your_endpoint(
         request: Request,
@@ -921,9 +921,9 @@ def get_routes(self) -> APIRouter | None:
             path_transformer=path_transformer,
             # ... other context fields
         )
-        
+
         return await proxy_service.dispatch_request(request, context)
-    
+
     return router
 ```
 

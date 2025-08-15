@@ -1336,18 +1336,10 @@ class ProxyService:
                 content=body,
             )
 
-            # Check for errors
-            if response.status_code >= 400:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Request failed with status {response.status_code}: "
-                    f"{response.text[:500]}",
-                )
-
             # Get response body
             response_body = response.content
 
-            # Apply response adapter if provided
+            # Apply response adapter if provided (even for error responses)
             if provider_context.response_adapter:
                 try:
                     response_json = json.loads(response_body.decode("utf-8"))

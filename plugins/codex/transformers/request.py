@@ -1,10 +1,12 @@
 """Codex-specific transformers for request/response transformation."""
 
 import json
+from typing import Any
 
 import structlog
 from typing_extensions import TypedDict
 
+from ccproxy.adapters.openai.adapter import OpenAIAdapter
 from ccproxy.core.transformers import RequestTransformer
 from ccproxy.core.types import ProxyRequest, TransformContext
 from ccproxy.models.detection import CodexCacheData
@@ -28,6 +30,7 @@ class CodexRequestTransformer(RequestTransformer):
     def __init__(self) -> None:
         """Initialize Codex request transformer."""
         super().__init__()
+        self._openai_adapter = OpenAIAdapter()
 
     async def _transform_request(
         self, request: ProxyRequest, context: TransformContext | None = None
@@ -387,3 +390,149 @@ class CodexRequestTransformer(RequestTransformer):
             data["stream"] = True
 
         return json.dumps(data, separators=(",", ":")).encode("utf-8")
+    
+    def transform_chat_to_codex(
+        self, 
+        request_data: dict[str, Any],
+        codex_instructions: str | None = None,
+    ) -> dict[str, Any]:
+        """Transform OpenAI Chat Completions request to Codex format.
+        
+        Args:
+            request_data: The OpenAI format request data
+            codex_instructions: Optional Codex CLI instructions to inject
+            
+        Returns:
+            Transformed request in Codex Response API format
+        """
+        # Use OpenAI adapter to convert format
+        transformed = self._openai_adapter.adapt_chat_to_response_request(request_data)
+        
+        # Inject Codex instructions if provided and not already present
+        if codex_instructions and not transformed.get("instructions"):
+            transformed["instructions"] = codex_instructions
+            logger.debug(
+                "codex_instructions_injected",
+                instructions_length=len(codex_instructions),
+            )
+        
+        # Ensure required Codex fields are present
+        self._ensure_codex_fields(transformed)
+        
+        return transformed
+    
+    def validate_codex_request(
+        self,
+        request_data: dict[str, Any],
+        codex_instructions: str | None = None,
+    ) -> dict[str, Any]:
+        """Transform or validate a native Codex request.
+        
+        Args:
+            request_data: The Codex format request data
+            codex_instructions: Optional Codex CLI instructions to inject
+            
+        Returns:
+            Validated/enhanced Codex request
+        """
+        # Make a copy to avoid modifying original
+        transformed = request_data.copy()
+        
+        # Inject instructions if not present
+        if codex_instructions and not transformed.get("instructions"):
+            transformed["instructions"] = codex_instructions
+            logger.debug(
+                "codex_instructions_added_to_native",
+                instructions_length=len(codex_instructions),
+            )
+        
+        # Ensure required Codex fields are present
+        self._ensure_codex_fields(transformed)
+        
+        return transformed
+    
+    def _ensure_codex_fields(self, request_data: dict[str, Any]) -> None:
+        """Ensure required Codex fields are present with defaults.
+        
+        Args:
+            request_data: The request data to validate/enhance (modified in-place)
+        """
+        # Set default model if not present
+        if "model" not in request_data:
+            request_data["model"] = "gpt-5"
+            logger.debug("codex_default_model_set", model="gpt-5")
+        
+        # Ensure stream field is present
+        if "stream" not in request_data:
+            request_data["stream"] = False
+            logger.debug("codex_default_stream_set", stream=False)
+        
+        # Log final request structure
+        logger.debug(
+            "codex_request_fields",
+            has_instructions="instructions" in request_data,
+            has_input="input" in request_data,
+            model=request_data.get("model"),
+            stream=request_data.get("stream"),
+            keys=list(request_data.keys()),
+        )
+    
+    def prepare_headers(
+        self,
+        headers: dict[str, str],
+        session_id: str,
+        auth_headers: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Prepare headers for Codex API request.
+        
+        Args:
+            headers: Original request headers
+            session_id: Session ID for the request
+            auth_headers: Optional authentication headers to add
+            
+        Returns:
+            Prepared headers for Codex API
+        """
+        # Copy headers to avoid modifying original
+        prepared = dict(headers)
+        
+        # Add session ID
+        prepared["session_id"] = session_id
+        
+        # Remove headers that shouldn't be forwarded
+        prepared.pop("host", None)
+        prepared.pop("content-length", None)
+        
+        # Add authentication if provided
+        if auth_headers:
+            prepared.update(auth_headers)
+            logger.debug(
+                "codex_auth_headers_added",
+                auth_keys=list(auth_headers.keys()),
+            )
+        
+        return prepared
+    
+    def prepare_streaming_headers(
+        self,
+        headers: dict[str, str],
+        session_id: str,
+        auth_headers: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Prepare headers for Codex streaming request.
+        
+        Args:
+            headers: Original request headers
+            session_id: Session ID for the request
+            auth_headers: Optional authentication headers to add
+            
+        Returns:
+            Prepared headers for Codex streaming API
+        """
+        # Start with regular header preparation
+        prepared = self.prepare_headers(headers, session_id, auth_headers)
+        
+        # Add streaming-specific headers
+        prepared["accept"] = "text/event-stream"
+        
+        return prepared

@@ -1,3 +1,6 @@
-"""Claude API transformers for request/response conversion."""
+"""Claude API plugin transformers."""
 
-__all__: list[str] = []
+from .request import ClaudeAPIRequestTransformer
+from .response import ClaudeAPIResponseTransformer
+
+__all__ = ["ClaudeAPIRequestTransformer", "ClaudeAPIResponseTransformer"]

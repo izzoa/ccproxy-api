@@ -21,7 +21,6 @@ from ccproxy.observability import get_metrics
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
 from ccproxy.scheduler.errors import SchedulerError
 from ccproxy.scheduler.manager import start_scheduler, stop_scheduler
-from ccproxy.services.claude_detection_service import ClaudeDetectionService
 from ccproxy.services.claude_sdk_service import ClaudeSDKService
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.proxy_service import ProxyService
@@ -282,32 +281,6 @@ async def setup_session_manager_shutdown(app: FastAPI) -> None:
             logger.debug("claude_sdk_session_manager_shutdown")
         except Exception as e:
             logger.error("claude_sdk_session_manager_shutdown_failed", error=str(e))
-
-
-async def initialize_claude_detection_startup(app: FastAPI, settings: Settings) -> None:
-    """Initialize Claude detection service.
-
-    Args:
-        app: FastAPI application instance
-        settings: Application settings
-    """
-    try:
-        logger.debug("initializing_claude_detection")
-        detection_service = ClaudeDetectionService(settings)
-        claude_data = await detection_service.initialize_detection()
-        app.state.claude_detection_data = claude_data
-        app.state.claude_detection_service = detection_service
-        logger.debug(
-            "claude_detection_completed",
-            version=claude_data.claude_version,
-            cached_at=claude_data.cached_at.isoformat(),
-        )
-    except Exception as e:
-        logger.error("claude_detection_startup_failed", error=str(e))
-        # Continue startup with fallback - detection service will provide fallback data
-        detection_service = ClaudeDetectionService(settings)
-        app.state.claude_detection_data = detection_service._get_fallback_data()
-        app.state.claude_detection_service = detection_service
 
 
 async def initialize_claude_sdk_startup(app: FastAPI, settings: Settings) -> None:

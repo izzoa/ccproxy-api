@@ -75,22 +75,23 @@ class ClaudeAPIDetectionService:
     def get_cached_data(self) -> ClaudeCacheData | None:
         """Get currently cached detection data."""
         return self._cached_data
-    
+
     def get_version(self) -> str | None:
         """Get the detected Claude CLI version."""
         if self._cached_data:
             return self._cached_data.claude_version
         return None
-    
+
     def get_cli_path(self) -> str | None:
         """Get the path to the Claude CLI binary."""
         try:
             import shutil
+
             cli_path = shutil.which("claude")
             return cli_path
         except Exception:
             return None
-    
+
     def get_binary_path(self) -> str | None:
         """Alias for get_cli_path for consistency with Codex."""
         return self.get_cli_path()

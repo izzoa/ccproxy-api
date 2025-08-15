@@ -31,7 +31,7 @@ class CoreServices:
 
     # Application settings
     settings: Settings
-    
+
     # Optional scheduler for plugin tasks
     scheduler: Scheduler | None
 
@@ -70,7 +70,7 @@ class ProviderPlugin(Protocol):
 
     # Health monitoring
     async def health_check(self) -> HealthCheckResult: ...
-    
+
     # Optional scheduled tasks
     def get_scheduled_tasks(self) -> list[ScheduledTaskDefinition] | None: ...
 ```
@@ -101,13 +101,13 @@ from ccproxy.scheduler.tasks import BaseScheduledTask
 
 class ScheduledTaskDefinition(TypedDict, total=False):
     """Definition for a scheduled task from a plugin."""
-    
+
     # Required fields
     task_name: str                          # Unique name for the task instance
     task_type: str                          # Type identifier for task registry
     task_class: type[BaseScheduledTask]     # Task class implementation
     interval_seconds: float                 # Interval between executions
-    
+
     # Optional fields
     enabled: bool                           # Whether task is enabled (default: True)
     skip_initial_run: bool                  # Skip first run at startup
@@ -197,7 +197,7 @@ class Plugin(ProviderPlugin):  # Must be named "Plugin"
             output=f"{self.name} plugin is healthy",
             version=self.version
         )
-    
+
     def get_scheduled_tasks(self) -> list[ScheduledTaskDefinition] | None:
         # Optional: return None if no scheduled tasks needed
         return None
@@ -232,7 +232,7 @@ logger = structlog.get_logger(__name__)
 
 class ExampleRefreshTask(BaseScheduledTask):
     """Example scheduled task for periodic operations."""
-    
+
     def __init__(
         self,
         name: str,
@@ -251,7 +251,7 @@ class ExampleRefreshTask(BaseScheduledTask):
         self.detection_service = detection_service
         self.skip_initial_run = skip_initial_run
         self._first_run = True
-    
+
     async def run(self) -> bool:
         """Execute the task."""
         # Skip first run if configured
@@ -259,9 +259,9 @@ class ExampleRefreshTask(BaseScheduledTask):
             self._first_run = False
             logger.debug(f"Skipping initial run for {self.name}")
             return True
-        
+
         self._first_run = False
-        
+
         try:
             # Perform task operations
             await self.detection_service.refresh()
@@ -270,11 +270,11 @@ class ExampleRefreshTask(BaseScheduledTask):
         except Exception as e:
             logger.error(f"Task {self.name} failed: {e}")
             return False
-    
+
     async def setup(self) -> None:
         """Setup before task execution starts."""
         logger.info(f"Setting up task {self.name}")
-    
+
     async def cleanup(self) -> None:
         """Cleanup after task execution stops."""
         logger.info(f"Cleaning up task {self.name}")
@@ -288,7 +288,7 @@ def get_scheduled_tasks(self) -> list[dict] | None:
     """Get scheduled task definitions."""
     if not self._detection_service:
         return None
-    
+
     return [
         {
             "task_name": f"refresh_{self.name}",
@@ -365,11 +365,11 @@ async def _register_plugin_tasks(self, plugin: ProviderPlugin) -> None:
     task_definitions = plugin.get_scheduled_tasks()
     if not task_definitions:
         return
-    
+
     for task_def in task_definitions:
         # Register task class
         task_registry.register(task_def["task_type"], task_def["task_class"])
-        
+
         # Add to scheduler
         await scheduler.add_task(
             task_name=task_def["task_name"],

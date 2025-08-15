@@ -36,7 +36,6 @@ from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
     check_version_updates_startup,
     flush_streaming_batches_shutdown,
-    initialize_claude_detection_startup,
     initialize_claude_sdk_startup,
     initialize_log_storage_shutdown,
     initialize_log_storage_startup,
@@ -85,11 +84,6 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "name": "Claude CLI",
         "startup": check_claude_cli_startup,
         "shutdown": None,  # Detection only, no cleanup needed
-    },
-    {
-        "name": "Claude Detection",
-        "startup": initialize_claude_detection_startup,
-        "shutdown": None,  # No cleanup needed
     },
     {
         "name": "Claude SDK",

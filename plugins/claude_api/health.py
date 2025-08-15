@@ -65,18 +65,20 @@ async def claude_api_health_check(
         if detection_service:
             cli_version = detection_service.get_version()
             cli_path = detection_service.get_cli_path()
-            
+
             cli_details = {
                 "cli_available": cli_path is not None,
                 "cli_version": cli_version,
                 "cli_path": cli_path,
             }
-            
+
             if cli_path:
-                cli_status_msg = f"CLI v{cli_version}" if cli_version else "CLI available"
+                cli_status_msg = (
+                    f"CLI v{cli_version}" if cli_version else "CLI available"
+                )
             else:
                 cli_status_msg = "CLI not found"
-        
+
         # Get authentication status from credentials manager
         auth_details: dict[str, Any] = {}
         if credentials_manager:
@@ -125,7 +127,7 @@ async def claude_api_health_check(
         # Add CLI status
         if cli_status_msg:
             output_parts.append(cli_status_msg)
-        
+
         # Add model info
         if config.models:
             output_parts.append(f"{len(config.models)} models available")

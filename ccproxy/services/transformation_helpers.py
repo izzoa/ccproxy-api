@@ -66,5 +66,3 @@ def should_apply_claude_transformations(provider_name: str) -> bool:
         True if Claude transformations should be applied
     """
     return provider_name in ["claude", "claude-openai", "claude-native"]
-
-

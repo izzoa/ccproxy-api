@@ -1,11 +1,6 @@
 """Claude API provider plugin implementation."""
 
-from typing import TYPE_CHECKING, Any
-
-
-if TYPE_CHECKING:
-    from ccproxy.plugins.protocol import ScheduledTaskDefinition
-    from ccproxy.services.credentials.manager import CredentialsManager
+from typing import Any
 
 import structlog
 from fastapi import APIRouter
@@ -73,11 +68,11 @@ class Plugin(ProviderPlugin):
         # Initialize detection service
         self._detection_service = ClaudeAPIDetectionService(services.settings)
         await self._detection_service.initialize_detection()
-        
+
         # Log CLI status
         version = self._detection_service.get_version()
         cli_path = self._detection_service.get_cli_path()
-        
+
         if cli_path:
             logger.info(
                 "claude_cli_available",
@@ -91,30 +86,24 @@ class Plugin(ProviderPlugin):
                 status="not_found",
                 msg="Claude CLI not found in PATH or common locations",
             )
-        
+
         # Initialize adapter with shared HTTP client
         self._adapter = ClaudeAPIAdapter(
             http_client=services.http_client,
             logger=services.logger.bind(plugin=self.name),
         )
 
-        # Get credentials manager from services
-        # The credentials manager is shared across plugins for OAuth token management
-        if hasattr(services, "credentials_manager"):
-            self._credentials_manager = services.credentials_manager
-            logger.info(
-                "claude_api_plugin_initialized",
-                status="initialized",
-                base_url=self._config.base_url,
-                models_count=len(self._config.models),
-                has_credentials_manager=True,
-            )
-        else:
-            logger.warning(
-                "claude_api_plugin_initialized",
-                status="initialized_without_auth",
-                msg="Credentials manager not available - authentication will not work",
-            )
+        # Initialize credentials manager for OAuth token management
+        from ccproxy.services.credentials.manager import CredentialsManager
+
+        self._credentials_manager = CredentialsManager()
+        logger.info(
+            "claude_api_plugin_initialized",
+            status="initialized",
+            base_url=self._config.base_url,
+            models_count=len(self._config.models) if self._config.models else 0,
+            has_credentials_manager=True,
+        )
 
     async def shutdown(self) -> None:
         """Cleanup on shutdown."""
@@ -151,14 +140,14 @@ class Plugin(ProviderPlugin):
     async def validate(self) -> bool:
         """Validate plugin is ready.
 
-        The plugin itself is always ready - OAuth tokens are handled at runtime.
+        Always returns True - actual validation happens during initialization.
+        The plugin system calls validate() before initialize(), so we can't
+        check config here since it hasn't been loaded yet.
 
         Returns:
-            True if plugin is configured and enabled
+            True - validation happens during initialization
         """
-        if not self._config:
-            return False
-        return self._config.enabled
+        return True
 
     def get_routes(self) -> APIRouter | None:
         """Return Claude API routes.
@@ -175,12 +164,10 @@ class Plugin(ProviderPlugin):
             HealthCheckResult with plugin status
         """
         return await claude_api_health_check(
-            self._config,
-            self._detection_service,
-            self._credentials_manager
+            self._config, self._detection_service, self._credentials_manager
         )
 
-    def get_scheduled_tasks(self) -> list["ScheduledTaskDefinition"] | None:
+    def get_scheduled_tasks(self) -> list[Any] | None:
         """Get scheduled task definitions.
 
         Returns:
@@ -188,7 +175,7 @@ class Plugin(ProviderPlugin):
         """
         if not self._detection_service:
             return None
-        
+
         return [
             {
                 "task_name": f"claude_api_detection_refresh_{self.name}",

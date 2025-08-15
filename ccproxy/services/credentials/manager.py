@@ -614,20 +614,15 @@ class CredentialsManager(AuthManager):
 
         try:
             # Check if credentials exist
-            has_creds = await self.has_credentials()
-            if not has_creds:
+            credentials = await self.load()
+            if not credentials:
                 return status
 
             status["auth_configured"] = True
 
-            # Load credentials to get details
-            credentials = await self.load_credentials()
-            if not credentials:
-                return status
-
             # Get OAuth token details
-            if credentials.oauth_token:
-                token = credentials.oauth_token
+            if credentials.claude_ai_oauth:
+                token = credentials.claude_ai_oauth
                 status["token_available"] = True
                 status["token_preview"] = (
                     f"{token.access_token[:12]}..."
@@ -663,8 +658,8 @@ class CredentialsManager(AuthManager):
                 if token.scopes:
                     status["oauth_scopes"] = ", ".join(token.scopes)
 
-            # Get account profile if available
-            if credentials.user_profile:
+            # Check for user profile if it exists (might not be present in ClaudeCredentials)
+            if hasattr(credentials, "user_profile") and credentials.user_profile:
                 profile = credentials.user_profile
                 status.update(
                     {
@@ -674,19 +669,23 @@ class CredentialsManager(AuthManager):
                 )
 
                 # Add organization details if available
-                if profile.organization:
+                if hasattr(profile, "organization") and profile.organization:
                     org = profile.organization
                     status.update(
                         {
                             "organization": org.name,
-                            "organization_type": org.organization_type or "Unknown",
-                            "billing_type": org.billing_type or "Unknown",
-                            "rate_limit_tier": org.rate_limit_tier or "Unknown",
+                            "organization_type": getattr(
+                                org, "organization_type", "Unknown"
+                            ),
+                            "billing_type": getattr(org, "billing_type", "Unknown"),
+                            "rate_limit_tier": getattr(
+                                org, "rate_limit_tier", "Unknown"
+                            ),
                         }
                     )
 
                 # Add user details
-                if profile.email:
+                if hasattr(profile, "email") and profile.email:
                     # Redact email for privacy
                     email_parts = profile.email.split("@")
                     if len(email_parts) == 2:
@@ -696,14 +695,14 @@ class CredentialsManager(AuthManager):
                     else:
                         status["email_preview"] = "***"
 
-                if profile.full_name:
+                if hasattr(profile, "full_name") and profile.full_name:
                     status["full_name"] = profile.full_name
-                if profile.display_name:
+                if hasattr(profile, "display_name") and profile.display_name:
                     status["display_name"] = profile.display_name
 
                 # Add subscription status
-                status["has_claude_pro"] = profile.has_claude_pro or False
-                status["has_claude_max"] = profile.has_claude_max or False
+                status["has_claude_pro"] = getattr(profile, "has_claude_pro", False)
+                status["has_claude_max"] = getattr(profile, "has_claude_max", False)
 
         except Exception as e:
             logger.debug("Failed to get auth status", error=str(e))
