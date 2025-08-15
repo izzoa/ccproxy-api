@@ -9,6 +9,7 @@ from ccproxy.core.services import CoreServices
 from ccproxy.models.provider import ProviderConfig
 from ccproxy.services.adapters.base import BaseAdapter
 
+
 if TYPE_CHECKING:
     from ccproxy.scheduler.tasks import BaseScheduledTask
 

@@ -105,7 +105,7 @@ class Plugin(ProviderPlugin):
         logger.info("codex_plugin_auth_manager_set", adapter_has_auth=True)
 
         # Set up detection service for the adapter
-        from ccproxy.services.codex_detection_service import CodexDetectionService
+        from .detection_service import CodexDetectionService
 
         detection_service = CodexDetectionService(services.settings)
 

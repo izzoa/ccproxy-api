@@ -76,6 +76,44 @@ class CodexDetectionService:
         """Get currently cached detection data."""
         return self._cached_data
 
+    def get_version(self) -> str:
+        """Get the Codex CLI version.
+
+        Returns:
+            Version string or "unknown" if not available
+        """
+        data = self.get_cached_data()
+        return data.codex_version if data else "unknown"
+
+    def get_binary_path(self) -> str | None:
+        """Get the Codex CLI binary path.
+
+        Returns:
+            Path to codex binary or None if not found
+        """
+        import shutil
+
+        # Try to find codex in PATH
+        codex_path = shutil.which("codex")
+        if codex_path:
+            return codex_path
+
+        # Check common locations
+        from pathlib import Path
+
+        common_paths = [
+            Path.home() / ".cache" / ".bun" / "bin" / "codex",
+            Path.home() / ".local" / "bin" / "codex",
+            Path("/usr/local/bin/codex"),
+            Path("/usr/bin/codex"),
+        ]
+
+        for path in common_paths:
+            if path.exists() and path.is_file():
+                return str(path)
+
+        return None
+
     async def _get_codex_version(self) -> str:
         """Get Codex CLI version."""
         try:

@@ -976,9 +976,7 @@ class ProxyService:
         # Then apply provider-specific transformations
         from ccproxy.services.transformation_helpers import (
             apply_claude_transformations,
-            apply_codex_transformations,
             should_apply_claude_transformations,
-            should_apply_codex_transformations,
         )
 
         if should_apply_claude_transformations(provider_context.provider_name):
@@ -996,17 +994,7 @@ class ProxyService:
                 injection_mode=injection_mode,
                 proxy_mode=self.proxy_mode,
             )
-        elif should_apply_codex_transformations(provider_context.provider_name):
-            # Apply Codex instructions injection
-            # Note: For Codex, we need to apply transformations even for native format
-            body, _ = await apply_codex_transformations(
-                body=body,
-                headers={},  # Don't transform headers here
-                access_token="",  # Not needed for body transformation
-                session_id=getattr(provider_context, "session_id", "") or "",
-                account_id=getattr(provider_context, "account_id", "") or "",
-                app_state=self.app_state,
-            )
+        # Codex transformations are now handled by the plugin itself
 
         return body
 
@@ -1021,9 +1009,7 @@ class ProxyService:
 
         from ccproxy.services.transformation_helpers import (
             apply_claude_transformations,
-            apply_codex_transformations,
             should_apply_claude_transformations,
-            should_apply_codex_transformations,
         )
 
         # Extract access token from auth headers
@@ -1045,18 +1031,7 @@ class ProxyService:
             )
             # Add authentication headers (could be Bearer token OR x-api-key)
             headers.update(auth_headers)
-        elif should_apply_codex_transformations(provider_context.provider_name):
-            # Use Codex transformer for complete header preparation
-            _, headers = await apply_codex_transformations(
-                body=b"",  # Not needed for header transformation
-                headers=request_headers,
-                access_token=access_token,
-                session_id=getattr(provider_context, "session_id", "") or "",
-                account_id=getattr(provider_context, "account_id", "") or "",
-                app_state=self.app_state,
-            )
-            # Add authentication headers
-            headers.update(auth_headers)
+        # Codex header transformations are now handled by the plugin itself
         else:
             # Default: start with request headers
             headers = dict(request_headers)

@@ -47,7 +47,6 @@ from ccproxy.utils.startup_helpers import (
     setup_scheduler_startup,
     setup_session_manager_shutdown,
     validate_claude_authentication_startup,
-    validate_codex_authentication_startup,
 )
 
 
@@ -75,11 +74,6 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
     {
         "name": "Claude Authentication",
         "startup": validate_claude_authentication_startup,
-        "shutdown": None,  # One-time validation, no cleanup needed
-    },
-    {
-        "name": "Codex Authentication",
-        "startup": validate_codex_authentication_startup,
         "shutdown": None,  # One-time validation, no cleanup needed
     },
     {

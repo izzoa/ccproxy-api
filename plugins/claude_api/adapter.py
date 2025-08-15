@@ -79,7 +79,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             if not self.openai_adapter:
                 from ccproxy.adapters.openai.adapter import OpenAIAdapter
 
-                self.openai_adapter = OpenAIAdapter()  # type: ignore[assignment]
+                self.openai_adapter = OpenAIAdapter()
 
             self._initialized = True
             self.logger.debug("Claude API adapter initialized successfully")
@@ -88,7 +88,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             self.logger.error(f"Failed to initialize Claude API adapter: {e}")
             raise HTTPException(
                 status_code=503, detail=f"Claude API initialization failed: {str(e)}"
-            )
+            ) from e
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
@@ -113,7 +113,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             # Native Anthropic format - no conversion needed
             provider_context = ProviderContext(
                 provider_name="claude-api-native",
-                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[attr-defined]
+                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[union-attr]
                 target_base_url="https://api.anthropic.com",
                 request_adapter=None,  # No conversion needed
                 response_adapter=None,  # Pass through
@@ -124,7 +124,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             # OpenAI format - needs conversion
             provider_context = ProviderContext(
                 provider_name="claude-api-openai",
-                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[attr-defined]
+                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[union-attr]
                 target_base_url="https://api.anthropic.com",
                 request_adapter=self.openai_adapter,
                 response_adapter=self.openai_adapter,
@@ -138,7 +138,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             )
 
         # Dispatch request through proxy service
-        result = await self.proxy_service.dispatch_request(request, provider_context)  # type: ignore[attr-defined]
+        result = await self.proxy_service.dispatch_request(request, provider_context)  # type: ignore[union-attr]
 
         # Handle different response types
         if isinstance(result, StreamingResponse):
@@ -215,7 +215,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             # Native Anthropic format
             provider_context = ProviderContext(
                 provider_name="claude-api-native",
-                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[attr-defined]
+                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[union-attr]
                 target_base_url="https://api.anthropic.com",
                 request_adapter=None,
                 response_adapter=None,
@@ -226,7 +226,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             # OpenAI format
             provider_context = ProviderContext(
                 provider_name="claude-api-openai",
-                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[attr-defined]
+                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[union-attr]
                 target_base_url="https://api.anthropic.com",
                 request_adapter=self.openai_adapter,
                 response_adapter=self.openai_adapter,
@@ -240,7 +240,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             )
 
         # Dispatch request through proxy service
-        result = await self.proxy_service.dispatch_request(  # type: ignore[attr-defined]
+        result = await self.proxy_service.dispatch_request(  # type: ignore[union-attr]
             modified_request, provider_context
         )
 

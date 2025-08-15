@@ -6,9 +6,9 @@ import structlog
 
 from ccproxy.auth.openai import OpenAITokenManager
 from ccproxy.plugins.protocol import HealthCheckResult
-from ccproxy.services.codex_detection_service import CodexDetectionService
 
 from .config import CodexSettings
+from .detection_service import CodexDetectionService
 
 
 logger = structlog.get_logger(__name__)

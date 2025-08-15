@@ -6,8 +6,9 @@ import structlog
 
 from ccproxy.scheduler.tasks import BaseScheduledTask
 
+
 if TYPE_CHECKING:
-    from ccproxy.services.codex_detection_service import CodexDetectionService
+    from .detection_service import CodexDetectionService
 
 
 logger = structlog.get_logger(__name__)

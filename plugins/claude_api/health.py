@@ -8,6 +8,7 @@ from ccproxy.plugins.protocol import HealthCheckResult
 from ccproxy.services.credentials.manager import CredentialsManager
 
 from .config import ClaudeAPISettings
+from .detection_service import ClaudeAPIDetectionService
 
 
 logger = structlog.get_logger(__name__)
@@ -15,6 +16,7 @@ logger = structlog.get_logger(__name__)
 
 async def claude_api_health_check(
     config: ClaudeAPISettings | None,
+    detection_service: ClaudeAPIDetectionService | None = None,
     credentials_manager: CredentialsManager | None = None,
 ) -> HealthCheckResult:
     """Perform health check for Claude API plugin.
@@ -57,6 +59,24 @@ async def claude_api_health_check(
                 version="1.0.0",
             )
 
+        # Get CLI status if detection service is available
+        cli_details = {}
+        cli_status_msg = None
+        if detection_service:
+            cli_version = detection_service.get_version()
+            cli_path = detection_service.get_cli_path()
+            
+            cli_details = {
+                "cli_available": cli_path is not None,
+                "cli_version": cli_version,
+                "cli_path": cli_path,
+            }
+            
+            if cli_path:
+                cli_status_msg = f"CLI v{cli_version}" if cli_version else "CLI available"
+            else:
+                cli_status_msg = "CLI not found"
+        
         # Get authentication status from credentials manager
         auth_details: dict[str, Any] = {}
         if credentials_manager:
@@ -102,6 +122,10 @@ async def claude_api_health_check(
             output_parts.append("Authentication not configured")
             status = "warn"
 
+        # Add CLI status
+        if cli_status_msg:
+            output_parts.append(cli_status_msg)
+        
         # Add model info
         if config.models:
             output_parts.append(f"{len(config.models)} models available")
@@ -114,6 +138,7 @@ async def claude_api_health_check(
             "enabled": config.enabled,
             "model_count": len(config.models) if config.models else 0,
             "support_openai_format": config.support_openai_format,
+            **cli_details,  # Include CLI detection details
             **auth_details,  # Include all auth details from helper
         }
 

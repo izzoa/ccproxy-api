@@ -15,7 +15,6 @@ from fastapi import FastAPI
 
 from ccproxy.auth.credentials_adapter import CredentialsAuthManager
 from ccproxy.auth.exceptions import CredentialsNotFoundError
-from ccproxy.auth.openai.credentials import OpenAITokenManager
 from ccproxy.observability import get_metrics
 
 # Note: get_claude_cli_info is imported locally to avoid circular imports
@@ -24,7 +23,6 @@ from ccproxy.scheduler.errors import SchedulerError
 from ccproxy.scheduler.manager import start_scheduler, stop_scheduler
 from ccproxy.services.claude_detection_service import ClaudeDetectionService
 from ccproxy.services.claude_sdk_service import ClaudeSDKService
-from ccproxy.services.codex_detection_service import CodexDetectionService
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.proxy_service import ProxyService
 
@@ -94,65 +92,6 @@ async def validate_claude_authentication_startup(
             "claude_token_validation_error",
             error=str(e),
             message="Failed to validate Claude authentication token. The server will continue without Claude authentication.",
-            exc_info=True,
-        )
-
-
-async def validate_codex_authentication_startup(
-    app: FastAPI, settings: Settings
-) -> None:
-    """Validate Codex (OpenAI) authentication credentials at startup.
-
-    Args:
-        app: FastAPI application instance
-        settings: Application settings
-    """
-    # Skip codex authentication validation if codex is disabled
-    if not settings.codex.enabled:
-        logger.debug("codex_token_validation_skipped", reason="codex_disabled")
-        return
-
-    try:
-        token_manager = OpenAITokenManager()
-        credentials = await token_manager.load_credentials()
-
-        if not credentials:
-            logger.warning(
-                "codex_token_not_found",
-                message="No Codex authentication credentials found. Please run 'ccproxy auth login-openai' to authenticate.",
-                location=token_manager.get_storage_location(),
-            )
-            return
-
-        if not credentials.active:
-            logger.warning(
-                "codex_token_inactive",
-                message="Codex authentication credentials are inactive. Please run 'ccproxy auth login-openai' to refresh.",
-                location=token_manager.get_storage_location(),
-            )
-            return
-
-        if credentials.is_expired():
-            logger.warning(
-                "codex_token_expired",
-                message="Codex authentication token has expired. Please run 'ccproxy auth login-openai' to refresh.",
-                location=token_manager.get_storage_location(),
-                expires_at=credentials.expires_at.isoformat(),
-            )
-        else:
-            hours_until_expiry = int(credentials.expires_in_seconds() / 3600)
-            logger.debug(
-                "codex_token_valid",
-                expires_in_hours=hours_until_expiry,
-                account_id=credentials.account_id,
-                location=token_manager.get_storage_location(),
-            )
-
-    except Exception as e:
-        logger.error(
-            "codex_token_validation_error",
-            error=str(e),
-            message="Failed to validate Codex authentication token. The server will continue without Codex authentication.",
             exc_info=True,
         )
 
@@ -233,41 +172,6 @@ async def check_claude_cli_startup(app: FastAPI, settings: Settings) -> None:
             "claude_cli_check_failed",
             error=str(e),
             message="Failed to check Claude CLI status during startup",
-        )
-
-
-async def check_codex_cli_startup(app: FastAPI, settings: Settings) -> None:
-    """Check Codex CLI availability at startup.
-
-    Args:
-        app: FastAPI application instance
-        settings: Application settings
-    """
-    try:
-        from ccproxy.api.routes.health import get_codex_cli_info
-
-        codex_info = await get_codex_cli_info()
-
-        if codex_info.status == "available":
-            logger.info(
-                "codex_cli_available",
-                status=codex_info.status,
-                version=codex_info.version,
-                binary_path=codex_info.binary_path,
-            )
-        else:
-            logger.warning(
-                "codex_cli_unavailable",
-                status=codex_info.status,
-                error=codex_info.error,
-                binary_path=codex_info.binary_path,
-                message=f"Codex CLI status: {codex_info.status}",
-            )
-    except Exception as e:
-        logger.error(
-            "codex_cli_check_failed",
-            error=str(e),
-            message="Failed to check Codex CLI status during startup",
         )
 
 
@@ -404,55 +308,6 @@ async def initialize_claude_detection_startup(app: FastAPI, settings: Settings) 
         detection_service = ClaudeDetectionService(settings)
         app.state.claude_detection_data = detection_service._get_fallback_data()
         app.state.claude_detection_service = detection_service
-
-
-async def initialize_codex_detection_startup(app: FastAPI, settings: Settings) -> None:
-    """Initialize Codex detection service.
-
-    Args:
-        app: FastAPI application instance
-        settings: Application settings
-    """
-    # Skip codex detection if codex is disabled
-    if not settings.codex.enabled:
-        logger.debug("codex_detection_skipped", reason="codex_disabled")
-        detection_service = CodexDetectionService(settings)
-        app.state.codex_detection_data = detection_service._get_fallback_data()
-        app.state.codex_detection_service = detection_service
-        return
-
-    # Check if Codex CLI is available before attempting header detection
-    from ccproxy.api.routes.health import get_codex_cli_info
-
-    codex_info = await get_codex_cli_info()
-    if codex_info.status != "available":
-        logger.debug(
-            "codex_detection_skipped",
-            reason="codex_cli_not_available",
-            status=codex_info.status,
-        )
-        detection_service = CodexDetectionService(settings)
-        app.state.codex_detection_data = detection_service._get_fallback_data()
-        app.state.codex_detection_service = detection_service
-        return
-
-    try:
-        logger.debug("initializing_codex_detection")
-        detection_service = CodexDetectionService(settings)
-        codex_data = await detection_service.initialize_detection()
-        app.state.codex_detection_data = codex_data
-        app.state.codex_detection_service = detection_service
-        logger.debug(
-            "codex_detection_completed",
-            version=codex_data.codex_version,
-            cached_at=codex_data.cached_at.isoformat(),
-        )
-    except Exception as e:
-        logger.error("codex_detection_startup_failed", error=str(e))
-        # Continue startup with fallback - detection service will provide fallback data
-        detection_service = CodexDetectionService(settings)
-        app.state.codex_detection_data = detection_service._get_fallback_data()
-        app.state.codex_detection_service = detection_service
 
 
 async def initialize_claude_sdk_startup(app: FastAPI, settings: Settings) -> None:

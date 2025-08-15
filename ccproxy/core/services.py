@@ -7,6 +7,7 @@ from httpx import AsyncClient
 
 from ccproxy.config.settings import Settings
 
+
 if TYPE_CHECKING:
     from ccproxy.scheduler.core import Scheduler
 
@@ -47,7 +48,8 @@ class CoreServices:
         if plugin_name == "claude_sdk":
             return self.settings.claude.model_dump()
         elif plugin_name == "codex":
-            return self.settings.codex.model_dump()
+            # Codex config now comes from plugins dictionary
+            return self.settings.plugins.get("codex", {})
         elif plugin_name == "openai":
             return {}
         else:

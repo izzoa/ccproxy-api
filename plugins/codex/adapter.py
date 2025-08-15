@@ -10,13 +10,14 @@ import structlog
 from fastapi import Request
 from starlette.responses import Response, StreamingResponse
 
-from ccproxy.adapters.openai.codex_adapter import CodexAdapter as CoreCodexAdapter
+from ccproxy.adapters.openai.adapter import OpenAIAdapter
 from ccproxy.services.adapters.base import BaseAdapter
 
 
 if TYPE_CHECKING:
     from ccproxy.auth.openai import OpenAITokenManager
-    from ccproxy.services.codex_detection_service import CodexDetectionService
+
+    from .detection_service import CodexDetectionService
 
 
 logger = structlog.get_logger(__name__)
@@ -36,7 +37,7 @@ class CodexAdapter(BaseAdapter):
         # The passed client might be closed or shared
         self._http_client = httpx.AsyncClient(timeout=60.0)
         self._logger = logger
-        self._core_adapter = CoreCodexAdapter()
+        self._core_adapter = OpenAIAdapter()
         self._auth_manager: OpenAITokenManager | None = None  # Will be set by plugin
         self._detection_service: CodexDetectionService | None = (
             None  # Will be set by plugin
@@ -75,7 +76,7 @@ class CodexAdapter(BaseAdapter):
             if "messages" in request_data:
                 # Convert OpenAI format to Codex format
                 transformed_request = (
-                    self._core_adapter.convert_chat_to_response_request(request_data)
+                    self._core_adapter.adapt_chat_to_response_request(request_data)
                 )
 
                 # Inject Codex instructions if not present
@@ -195,7 +196,7 @@ class CodexAdapter(BaseAdapter):
             # Transform response back if needed
             if response.status_code == 200 and "messages" in request_data:
                 response_json = json.loads(response_body)
-                adapted_json = self._core_adapter.convert_response_to_chat(
+                adapted_json = self._core_adapter.adapt_response_to_chat(
                     response_json
                 )
                 response_body = json.dumps(adapted_json).encode()
@@ -252,7 +253,7 @@ class CodexAdapter(BaseAdapter):
         # Transform request if it's in OpenAI format
         if "messages" in request_data:
             # Convert OpenAI format to Codex format
-            transformed_request = self._core_adapter.convert_chat_to_response_request(
+            transformed_request = self._core_adapter.adapt_chat_to_response_request(
                 request_data
             )
 
@@ -386,7 +387,7 @@ class CodexAdapter(BaseAdapter):
                         response_stream = response.aiter_bytes()
                         async for (
                             chunk_dict
-                        ) in self._core_adapter.convert_response_stream_to_chat(
+                        ) in self._core_adapter.adapt_response_stream_to_chat(
                             response_stream
                         ):
                             yield f"data: {json.dumps(chunk_dict)}\n\n".encode()
@@ -496,9 +497,7 @@ class CodexAdapter(BaseAdapter):
         if self._detection_service:
             try:
                 # Import at runtime for isinstance check
-                from ccproxy.services.codex_detection_service import (
-                    CodexDetectionService,
-                )
+                from .detection_service import CodexDetectionService
 
                 # For actual CodexDetectionService, do isinstance check
                 if isinstance(self._detection_service, CodexDetectionService):
@@ -562,17 +561,17 @@ class CodexAdapter(BaseAdapter):
         self, chat_request: dict[str, Any]
     ) -> dict[str, Any]:
         """Convert Chat Completions request to Response API format."""
-        return self._core_adapter.convert_chat_to_response_request(chat_request)
+        return self._core_adapter.adapt_chat_to_response_request(chat_request)
 
     def convert_response_to_chat(self, response_data: dict[str, Any]) -> dict[str, Any]:
         """Convert Response API response to Chat Completions format."""
-        return self._core_adapter.convert_response_to_chat(response_data)
+        return self._core_adapter.adapt_response_to_chat(response_data)
 
     async def convert_response_stream_to_chat(
         self, response_stream: AsyncIterator[bytes]
     ) -> AsyncIterator[dict[str, Any]]:
         """Convert Response API SSE stream to Chat Completions format."""
-        async for chunk in self._core_adapter.convert_response_stream_to_chat(
+        async for chunk in self._core_adapter.adapt_response_stream_to_chat(
             response_stream
         ):
             yield chunk
@@ -581,11 +580,12 @@ class CodexAdapter(BaseAdapter):
         self, error_data: dict[str, Any]
     ) -> dict[str, Any]:
         """Convert Response API error to Chat Completions error format."""
-        return self._core_adapter.convert_error_to_chat_format(error_data)
+        # The OpenAI adapter doesn't have convert_error_to_chat_format, use adapt_error instead
+        return self._core_adapter.adapt_error(error_data)
 
     # Provide access to the core adapter for direct use when needed
-    def get_core_adapter(self) -> CoreCodexAdapter:
-        """Get the underlying core Codex adapter.
+    def get_core_adapter(self) -> OpenAIAdapter:
+        """Get the underlying core OpenAI adapter.
 
         This allows direct access to the core adapter when the plugin
         system needs to use it directly with ProviderContext.
