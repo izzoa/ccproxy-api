@@ -52,26 +52,19 @@ class Plugin(ProviderPlugin):
         """Initialize plugin with shared services."""
         self._services = services
 
-        # Load plugin-specific configuration
-        # Check for legacy codex config first
-        if hasattr(services.settings, "codex"):
-            # Use legacy config structure
-            legacy_config = services.settings.codex
+        # Load plugin-specific configuration from plugins dictionary
+        plugin_config = getattr(services.settings, "plugins", {}).get(self.name, {})
+        
+        # If no config provided, use defaults from CodexSettings
+        if not plugin_config:
             plugin_config = {
                 "name": self.name,
-                "base_url": legacy_config.base_url,
+                "base_url": "https://chatgpt.com/backend-api/codex",
                 "supports_streaming": True,
                 "requires_auth": True,
                 "auth_type": "oauth",
                 "models": ["gpt-4", "gpt-4-turbo"],
-                "oauth": legacy_config.oauth.model_dump(),
-                "callback_port": legacy_config.callback_port,
-                "redirect_uri": legacy_config.redirect_uri,
-                "verbose_logging": legacy_config.verbose_logging,
             }
-        else:
-            # Use plugin config from settings
-            plugin_config = getattr(services.settings, "plugins", {}).get(self.name, {})
 
         self._config = CodexSettings.model_validate(plugin_config)
 

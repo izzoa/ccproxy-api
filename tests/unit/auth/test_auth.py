@@ -835,7 +835,7 @@ class TestOpenAIAuthentication:
     def test_openai_oauth_client_initialization(self) -> None:
         """Test OpenAI OAuth client initialization."""
         from ccproxy.auth.openai import OpenAIOAuthClient
-        from ccproxy.config.codex import CodexSettings
+        from plugins.codex.config import CodexSettings
 
         settings = CodexSettings()
         client = OpenAIOAuthClient(settings)
@@ -852,7 +852,7 @@ class TestOpenAIAuthentication:
         from datetime import UTC, datetime
 
         from ccproxy.auth.openai import OpenAICredentials, OpenAIOAuthClient
-        from ccproxy.config.codex import CodexSettings
+        from plugins.codex.config import CodexSettings
 
         # Mock successful authentication
         expected_credentials = OpenAICredentials(
@@ -884,7 +884,7 @@ class TestOpenAIAuthentication:
     ) -> None:
         """Test OpenAI OAuth flow error handling."""
         from ccproxy.auth.openai import OpenAIOAuthClient
-        from ccproxy.config.codex import CodexSettings
+        from plugins.codex.config import CodexSettings
 
         # Mock authentication failure
         mock_authenticate.side_effect = ValueError("OAuth error")

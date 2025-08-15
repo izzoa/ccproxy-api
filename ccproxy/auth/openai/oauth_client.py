@@ -15,7 +15,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 
-from ccproxy.config.codex import CodexSettings
+from plugins.codex.config import CodexSettings
 
 from .credentials import OpenAICredentials, OpenAITokenManager
 

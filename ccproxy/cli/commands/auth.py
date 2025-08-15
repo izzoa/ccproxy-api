@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated
 
 if TYPE_CHECKING:
     from ccproxy.auth.openai import OpenAIOAuthClient, OpenAITokenManager
-    from ccproxy.config.codex import CodexSettings
+    from plugins.codex.config import CodexSettings
 
 import typer
 from rich import box
@@ -607,15 +607,27 @@ def login_openai_command(
     """
     import asyncio
 
-    from ccproxy.config.codex import CodexSettings
+    from plugins.codex.config import CodexSettings
 
     toolkit = get_rich_toolkit()
     toolkit.print("[bold cyan]OpenAI OAuth Login[/bold cyan]", centered=True)
     toolkit.print_line()
 
     try:
-        # Get Codex settings
-        settings = CodexSettings()
+        # Get Codex settings from plugin config
+        app_settings = get_settings()
+        codex_config = app_settings.plugins.get("codex", {})
+        if not codex_config:
+            # Use defaults if no config
+            codex_config = {
+                "name": "codex",
+                "base_url": "https://chatgpt.com/backend-api/codex",
+                "supports_streaming": True,
+                "requires_auth": True,
+                "auth_type": "oauth",
+                "models": ["gpt-4", "gpt-4-turbo"],
+            }
+        settings = CodexSettings.model_validate(codex_config)
 
         # Check if already logged in
         token_manager = get_openai_token_manager()

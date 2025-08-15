@@ -163,9 +163,10 @@ plugins/
 │   ├── plugin.py                      # ClaudeSDKPlugin class
 │   ├── adapter.py                     # ClaudeSDKAdapter (from BaseAdapter)
 │   ├── config.py                      # ClaudeSettings (extends ProviderConfig)
-│   ├── detection_service.py           # Claude CLI detection service
+│   ├── detection_service.py           # Claude CLI detection service (moved from ccproxy/services)
 │   ├── routes.py                      # Claude-specific routes
 │   ├── health.py                      # Claude health check implementation
+│   ├── tasks.py                       # Scheduled task for CLI detection refresh
 │   ├── transformers/
 │   │   ├── __init__.py
 │   │   ├── request.py                 # Claude request transformers
@@ -175,7 +176,26 @@ plugins/
 │       └── cli_detector.py            # CLI detection utilities
 ```
 
-### Codex Plugin
+### Claude API Plugin
+```
+plugins/
+├── claude_api/
+│   ├── __init__.py                    # Plugin entry point with __all__ exports
+│   ├── plugin.py                      # ClaudeAPIPlugin class
+│   ├── adapter.py                     # ClaudeAPIAdapter (from BaseAdapter)
+│   ├── config.py                      # ClaudeAPISettings (extends ProviderConfig)
+│   ├── routes.py                      # Claude API routes (Anthropic-compatible)
+│   ├── health.py                      # Claude API health check implementation
+│   ├── transformers/
+│   │   ├── __init__.py
+│   │   ├── request.py                 # Request transformers
+│   │   └── response.py                # Response transformers
+│   └── utils/
+│       ├── __init__.py
+│       └── api_utils.py               # API-specific utilities
+```
+
+### Codex Plugin (COMPLETED)
 ```
 plugins/
 ├── codex/
@@ -183,9 +203,9 @@ plugins/
 │   ├── plugin.py                      # CodexPlugin class
 │   ├── adapter.py                     # CodexAdapter (from BaseAdapter)
 │   ├── config.py                      # CodexSettings (extends ProviderConfig)
-│   ├── detection_service.py           # Codex CLI detection service
-│   ├── routes.py                      # Codex-specific routes (/codex/*)
+│   ├── routes.py                      # Codex-specific routes (embedded in plugin.py)
 │   ├── health.py                      # Codex health check implementation
+│   ├── tasks.py                       # Scheduled task for CLI detection refresh
 │   ├── transformers/
 │   │   ├── __init__.py
 │   │   ├── request.py                 # Codex request transformers
@@ -194,6 +214,7 @@ plugins/
 │       ├── __init__.py
 │       └── cli_detector.py            # CLI detection utilities
 ```
+*Note: Detection service remains in ccproxy/services for now but initialized by plugin
 
 ### OpenAI Plugin (Existing)
 ```
@@ -286,6 +307,7 @@ from .adapter import ClaudeSDKAdapter
 from .config import ClaudeSettings
 from .health import claude_health_check
 from .routes import router as claude_router
+from .tasks import ClaudeDetectionRefreshTask
 
 class Plugin(ProviderPlugin):  # Standardized class name for discovery
     """Claude SDK provider plugin."""
@@ -297,6 +319,7 @@ class Plugin(ProviderPlugin):  # Standardized class name for discovery
         self._adapter = None
         self._config = None
         self._services = None
+        self._detection_service = None
 
     @property
     def name(self) -> str:
@@ -315,8 +338,8 @@ class Plugin(ProviderPlugin):  # Standardized class name for discovery
         self._services = services
 
         # Load plugin-specific configuration
-        plugin_config = services.settings.plugins.get(self.name, {})
-        self._config = ClaudeSettings(**plugin_config)
+        plugin_config = services.get_plugin_config(self.name)
+        self._config = ClaudeSettings.model_validate(plugin_config)
 
         # Initialize adapter with shared HTTP client
         self._adapter = ClaudeSDKAdapter(
@@ -324,9 +347,32 @@ class Plugin(ProviderPlugin):  # Standardized class name for discovery
             logger=services.logger.bind(plugin=self.name)
         )
 
-        # Perform any startup tasks (e.g., CLI detection)
-        if self._config.auto_detect_cli:
-            await self._detect_cli_headers()
+        # Initialize detection service
+        from ccproxy.services.claude_detection_service import ClaudeDetectionService
+        
+        self._detection_service = ClaudeDetectionService(services.settings)
+        await self._detection_service.initialize_detection()
+        
+        # Log CLI status
+        version = self._detection_service.get_version()
+        cli_path = self._detection_service.get_cli_path()
+        
+        if cli_path:
+            services.logger.info(
+                "claude_cli_available",
+                status="available",
+                version=version,
+                cli_path=cli_path,
+            )
+        else:
+            services.logger.warning(
+                "claude_cli_not_found",
+                status="not_found",
+                msg="Claude CLI not found in PATH or common locations",
+            )
+        
+        # Set detection service on adapter
+        self._adapter.set_detection_service(self._detection_service)
 
     async def shutdown(self) -> None:
         """Cleanup on shutdown."""
@@ -334,17 +380,19 @@ class Plugin(ProviderPlugin):  # Standardized class name for discovery
             await self._adapter.cleanup()
 
     def create_adapter(self) -> BaseAdapter:
+        if not self._adapter:
+            raise RuntimeError("Plugin not initialized")
         return self._adapter
 
     def create_config(self) -> ClaudeSettings:
+        if not self._config:
+            raise RuntimeError("Plugin not initialized")
         return self._config
 
     async def validate(self) -> bool:
-        """Check if Claude CLI is available."""
-        if not self._config:
-            return False
-        cli_path, _ = self._config.find_claude_cli()
-        return cli_path is not None
+        """Check if Claude SDK is available."""
+        # Validation happens during initialization
+        return True
 
     def get_routes(self) -> APIRouter | None:
         """Return Claude-specific routes."""
@@ -352,7 +400,27 @@ class Plugin(ProviderPlugin):  # Standardized class name for discovery
 
     async def health_check(self) -> HealthCheckResult:
         """Perform health check for Claude SDK."""
-        return await claude_health_check(self._config)
+        return await claude_health_check(
+            self._config, 
+            self._detection_service
+        )
+    
+    def get_scheduled_tasks(self) -> list[dict] | None:
+        """Get scheduled task definitions."""
+        if not self._detection_service:
+            return None
+        
+        return [
+            {
+                "task_name": f"claude_detection_refresh_{self.name}",
+                "task_type": "claude_detection_refresh",
+                "task_class": ClaudeDetectionRefreshTask,
+                "interval_seconds": 3600,  # Refresh every hour
+                "enabled": True,
+                "detection_service": self._detection_service,
+                "skip_initial_run": True,
+            }
+        ]
 ```
 
 ### Concurrent Health Check Aggregation
@@ -490,6 +558,76 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logger.error(f"Error shutting down plugin {plugin.name}: {e}")
 ```
 
+## Task Implementation Example
+
+### Claude Detection Refresh Task
+
+```python
+# plugins/claude_sdk/tasks.py
+from typing import TYPE_CHECKING
+import structlog
+from ccproxy.scheduler.tasks import BaseScheduledTask
+
+if TYPE_CHECKING:
+    from ccproxy.services.claude_detection_service import ClaudeDetectionService
+
+logger = structlog.get_logger(__name__)
+
+class ClaudeDetectionRefreshTask(BaseScheduledTask):
+    """Task to periodically refresh Claude CLI detection headers."""
+
+    def __init__(
+        self,
+        name: str,
+        interval_seconds: float,
+        detection_service: "ClaudeDetectionService",
+        enabled: bool = True,
+        skip_initial_run: bool = True,
+        **kwargs,
+    ):
+        super().__init__(
+            name=name,
+            interval_seconds=interval_seconds,
+            enabled=enabled,
+            **kwargs,
+        )
+        self.detection_service = detection_service
+        self.skip_initial_run = skip_initial_run
+        self._first_run = True
+
+    async def run(self) -> bool:
+        """Execute the detection refresh."""
+        if self._first_run and self.skip_initial_run:
+            self._first_run = False
+            logger.debug(f"Skipping initial run for {self.name}")
+            return True
+        
+        self._first_run = False
+        
+        try:
+            logger.info(f"Starting Claude detection refresh for {self.name}")
+            detection_data = await self.detection_service.initialize_detection()
+            
+            logger.info(
+                "claude_detection_refresh_completed",
+                task_name=self.name,
+                version=detection_data.claude_version if detection_data else "unknown",
+            )
+            return True
+            
+        except Exception as e:
+            logger.error(f"Claude detection refresh failed: {e}")
+            return False
+
+    async def setup(self) -> None:
+        """Setup before task execution starts."""
+        logger.info(f"Setting up {self.name}")
+
+    async def cleanup(self) -> None:
+        """Cleanup after task execution stops."""
+        logger.info(f"Cleaning up {self.name}")
+```
+
 ## File Movement Plan
 
 ### Phase 1: Claude SDK Plugin
@@ -498,27 +636,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 - `ccproxy/services/claude_detection_service.py` → `plugins/claude_sdk/detection_service.py`
 - `ccproxy/config/claude.py` → `plugins/claude_sdk/config.py` (extend ProviderConfig)
 - `ccproxy/core/http_transformers.py` (Claude parts) → `plugins/claude_sdk/transformers/`
-- `ccproxy/services/claude_service.py` (if exists) → `plugins/claude_sdk/adapter.py`
+- `plugins/claude_sdk_plugin.py` → Remove after migration
 
 **Create NEW:**
-- `plugins/claude_sdk/__init__.py` with `__all__ = ['Plugin']`
-- `plugins/claude_sdk/plugin.py` - Main plugin class
+- `plugins/claude_sdk/__init__.py` with `__all__ = ['Plugin']` (EXISTS)
+- `plugins/claude_sdk/plugin.py` - Main plugin class with scheduled tasks
 - `plugins/claude_sdk/health.py` - Health check implementation
 - `plugins/claude_sdk/routes.py` - Claude-specific routes
+- `plugins/claude_sdk/tasks.py` - Scheduled task implementations
 
-### Phase 2: Codex Plugin
+### Phase 2: Codex Plugin (COMPLETED)
+
+This phase has been completed in commits 9bf5947 to 9da3736. The implementation includes:
+- Plugin structure with scheduled tasks
+- Authentication manager integration
+- Detection service initialization
+- Health checks with auth and detection status
+- Routes embedded in plugin.py
+
+### Phase 3: Claude API Plugin
 
 **Move FROM:**
-- `ccproxy/services/codex_detection_service.py` → `plugins/codex/detection_service.py`
-- `ccproxy/config/codex.py` → `plugins/codex/config.py` (extend ProviderConfig)
-- `ccproxy/core/codex_transformers.py` → `plugins/codex/transformers/`
-- `ccproxy/api/routes/codex.py` (if exists) → `plugins/codex/routes.py`
+- `plugins/claude_api_plugin.py` → Refactor into plugin structure
+- Relevant parts from `ccproxy/adapters/` → `plugins/claude_api/adapter.py`
+- OpenAI format conversion logic → `plugins/claude_api/transformers/`
 
 **Create NEW:**
-- `plugins/codex/__init__.py` with `__all__ = ['Plugin']`
-- `plugins/codex/plugin.py` - Main plugin class
-- `plugins/codex/health.py` - Health check implementation
-- `plugins/codex/adapter.py` - Codex adapter implementation
+- `plugins/claude_api/__init__.py` with `__all__ = ['Plugin']`
+- `plugins/claude_api/plugin.py` - Main plugin class
+- `plugins/claude_api/adapter.py` - Claude API adapter
+- `plugins/claude_api/config.py` - ClaudeAPISettings (extend ProviderConfig)
+- `plugins/claude_api/health.py` - Health check implementation
+- `plugins/claude_api/routes.py` - Anthropic-compatible API routes
+- `plugins/claude_api/transformers/` - Request/response transformers
 
 ### Phase 3: OpenAI Plugin Clarification
 
@@ -603,42 +753,45 @@ async def test_plugin_lifecycle(plugin, mock_services):
 
 ## Migration Strategy
 
-### Phase 1: Infrastructure (Week 1)
-- Create enhanced plugin protocol with lifecycle hooks
-- Implement plugin loader with entry point support
-- Create CoreServices container
-- Update app.py for dynamic plugin registration
-- Create plugin contract test harness
+### Phase 1: Infrastructure (COMPLETED)
+- ✅ Enhanced plugin protocol with lifecycle hooks
+- ✅ Plugin loader with entry point support
+- ✅ CoreServices container with scheduler support
+- ✅ App.py dynamic plugin registration
+- ✅ Plugin contract test harness
+- ✅ Scheduled tasks support
 
-### Phase 2: Claude SDK Plugin (Week 2)
-- Create plugin directory structure
-- Move files and update imports
-- Extend ClaudeSettings from ProviderConfig
-- Implement Plugin class with lifecycle methods
-- Add typed health checks
-- Test thoroughly
+### Phase 2: Codex Plugin (COMPLETED)
+- ✅ Plugin directory structure
+- ✅ Files moved and imports updated
+- ✅ CodexSettings extends ProviderConfig
+- ✅ Plugin class with lifecycle methods
+- ✅ Typed health checks
+- ✅ Scheduled task for detection refresh
+- ✅ Authentication manager integration
 
-### Phase 3: Codex Plugin (Week 3)
-- Create plugin directory structure
-- Move files and update imports
-- Extend CodexSettings from ProviderConfig
-- Implement Plugin class with lifecycle methods
-- Add typed health checks
-- Test thoroughly
+### Phase 3: Claude SDK Plugin (In Progress)
+- ⬜ Create full plugin directory structure
+- ⬜ Move detection service to plugin
+- ⬜ Extend ClaudeSettings from ProviderConfig
+- ⬜ Implement Plugin class with lifecycle methods
+- ⬜ Add scheduled task for CLI detection
+- ⬜ Add typed health checks
+- ⬜ Test thoroughly
 
-### Phase 4: OpenAI Clarification (Week 4)
-- Rename conflicting classes
-- Consolidate OpenAI code into plugin directory
-- Implement lifecycle methods
-- Add health checks
-- Test thoroughly
+### Phase 4: Claude API Plugin (Next)
+- ⬜ Create plugin directory structure
+- ⬜ Refactor claude_api_plugin.py
+- ⬜ Implement adapter with OpenAI format support
+- ⬜ Add health checks
+- ⬜ Test Anthropic API compatibility
 
-### Phase 5: Cleanup and Testing (Week 5)
-- Remove old files and imports
-- Update all remaining imports
-- Run comprehensive test suite
-- Update documentation
-- Performance benchmarking
+### Phase 5: Cleanup and Testing (Final)
+- ⬜ Remove legacy plugin files
+- ⬜ Update all remaining imports
+- ⬜ Run comprehensive test suite
+- ⬜ Update documentation
+- ⬜ Performance benchmarking
 
 ## Quality Assurance
 
@@ -670,6 +823,110 @@ async def test_plugin_lifecycle(plugin, mock_services):
 4. **Timeout Protection**: Bounded timeouts for health checks and initialization
 5. **Explicit API Surface**: `__all__` exports in `__init__.py` files
 
+## Key Implementation Patterns for Remaining Plugins
+
+Based on the successful Codex plugin implementation, follow these patterns:
+
+### 1. Initialization Pattern
+```python
+async def initialize(self, services: CoreServices) -> None:
+    # Get configuration
+    plugin_config = services.get_plugin_config(self.name)
+    self._config = YourSettings.model_validate(plugin_config)
+    
+    # Initialize adapter
+    self._adapter = YourAdapter(
+        http_client=services.http_client,
+        logger=services.logger.bind(plugin=self.name)
+    )
+    
+    # Set up detection service (if applicable)
+    if hasattr(self, "_detection_service"):
+        detection_service = YourDetectionService(services.settings)
+        await detection_service.initialize_detection()
+        self._adapter.set_detection_service(detection_service)
+    
+    # Set up auth manager (if needed)
+    if self._config.requires_auth:
+        auth_manager = YourAuthManager()
+        self._adapter.set_auth_manager(auth_manager)
+```
+
+### 2. Health Check Pattern
+```python
+async def health_check(self) -> HealthCheckResult:
+    # Check multiple aspects
+    checks = []
+    
+    # Detection service status
+    if self._detection_service:
+        version = self._detection_service.get_version()
+        checks.append(f"CLI: {version or 'not found'}")
+    
+    # Auth status
+    if self._auth_manager:
+        has_creds = await self._auth_manager.has_credentials()
+        checks.append(f"Auth: {'configured' if has_creds else 'not configured'}")
+    
+    status = "pass" if all_good else "warn" if partial else "fail"
+    
+    return HealthCheckResult(
+        status=status,
+        componentId=f"plugin-{self.name}",
+        output="; ".join(checks),
+        version=self.version,
+        details={"checks": checks}
+    )
+```
+
+### 3. Scheduled Task Pattern
+```python
+def get_scheduled_tasks(self) -> list[dict] | None:
+    if not self._detection_service:
+        return None
+    
+    return [{
+        "task_name": f"{self.name}_refresh",
+        "task_type": f"{self.name}_detection_refresh",
+        "task_class": YourRefreshTask,
+        "interval_seconds": 3600,
+        "enabled": True,
+        "detection_service": self._detection_service,
+        "skip_initial_run": True,  # Important!
+    }]
+```
+
+### 4. Route Implementation Pattern
+```python
+def get_routes(self) -> APIRouter | None:
+    router = APIRouter(tags=[f"plugin-{self.name}"])
+    
+    # Define path transformer
+    def path_transformer(path: str) -> str:
+        # Transform paths as needed
+        return path
+    
+    @router.post("/your-endpoint")
+    async def your_endpoint(
+        request: Request,
+        proxy_service: ProxyServiceDep,
+        auth: ConditionalAuthDep,
+    ):
+        # Use ProviderContext for unified handling
+        context = ProviderContext(
+            provider_name=self.name,
+            auth_manager=self._auth_manager,
+            target_base_url=self._config.base_url,
+            route_prefix=self._router_prefix,
+            path_transformer=path_transformer,
+            # ... other context fields
+        )
+        
+        return await proxy_service.dispatch_request(request, context)
+    
+    return router
+```
+
 ## Success Criteria
 
 1. All provider-specific code moved to plugin directories
@@ -681,6 +938,7 @@ async def test_plugin_lifecycle(plugin, mock_services):
 7. Plugin discovery works for both development and installed packages
 8. Shared resources (HTTP client, logger) properly managed
 9. Clean shutdown with resource cleanup
+10. Scheduled tasks properly registered and running
 
 ## Documentation Requirements
 
@@ -712,5 +970,7 @@ Update `docs/migration.md` with:
 ---
 
 *Document Created: 2024-12-14*
-*Status: READY FOR IMPLEMENTATION*
+*Last Updated: 2025-01-15*
+*Status: IN PROGRESS - Phase 2 (Codex) Complete, Phase 3 (Claude SDK) Next*
 *Incorporates feedback from: Gemini 2.5 Pro, O3*
+*Implementation Pattern: Based on successful Codex plugin (commits 9bf5947-9da3736)*
