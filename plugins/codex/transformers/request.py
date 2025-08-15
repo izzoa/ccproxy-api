@@ -1,9 +1,13 @@
 """Codex request transformer - headers and auth only."""
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING
 
 import structlog
+
+
+if TYPE_CHECKING:
+    from plugins.codex.detection_service import CodexDetectionService
 
 
 logger = structlog.get_logger(__name__)
@@ -19,7 +23,7 @@ class CodexRequestTransformer:
     - Minimal instructions field injection
     """
 
-    def __init__(self, detection_service: Any | None = None):
+    def __init__(self, detection_service: "CodexDetectionService | None" = None):
         """Initialize the request transformer.
 
         Args:

@@ -11,7 +11,6 @@ from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.http import BaseProxyClient
 from ccproxy.observability import PrometheusMetrics, get_metrics
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
-from ccproxy.services.claude_sdk_service import ClaudeSDKService
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.proxy_service import ProxyService
 
@@ -45,73 +44,8 @@ def get_cached_settings(request: Request) -> Settings:
     return settings
 
 
-def get_cached_claude_service(request: Request) -> ClaudeSDKService:
-    """Get cached ClaudeSDKService from app state.
-
-    This avoids recreating the ClaudeSDKService on every request by using the
-    service instance created during application startup.
-
-    Args:
-        request: FastAPI request object
-
-    Returns:
-        ClaudeSDKService instance from app state
-
-    Raises:
-        RuntimeError: If ClaudeSDKService is not available in app state
-    """
-    claude_service = getattr(request.app.state, "claude_service", None)
-    if claude_service is None:
-        # Fallback to get_claude_service() for safety, but this should not happen
-        # in normal operation after lifespan startup
-        logger.warning(
-            "ClaudeSDKService not found in app state, falling back to get_claude_service()"
-        )
-        # Get dependencies manually for fallback
-        settings = get_cached_settings(request)
-
-        claude_service = get_claude_service(settings)
-    return claude_service
-
-
 # Type aliases for dependency injection
 SettingsDep = Annotated[Settings, Depends(get_cached_settings)]
-
-
-def get_claude_service(
-    settings: SettingsDep,
-) -> ClaudeSDKService:
-    """Get Claude SDK service instance.
-
-    Args:
-        settings: Application settings dependency
-
-    Returns:
-        Claude SDK service instance
-    """
-    logger.debug("Creating Claude SDK service instance")
-    # Get global metrics instance
-    metrics = get_metrics()
-
-    # Check if pooling should be enabled from configuration
-    use_pool = settings.claude.sdk_session_pool.enabled
-    session_manager = None
-
-    if use_pool:
-        logger.info(
-            "claude_sdk_pool_enabled",
-            message="Using Claude SDK client pooling for improved performance",
-            pool_size=settings.claude.sdk_session_pool.max_sessions,
-            max_pool_size=settings.claude.sdk_session_pool.max_sessions,
-        )
-        # Note: Session manager should be created in the lifespan function, not here
-        # This dependency function should not create stateful resources
-
-    return ClaudeSDKService(
-        metrics=metrics,
-        settings=settings,
-        session_manager=session_manager,
-    )
 
 
 def get_credentials_manager(
@@ -216,7 +150,6 @@ async def get_duckdb_storage(request: Request) -> SimpleDuckDBStorage | None:
 
 
 # Type aliases for service dependencies
-ClaudeServiceDep = Annotated[ClaudeSDKService, Depends(get_cached_claude_service)]
 ProxyServiceDep = Annotated[ProxyService, Depends(get_proxy_service)]
 ObservabilityMetricsDep = Annotated[
     PrometheusMetrics, Depends(get_observability_metrics)

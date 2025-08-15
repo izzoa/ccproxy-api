@@ -1,6 +1,6 @@
 """Scheduled tasks for Codex plugin."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -24,8 +24,8 @@ class CodexDetectionRefreshTask(BaseScheduledTask):
         detection_service: "CodexDetectionService",
         enabled: bool = True,
         skip_initial_run: bool = True,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """Initialize the Codex detection refresh task.
 
         Args:

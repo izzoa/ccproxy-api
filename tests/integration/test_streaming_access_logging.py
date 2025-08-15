@@ -78,17 +78,13 @@ class TestStreamingAccessLogging:  # type: ignore[unreachable]
         app = create_app(settings=test_settings)
 
         # Override dependencies
-        from ccproxy.api.dependencies import (
-            get_cached_claude_service,
-            get_cached_settings,
-        )
+        from ccproxy.api.dependencies import get_cached_settings
         from ccproxy.config.settings import get_settings as original_get_settings
 
         app.dependency_overrides[original_get_settings] = lambda: test_settings
         app.dependency_overrides[get_cached_settings] = lambda request: test_settings
-        app.dependency_overrides[get_cached_claude_service] = (
-            lambda request: mock_internal_claude_sdk_service_streaming
-        )
+        # Note: Plugin-based architecture no longer uses get_cached_claude_service
+        # ProxyService is initialized at startup and stored in app.state
 
         client = TestClient(app)
 
@@ -202,17 +198,13 @@ class TestStreamingAccessLogging:  # type: ignore[unreachable]
         app = create_app(settings=test_settings)
 
         # Override dependencies
-        from ccproxy.api.dependencies import (
-            get_cached_claude_service,
-            get_cached_settings,
-        )
+        from ccproxy.api.dependencies import get_cached_settings
         from ccproxy.config.settings import get_settings as original_get_settings
 
         app.dependency_overrides[original_get_settings] = lambda: test_settings
         app.dependency_overrides[get_cached_settings] = lambda request: test_settings
-        app.dependency_overrides[get_cached_claude_service] = (
-            lambda request: mock_internal_claude_sdk_service_streaming
-        )
+        # Note: Plugin-based architecture no longer uses get_cached_claude_service
+        # ProxyService is initialized at startup and stored in app.state
 
         client = TestClient(app)
 
@@ -290,17 +282,13 @@ class TestStreamingAccessLogging:  # type: ignore[unreachable]
         app = create_app(settings=test_settings)
 
         # Override dependencies
-        from ccproxy.api.dependencies import (
-            get_cached_claude_service,
-            get_cached_settings,
-        )
+        from ccproxy.api.dependencies import get_cached_settings
         from ccproxy.config.settings import get_settings as original_get_settings
 
         app.dependency_overrides[original_get_settings] = lambda: test_settings
         app.dependency_overrides[get_cached_settings] = lambda request: test_settings
-        app.dependency_overrides[get_cached_claude_service] = (
-            lambda request: mock_internal_claude_sdk_service_streaming
-        )
+        # Note: Plugin-based architecture no longer uses get_cached_claude_service
+        # ProxyService is initialized at startup and stored in app.state
 
         client = TestClient(app)
 
@@ -370,17 +358,13 @@ class TestStreamingAccessLogging:  # type: ignore[unreachable]
         app = create_app(settings=test_settings)
 
         # Override dependencies
-        from ccproxy.api.dependencies import (
-            get_cached_claude_service,
-            get_cached_settings,
-        )
+        from ccproxy.api.dependencies import get_cached_settings
         from ccproxy.config.settings import get_settings as original_get_settings
 
         app.dependency_overrides[original_get_settings] = lambda: test_settings
         app.dependency_overrides[get_cached_settings] = lambda request: test_settings
-        app.dependency_overrides[get_cached_claude_service] = (
-            lambda request: mock_internal_claude_sdk_service_streaming
-        )
+        # Note: Plugin-based architecture no longer uses get_cached_claude_service
+        # ProxyService is initialized at startup and stored in app.state
 
         client = TestClient(app)
 
@@ -453,17 +437,13 @@ class TestStreamingAccessLogging:  # type: ignore[unreachable]
         app = create_app(settings=test_settings)
 
         # Override dependencies
-        from ccproxy.api.dependencies import (
-            get_cached_claude_service,
-            get_cached_settings,
-        )
+        from ccproxy.api.dependencies import get_cached_settings
         from ccproxy.config.settings import get_settings as original_get_settings
 
         app.dependency_overrides[original_get_settings] = lambda: test_settings
         app.dependency_overrides[get_cached_settings] = lambda request: test_settings
-        app.dependency_overrides[get_cached_claude_service] = (
-            lambda request: mock_internal_claude_sdk_service_streaming
-        )
+        # Note: Plugin-based architecture no longer uses get_cached_claude_service
+        # ProxyService is initialized at startup and stored in app.state
 
         client = TestClient(app)
 

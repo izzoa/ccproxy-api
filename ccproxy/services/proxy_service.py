@@ -891,19 +891,24 @@ class ProxyService:
             # Step 6: Check if this should be handled by a plugin adapter
             # Parse URL to check for special protocols (like claude-sdk://)
             from urllib.parse import urlparse
+
             parsed_url = urlparse(target_url)
 
             # If using a special protocol, route to plugin adapter
             if parsed_url.scheme not in ("http", "https"):
                 plugin_adapter = self.get_plugin_adapter(provider_context.provider_name)
                 if plugin_adapter:
-                    logger.debug(f"Routing to plugin adapter: {provider_context.provider_name}")
+                    logger.debug(
+                        f"Routing to plugin adapter: {provider_context.provider_name}"
+                    )
 
                     # Extract just the path for the adapter
                     endpoint_path = parsed_url.path or request.url.path
 
                     if is_streaming and provider_context.supports_streaming:
-                        response: Response | StreamingResponse = await plugin_adapter.handle_streaming(
+                        response: (
+                            Response | StreamingResponse
+                        ) = await plugin_adapter.handle_streaming(
                             request, endpoint_path
                         )
                     else:
@@ -913,7 +918,7 @@ class ProxyService:
                 else:
                     raise HTTPException(
                         status_code=503,
-                        detail=f"No adapter available for provider: {provider_context.provider_name}"
+                        detail=f"No adapter available for provider: {provider_context.provider_name}",
                     )
             else:
                 # Step 6: Execute regular HTTP request

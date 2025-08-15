@@ -189,18 +189,10 @@ class FastAPIAppFactory:
         overrides[get_cached_settings] = mock_get_cached_settings_for_factory
 
         # Override Claude service if mock provided
-        # NOTE: Since we're setting claude_service in app.state, the cached dependency
-        # should work automatically. We'll only add override as backup for non-cached calls.
-        if claude_service_mock is not None:
-            from ccproxy.api.dependencies import get_claude_service
-
-            def mock_get_claude_service(
-                settings: Any = None, auth_manager: Any = None
-            ) -> MockService:
-                return claude_service_mock
-
-            # Only override the non-cached version as backup
-            overrides[get_claude_service] = mock_get_claude_service
+        # NOTE: Plugin-based architecture no longer uses get_claude_service dependency.
+        # ProxyService is initialized at startup and stored in app.state.
+        # Mock should be handled at the ProxyService level if needed.
+        # (App state modifications should be done after app creation, not in dependency overrides)
 
         # Override auth manager if auth is enabled
         if auth_enabled and settings.security.auth_token:

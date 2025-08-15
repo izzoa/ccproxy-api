@@ -87,10 +87,8 @@ class Plugin(ProviderPlugin):
             )
 
         # Initialize adapter with shared HTTP client
-        self._adapter = ClaudeSDKAdapter(
-            http_client=services.http_client,
-            logger=services.logger.bind(plugin=self.name),
-        )
+        # Create adapter - simplified version doesn't need http_client or logger
+        self._adapter = ClaudeSDKAdapter()
 
         # Set detection service on adapter
         self._adapter.set_detection_service(self._detection_service)
@@ -106,7 +104,7 @@ class Plugin(ProviderPlugin):
     async def shutdown(self) -> None:
         """Cleanup on shutdown."""
         if self._adapter:
-            await self._adapter.cleanup()
+            await self._adapter.close()  # Use close() instead of cleanup()
         logger.info("claude_sdk_plugin_shutdown", status="shutdown")
 
     def create_adapter(self) -> BaseAdapter:

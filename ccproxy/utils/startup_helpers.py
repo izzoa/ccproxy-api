@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 import structlog
 from fastapi import FastAPI
 
-from ccproxy.auth.credentials_adapter import CredentialsAuthManager
 from ccproxy.auth.exceptions import CredentialsNotFoundError
 from ccproxy.observability import get_metrics
 
@@ -21,7 +20,6 @@ from ccproxy.observability import get_metrics
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
 from ccproxy.scheduler.errors import SchedulerError
 from ccproxy.scheduler.manager import start_scheduler, stop_scheduler
-from ccproxy.services.claude_sdk_service import ClaudeSDKService
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.proxy_service import ProxyService
 
@@ -281,55 +279,6 @@ async def setup_session_manager_shutdown(app: FastAPI) -> None:
             logger.debug("claude_sdk_session_manager_shutdown")
         except Exception as e:
             logger.error("claude_sdk_session_manager_shutdown_failed", error=str(e))
-
-
-async def initialize_claude_sdk_startup(app: FastAPI, settings: Settings) -> None:
-    """Initialize ClaudeSDKService and store in app state.
-
-    Args:
-        app: FastAPI application instance
-        settings: Application settings
-    """
-    try:
-        # Create auth manager with settings
-        auth_manager = CredentialsAuthManager()
-
-        # Get global metrics instance
-        metrics = get_metrics()
-
-        # Check if session pool should be enabled from settings configuration
-        use_session_pool = settings.claude.sdk_session_pool.enabled
-
-        # Initialize session manager if session pool is enabled
-        session_manager = None
-        if use_session_pool:
-            from plugins.claude_sdk.manager import SessionManager
-
-            # Create SessionManager with dependency injection
-            session_manager = SessionManager(
-                settings=settings, metrics_factory=lambda: metrics
-            )
-
-            # Start the session manager (initializes session pool if enabled)
-            await session_manager.start()
-
-        # Create ClaudeSDKService instance
-        claude_service = ClaudeSDKService(
-            auth_manager=auth_manager,
-            metrics=metrics,
-            settings=settings,
-            session_manager=session_manager,
-        )
-
-        # Store in app state for reuse in dependencies
-        app.state.claude_service = claude_service
-        app.state.session_manager = (
-            session_manager  # Store session_manager for shutdown
-        )
-        logger.debug("claude_sdk_service_initialized")
-    except Exception as e:
-        logger.error("claude_sdk_service_initialization_failed", error=str(e))
-        # Continue startup even if ClaudeSDKService fails (graceful degradation)
 
 
 async def initialize_proxy_service_startup(app: FastAPI, settings: Settings) -> None:

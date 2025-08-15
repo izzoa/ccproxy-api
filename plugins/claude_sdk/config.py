@@ -1,7 +1,6 @@
 """Configuration for Claude SDK plugin."""
 
 from enum import Enum
-from typing import Any
 
 from claude_code_sdk import ClaudeCodeOptions
 from pydantic import BaseModel, Field, model_validator

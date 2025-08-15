@@ -67,6 +67,7 @@ class TestCodexRequestTransformer:
         body_bytes = json.dumps(body_data).encode()
 
         result = transformer.transform_body(body_bytes)
+        assert result is not None
         result_data = json.loads(result.decode())
 
         assert result_data["instructions"] == "existing instructions"
@@ -78,6 +79,7 @@ class TestCodexRequestTransformer:
         body_bytes = json.dumps(body_data).encode()
 
         result = transformer.transform_body(body_bytes)
+        assert result is not None
         result_data = json.loads(result.decode())
 
         assert "instructions" in result_data
@@ -121,6 +123,7 @@ class TestCodexRequestTransformer:
         transformer = CodexRequestTransformer()
         instructions = transformer._get_instructions()
 
+        assert instructions is not None
         assert "Codex CLI" in instructions
         assert "OpenAI" in instructions
 
@@ -208,6 +211,7 @@ async def test_transformers_integration():
 
     # Verify request transformation
     assert transformed_headers["session_id"] == "test-session"
+    assert transformed_body is not None
     assert "instructions" in json.loads(transformed_body.decode())
 
     # Test response transformation

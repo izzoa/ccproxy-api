@@ -238,7 +238,7 @@ def app_with_claude_sdk_environment(
     app = create_app(settings=test_settings)
 
     # Override the settings dependency for testing
-    from ccproxy.api.dependencies import get_cached_claude_service, get_cached_settings
+    from ccproxy.api.dependencies import get_cached_settings
     from ccproxy.config.settings import get_settings as original_get_settings
 
     app.dependency_overrides[original_get_settings] = lambda: test_settings
@@ -250,13 +250,10 @@ def app_with_claude_sdk_environment(
         mock_get_cached_settings_for_claude_sdk
     )
 
-    # Override the actual dependency being used (get_cached_claude_service)
-    def mock_get_cached_claude_service_for_sdk(request: Request) -> AsyncMock:
-        return mock_internal_claude_sdk_service
-
-    app.dependency_overrides[get_cached_claude_service] = (
-        mock_get_cached_claude_service_for_sdk
-    )
+    # NOTE: Plugin-based architecture no longer uses get_cached_claude_service
+    # ProxyService is initialized at startup and stored in app.state
+    # Store mock in app state for compatibility if needed by tests
+    app.state.claude_service_mock = mock_internal_claude_sdk_service
 
     return app
 

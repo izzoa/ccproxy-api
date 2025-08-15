@@ -171,5 +171,9 @@ class ClaudeAPIRequestTransformer:
 
         # Convert back to dict
         if transformed_bytes:
-            return json.loads(transformed_bytes.decode("utf-8"))
+            result = json.loads(transformed_bytes.decode("utf-8"))
+            if isinstance(result, dict):
+                return result
+            # If not a dict, return original
+            return request_json
         return request_json

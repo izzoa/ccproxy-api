@@ -11,7 +11,11 @@ from ccproxy.api.dependencies import ProxyServiceDep
 from ccproxy.auth.conditional import ConditionalAuthDep
 from ccproxy.core.services import CoreServices
 from ccproxy.models.provider import ProviderConfig
-from ccproxy.plugins.protocol import HealthCheckResult, ProviderPlugin
+from ccproxy.plugins.protocol import (
+    HealthCheckResult,
+    ProviderPlugin,
+    ScheduledTaskDefinition,
+)
 from ccproxy.services.adapters.base import BaseAdapter
 
 from .adapter import CodexAdapter
@@ -326,7 +330,7 @@ class Plugin(ProviderPlugin):
             self._config, self._detection_service, self._auth_manager
         )
 
-    def get_scheduled_tasks(self) -> list[dict[str, Any]] | None:
+    def get_scheduled_tasks(self) -> list[ScheduledTaskDefinition] | None:
         """Get scheduled task definitions for Codex plugin.
 
         Returns:
@@ -335,14 +339,14 @@ class Plugin(ProviderPlugin):
         if not self._detection_service:
             return None
 
-        return [
-            {
-                "task_name": f"codex_detection_refresh_{self.name}",
-                "task_type": "codex_detection_refresh",
-                "task_class": CodexDetectionRefreshTask,
-                "interval_seconds": 3600,  # Refresh every hour
-                "enabled": True,
-                "detection_service": self._detection_service,
-                "skip_initial_run": True,  # Skip first run since we already detect during initialization
-            }
-        ]
+        # Create the task definition with detection_service
+        task_def: ScheduledTaskDefinition = {
+            "task_name": f"codex_detection_refresh_{self.name}",
+            "task_type": "codex_detection_refresh",
+            "task_class": CodexDetectionRefreshTask,
+            "interval_seconds": 3600.0,  # Refresh every hour
+            "enabled": True,
+            "detection_service": self._detection_service,  # Pass the detection service
+        }
+
+        return [task_def]

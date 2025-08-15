@@ -1,6 +1,6 @@
 """Routes for Claude SDK plugin."""
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 from starlette.responses import Response
 
 from ccproxy.api.dependencies import ProxyServiceDep

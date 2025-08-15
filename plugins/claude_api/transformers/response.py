@@ -17,7 +17,7 @@ class ClaudeAPIResponseTransformer:
     - Server header forwarding
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the response transformer."""
         pass
 

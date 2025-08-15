@@ -48,9 +48,24 @@ source = "vcs"
 version-file = "ccproxy/_version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["ccproxy"]
+packages = ["ccproxy", "plugins"]
 include = [
-    "ccproxy/data/*.json"
+    "ccproxy/data/*.json",
+    "plugins/**/*.py",
+    "plugins/**/*.json",
+    "plugins/**/*.toml"
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "ccproxy/**/*.py",
+    "ccproxy/**/*.json",
+    "plugins/**/*.py",
+    "plugins/**/*.json",
+    "plugins/**/*.toml",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml"
 ]
 
 [project.scripts]

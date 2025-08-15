@@ -37,7 +37,6 @@ from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
     check_version_updates_startup,
     flush_streaming_batches_shutdown,
-    initialize_claude_sdk_startup,
     initialize_log_storage_shutdown,
     initialize_log_storage_startup,
     initialize_permission_service_startup,
@@ -45,7 +44,6 @@ from ccproxy.utils.startup_helpers import (
     setup_permission_service_shutdown,
     setup_scheduler_shutdown,
     setup_scheduler_startup,
-    setup_session_manager_shutdown,
     validate_claude_authentication_startup,
 )
 
@@ -85,11 +83,6 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "name": "Claude CLI",
         "startup": check_claude_cli_startup,
         "shutdown": None,  # Detection only, no cleanup needed
-    },
-    {
-        "name": "Claude SDK",
-        "startup": initialize_claude_sdk_startup,
-        "shutdown": setup_session_manager_shutdown,
     },
     {
         "name": "Scheduler",

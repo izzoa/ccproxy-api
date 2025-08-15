@@ -9,8 +9,10 @@ import structlog
 from fastapi import HTTPException, Request
 from starlette.responses import Response, StreamingResponse
 
+from ccproxy.auth.base import AuthManager
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.provider_context import ProviderContext
+from ccproxy.services.proxy_service import ProxyService
 
 from .format_adapter import CodexFormatAdapter
 from .transformers import CodexRequestTransformer, CodexResponseTransformer
@@ -38,19 +40,19 @@ class CodexAdapter(BaseAdapter):
             logger: Structured logger instance
         """
         self.logger = logger or structlog.get_logger(__name__)
-        self.proxy_service: Any = None
+        self.proxy_service: ProxyService | None = None
         self.format_adapter: CodexFormatAdapter | None = None
         self.request_transformer: CodexRequestTransformer | None = None
         self.response_transformer: CodexResponseTransformer | None = None
         self._initialized = False
-        self._auth_manager = None
+        self._auth_manager: AuthManager | None = None
         self._detection_service = None
 
-    def set_proxy_service(self, proxy_service: Any) -> None:
+    def set_proxy_service(self, proxy_service: ProxyService) -> None:
         """Set the proxy service for request handling."""
         self.proxy_service = proxy_service
 
-    def set_auth_manager(self, auth_manager: Any) -> None:
+    def set_auth_manager(self, auth_manager: AuthManager) -> None:
         """Set the authentication manager."""
         self._auth_manager = auth_manager
 
@@ -105,7 +107,7 @@ class CodexAdapter(BaseAdapter):
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
-    ) -> Response:
+    ) -> Response | StreamingResponse:
         """Handle a request to the Codex API.
 
         Args:
@@ -133,6 +135,11 @@ class CodexAdapter(BaseAdapter):
                 pass
 
         # Create provider context
+        if not self._auth_manager:
+            raise HTTPException(
+                status_code=503, detail="Authentication manager not available"
+            )
+
         context = ProviderContext(
             provider_name="codex",
             auth_manager=self._auth_manager,
@@ -140,8 +147,10 @@ class CodexAdapter(BaseAdapter):
             route_prefix="/codex",
             request_adapter=self.format_adapter if needs_conversion else None,
             response_adapter=self.format_adapter if needs_conversion else None,
-            request_transformer=self.request_transformer,
-            response_transformer=self.response_transformer,
+            # Note: ProviderContext type annotation only allows Callable, but proxy service
+            # actually supports object-based transformers with transform_headers method
+            request_transformer=self.request_transformer,  # type: ignore[arg-type]
+            response_transformer=self.response_transformer,  # type: ignore[arg-type]
             supports_streaming=True,
             requires_session=True,
             session_id=session_id,
@@ -156,6 +165,8 @@ class CodexAdapter(BaseAdapter):
         )
 
         # Delegate to proxy service
+        if not self.proxy_service:
+            raise HTTPException(status_code=503, detail="Proxy service not available")
         return await self.proxy_service.dispatch_request(request, context)
 
     async def handle_streaming(

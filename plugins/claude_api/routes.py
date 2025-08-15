@@ -56,7 +56,7 @@ def create_anthropic_context(
         # Use proper transformers that handle both headers and body
         transformer = ClaudeAPIRequestTransformer(detection_service)
 
-        def request_transformer(headers):
+        def request_transformer(headers: dict[str, str]) -> dict[str, str]:
             return transformer.transform_headers(headers)
 
     # Always use response transformer to preserve server headers
@@ -155,21 +155,36 @@ async def create_openai_chat_completion(
                 body_bytes = json.dumps(anthropic_body).encode("utf-8")
                 transformed_bytes = self.claude_transformer.transform_body(body_bytes)
                 if transformed_bytes:
-                    return json.loads(transformed_bytes.decode("utf-8"))
+                    result = json.loads(transformed_bytes.decode("utf-8"))
+                    if isinstance(result, dict):
+                        return result
+                    # If not a dict, return original
+                    if isinstance(anthropic_body, dict):
+                        return anthropic_body
+                    # If neither result nor anthropic_body are dicts, return empty
+                    return {}
 
-            return anthropic_body
+            # Ensure anthropic_body is a dict
+            if isinstance(anthropic_body, dict):
+                return anthropic_body
+            # If not a dict, return empty dict
+            return {}
 
         async def adapt_response(self, body: dict[str, Any]) -> dict[str, Any]:
             """Pass through to OpenAI adapter for response conversion."""
-            return await self.openai_adapter.adapt_response(body)
+            result = await self.openai_adapter.adapt_response(body)
+            if isinstance(result, dict):
+                return result
+            # If not a dict, return the original body
+            return body
 
-        async def adapt_stream(self, stream):
+        async def adapt_stream(self, stream: Any) -> Any:
             """Pass through to OpenAI adapter for stream conversion."""
             async for chunk in self.openai_adapter.adapt_stream(stream):
                 yield chunk
 
     # Create chained adapter if we have detection service
-    request_adapter = openai_adapter
+    request_adapter: Any = openai_adapter
     if detection_service:
         claude_transformer = ClaudeAPIRequestTransformer(detection_service)
         request_adapter = ChainedAdapter(openai_adapter, claude_transformer)

@@ -22,7 +22,6 @@ from ccproxy.scheduler.errors import SchedulerError
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
     flush_streaming_batches_shutdown,
-    initialize_claude_sdk_startup,
     initialize_log_storage_shutdown,
     initialize_log_storage_startup,
     initialize_permission_service_startup,
@@ -645,122 +644,6 @@ class TestClaudeDetectionStartup:
         return Mock(spec=Settings)
 
     # Removed deprecated Claude detection startup tests - function no longer exists
-
-
-class TestClaudeSDKStartup:
-    """Test Claude SDK service initialization."""
-
-    @pytest.fixture
-    def mock_app(self) -> FastAPI:
-        """Create a mock FastAPI app."""
-        app = FastAPI()
-        app.state = Mock()
-        return app
-
-    @pytest.fixture
-    def mock_settings(self) -> Mock:
-        """Create mock settings."""
-        settings = Mock(spec=Settings)
-        # Configure nested attributes properly
-        settings.claude = Mock()
-        settings.claude.sdk_session_pool = Mock()
-        settings.claude.sdk_session_pool.enabled = True
-        return settings
-
-    async def test_claude_sdk_startup_success_with_session_pool(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test successful Claude SDK initialization with session pool."""
-        with (
-            patch(
-                "ccproxy.utils.startup_helpers.CredentialsAuthManager"
-            ) as MockAuthManager,
-            patch("ccproxy.utils.startup_helpers.get_metrics") as mock_get_metrics,
-            patch("ccproxy.utils.startup_helpers.ClaudeSDKService") as MockSDKService,
-            patch("plugins.claude_sdk.manager.SessionManager") as MockSessionManager,
-        ):
-            # Setup mocks
-            mock_auth_manager = Mock()
-            MockAuthManager.return_value = mock_auth_manager
-
-            mock_metrics = Mock()
-            mock_get_metrics.return_value = mock_metrics
-
-            mock_session_manager = AsyncMock()
-            MockSessionManager.return_value = mock_session_manager
-
-            mock_claude_service = Mock()
-            MockSDKService.return_value = mock_claude_service
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await initialize_claude_sdk_startup(mock_app, mock_settings)
-
-                # Verify session manager was created and started
-                MockSessionManager.assert_called_once()
-                mock_session_manager.start.assert_called_once()
-
-                # Verify Claude service was created with correct parameters
-                MockSDKService.assert_called_once()
-                call_kwargs = MockSDKService.call_args[1]
-                assert call_kwargs["auth_manager"] == mock_auth_manager
-                assert call_kwargs["metrics"] == mock_metrics
-                assert call_kwargs["settings"] == mock_settings
-                assert call_kwargs["session_manager"] == mock_session_manager
-
-                # Verify services were stored in app state
-                assert mock_app.state.claude_service == mock_claude_service
-                assert mock_app.state.session_manager == mock_session_manager
-
-    async def test_claude_sdk_startup_without_session_pool(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test Claude SDK initialization without session pool."""
-        mock_settings.claude.sdk_session_pool.enabled = False
-
-        with (
-            patch(
-                "ccproxy.utils.startup_helpers.CredentialsAuthManager"
-            ) as MockAuthManager,
-            patch("ccproxy.utils.startup_helpers.get_metrics") as mock_get_metrics,
-            patch("ccproxy.utils.startup_helpers.ClaudeSDKService") as MockSDKService,
-        ):
-            # Setup mocks
-            mock_auth_manager = Mock()
-            MockAuthManager.return_value = mock_auth_manager
-
-            mock_metrics = Mock()
-            mock_get_metrics.return_value = mock_metrics
-
-            mock_claude_service = Mock()
-            MockSDKService.return_value = mock_claude_service
-
-            await initialize_claude_sdk_startup(mock_app, mock_settings)
-
-            # Verify Claude service was created without session manager
-            MockSDKService.assert_called_once()
-            call_kwargs = MockSDKService.call_args[1]
-            assert call_kwargs["session_manager"] is None
-
-    async def test_claude_sdk_startup_error(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test error handling during Claude SDK initialization."""
-        with patch(
-            "ccproxy.utils.startup_helpers.CredentialsAuthManager"
-        ) as MockAuthManager:
-            MockAuthManager.side_effect = Exception("Auth manager failed")
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await initialize_claude_sdk_startup(mock_app, mock_settings)
-
-                # Verify error was logged
-                mock_logger.error.assert_called_once()
-                call_args = mock_logger.error.call_args[1]
-                assert (
-                    "claude_sdk_service_initialization_failed"
-                    in mock_logger.error.call_args[0]
-                )
-                assert call_args["error"] == "Auth manager failed"
 
 
 class TestPermissionServiceLifecycle:
