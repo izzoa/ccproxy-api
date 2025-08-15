@@ -339,14 +339,14 @@ class Plugin(ProviderPlugin):
         if not self._detection_service:
             return None
 
-        # Create the task definition with detection_service
+        # Create the task definition
         task_def: ScheduledTaskDefinition = {
             "task_name": f"codex_detection_refresh_{self.name}",
             "task_type": "codex_detection_refresh",
             "task_class": CodexDetectionRefreshTask,
             "interval_seconds": 3600.0,  # Refresh every hour
             "enabled": True,
-            "detection_service": self._detection_service,  # Pass the detection service
+            # detection_service will be passed through task initialization
         }
 
         return [task_def]
