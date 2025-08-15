@@ -34,12 +34,10 @@ from ccproxy.core.logging import setup_logging
 from ccproxy.utils.models_provider import get_models_list
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
-    check_codex_cli_startup,
     check_version_updates_startup,
     flush_streaming_batches_shutdown,
     initialize_claude_detection_startup,
     initialize_claude_sdk_startup,
-    initialize_codex_detection_startup,
     initialize_log_storage_shutdown,
     initialize_log_storage_startup,
     initialize_permission_service_startup,
@@ -95,18 +93,8 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "shutdown": None,  # Detection only, no cleanup needed
     },
     {
-        "name": "Codex CLI",
-        "startup": check_codex_cli_startup,
-        "shutdown": None,  # Detection only, no cleanup needed
-    },
-    {
         "name": "Claude Detection",
         "startup": initialize_claude_detection_startup,
-        "shutdown": None,  # No cleanup needed
-    },
-    {
-        "name": "Codex Detection",
-        "startup": initialize_codex_detection_startup,
         "shutdown": None,  # No cleanup needed
     },
     {

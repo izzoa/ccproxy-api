@@ -115,9 +115,29 @@ class Plugin(ProviderPlugin):
         logger.info("codex_plugin_initializing_detection")
         try:
             await detection_service.initialize_detection()
+            
+            # Log Codex CLI status
+            version = detection_service.get_version()
+            binary_path = detection_service.get_binary_path()
+            
+            if binary_path:
+                logger.info(
+                    "codex_cli_available",
+                    status="available",
+                    version=version,
+                    binary_path=binary_path,
+                )
+            else:
+                logger.warning(
+                    "codex_cli_not_found",
+                    status="not_found",
+                    msg="Codex CLI not found in PATH or common locations",
+                )
+            
             logger.info(
                 "codex_plugin_detection_initialized",
                 has_cached_data=detection_service.get_cached_data() is not None,
+                version=version,
             )
         except Exception as e:
             logger.warning(
@@ -151,6 +171,7 @@ class Plugin(ProviderPlugin):
         # Always return True - actual validation happens during initialization
         # The plugin system calls validate() before initialize(), so we can't
         # check config here since it hasn't been loaded yet
+        # The detection service will handle CLI availability checking
         return True
 
     def get_routes(self) -> APIRouter | None:
