@@ -107,6 +107,22 @@ class Plugin(ProviderPlugin):
         from ccproxy.services.codex_detection_service import CodexDetectionService
 
         detection_service = CodexDetectionService(services.settings)
+        
+        # Initialize detection service to capture Codex CLI headers
+        services.logger.info("codex_plugin_initializing_detection")
+        try:
+            await detection_service.initialize_detection()
+            services.logger.info(
+                "codex_plugin_detection_initialized",
+                has_cached_data=detection_service.get_cached_data() is not None,
+            )
+        except Exception as e:
+            services.logger.warning(
+                "codex_plugin_detection_initialization_failed",
+                error=str(e),
+                msg="Using fallback Codex instructions",
+            )
+        
         self._adapter.set_detection_service(detection_service)
         services.logger.info(
             "codex_plugin_detection_service_set", adapter_has_detection=True
