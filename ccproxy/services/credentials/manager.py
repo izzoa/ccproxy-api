@@ -596,3 +596,107 @@ class CredentialsManager(AuthManager):
             Provider name string.
         """
         return "anthropic-claude"
+
+    async def get_auth_status(self) -> dict[str, Any]:
+        """Get detailed authentication status information.
+
+        Returns:
+            Dictionary with auth status details including token info,
+            expiration, account profile, and storage location.
+        """
+        status: dict[str, Any] = {
+            "auth_configured": False,
+            "token_available": False,
+            "storage_location": str(self.storage.storage_path) if hasattr(self.storage, 'storage_path') else "Unknown",
+        }
+
+        try:
+            # Check if credentials exist
+            has_creds = await self.has_credentials()
+            if not has_creds:
+                return status
+
+            status["auth_configured"] = True
+
+            # Load credentials to get details
+            credentials = await self.load_credentials()
+            if not credentials:
+                return status
+
+            # Get OAuth token details
+            if credentials.oauth_token:
+                token = credentials.oauth_token
+                status["token_available"] = True
+                status["token_preview"] = (
+                    f"{token.access_token[:12]}..."
+                    if len(token.access_token) > 12
+                    else "[SHORT]"
+                )
+
+                # Check token expiration
+                if token.expires_at:
+                    exp_dt = token.expires_at_datetime
+                    now = datetime.now(UTC)
+                    time_remaining = exp_dt - now
+
+                    days = time_remaining.days
+                    hours = time_remaining.seconds // 3600
+                    minutes = (time_remaining.seconds % 3600) // 60
+
+                    status.update({
+                        "token_expired": token.is_expired,
+                        "expires_at": exp_dt.isoformat(),
+                        "time_remaining": (
+                            f"{days} days, {hours} hours, {minutes} minutes"
+                            if not token.is_expired
+                            else "Expired"
+                        ),
+                    })
+
+                # Add subscription and scope info
+                if token.subscription_type:
+                    status["subscription_type"] = token.subscription_type
+                if token.scopes:
+                    status["oauth_scopes"] = ", ".join(token.scopes)
+
+            # Get account profile if available
+            if credentials.user_profile:
+                profile = credentials.user_profile
+                status.update({
+                    "account_profile": "Available",
+                    "login_method": profile.login_method or "Unknown",
+                })
+                
+                # Add organization details if available
+                if profile.organization:
+                    org = profile.organization
+                    status.update({
+                        "organization": org.name,
+                        "organization_type": org.organization_type or "Unknown",
+                        "billing_type": org.billing_type or "Unknown",
+                        "rate_limit_tier": org.rate_limit_tier or "Unknown",
+                    })
+                
+                # Add user details
+                if profile.email:
+                    # Redact email for privacy
+                    email_parts = profile.email.split('@')
+                    if len(email_parts) == 2:
+                        status["email_preview"] = f"{email_parts[0][:3]}***@{email_parts[1]}"
+                    else:
+                        status["email_preview"] = "***"
+                
+                if profile.full_name:
+                    status["full_name"] = profile.full_name
+                if profile.display_name:
+                    status["display_name"] = profile.display_name
+                
+                # Add subscription status
+                status["has_claude_pro"] = profile.has_claude_pro or False
+                status["has_claude_max"] = profile.has_claude_max or False
+
+        except Exception as e:
+            logger.debug("Failed to get auth status", error=str(e))
+            status["auth_error"] = str(e)
+
+        return status

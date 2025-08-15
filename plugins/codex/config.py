@@ -78,7 +78,7 @@ class CodexSettings(ProviderConfig):
         default="oauth", description="Authentication type (bearer, api_key, etc.)"
     )
     models: list[str] = Field(
-        default_factory=lambda: ["gpt-4", "gpt-4-turbo"],
+        default_factory=lambda: ["gpt-5"],
         description="List of supported models",
     )
 

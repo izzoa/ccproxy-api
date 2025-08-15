@@ -63,7 +63,7 @@ class Plugin(ProviderPlugin):
                 "supports_streaming": True,
                 "requires_auth": True,
                 "auth_type": "oauth",
-                "models": ["gpt-4", "gpt-4-turbo"],
+                "models": ["gpt-5"],
             }
 
         self._config = CodexSettings.model_validate(plugin_config)

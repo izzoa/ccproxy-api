@@ -625,7 +625,7 @@ def login_openai_command(
                 "supports_streaming": True,
                 "requires_auth": True,
                 "auth_type": "oauth",
-                "models": ["gpt-4", "gpt-4-turbo"],
+                "models": ["gpt-5"],
             }
         settings = CodexSettings.model_validate(codex_config)
 
