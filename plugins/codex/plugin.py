@@ -77,7 +77,30 @@ class Plugin(ProviderPlugin):
         from ccproxy.auth.openai import OpenAITokenManager
 
         auth_manager = OpenAITokenManager()
+        services.logger.info(
+            "codex_plugin_auth_setup",
+            auth_manager_type=type(auth_manager).__name__,
+            storage_location=auth_manager.get_storage_location(),
+        )
+
+        # Check if we have valid credentials
+        has_creds = await auth_manager.has_credentials()
+        if has_creds:
+            token = await auth_manager.get_valid_token()
+            services.logger.info(
+                "codex_plugin_auth_status",
+                has_credentials=True,
+                has_valid_token=bool(token),
+                token_preview=token[:20] + "..." if token else None,
+            )
+        else:
+            services.logger.warning(
+                "codex_plugin_no_auth",
+                msg="No OpenAI credentials found. Run 'ccproxy auth login --provider openai' to authenticate.",
+            )
+
         self._adapter.set_auth_manager(auth_manager)
+        services.logger.info("codex_plugin_auth_manager_set", adapter_has_auth=True)
 
     async def shutdown(self) -> None:
         """Cleanup on shutdown."""

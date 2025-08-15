@@ -92,13 +92,52 @@ class CodexAdapter(BaseAdapter):
             if self._auth_manager:
                 from ccproxy.auth.openai import OpenAITokenManager
 
+                self._logger.info(
+                    "codex_auth_manager_check",
+                    has_auth_manager=True,
+                    auth_manager_type=type(self._auth_manager).__name__,
+                    is_openai_manager=isinstance(
+                        self._auth_manager, OpenAITokenManager
+                    ),
+                )
                 try:
                     if isinstance(self._auth_manager, OpenAITokenManager):
                         auth_headers = await self._auth_manager.get_auth_headers()
                         headers.update(auth_headers)
-                        self._logger.debug("Added OpenAI authentication headers")
+                        self._logger.info(
+                            "codex_auth_headers_added",
+                            auth_header_keys=list(auth_headers.keys()),
+                            has_authorization=("authorization" in auth_headers),
+                        )
                 except Exception as e:
-                    self._logger.warning(f"Failed to get auth headers: {e}")
+                    self._logger.error(
+                        "codex_auth_headers_failed",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+            else:
+                self._logger.warning(
+                    "codex_auth_manager_missing", msg="No auth manager set"
+                )
+
+            # Log final headers (mask auth token)
+            headers_to_log = {k: v for k, v in headers.items()}
+            if "authorization" in headers_to_log:
+                auth_val = headers_to_log["authorization"]
+                if auth_val.startswith("Bearer "):
+                    headers_to_log["authorization"] = (
+                        f"Bearer {auth_val[7:27]}..."
+                        if len(auth_val) > 27
+                        else "Bearer [SHORT]"
+                    )
+
+            self._logger.info(
+                "codex_request_headers",
+                headers=headers_to_log,
+                has_auth="authorization" in headers,
+                method=method,
+                url=target_url,
+            )
 
             # Make the actual HTTP request
             # Note: self._http_client is passed in from the plugin, already instantiated
@@ -202,18 +241,52 @@ class CodexAdapter(BaseAdapter):
         if self._auth_manager:
             from ccproxy.auth.openai import OpenAITokenManager
 
+            self._logger.info(
+                "codex_streaming_auth_manager_check",
+                has_auth_manager=True,
+                auth_manager_type=type(self._auth_manager).__name__,
+                is_openai_manager=isinstance(self._auth_manager, OpenAITokenManager),
+            )
             try:
                 if isinstance(self._auth_manager, OpenAITokenManager):
                     auth_headers = await self._auth_manager.get_auth_headers()
                     headers.update(auth_headers)
-                    self._logger.debug(
-                        "Added OpenAI authentication headers for streaming"
+                    self._logger.info(
+                        "codex_streaming_auth_headers_added",
+                        auth_header_keys=list(auth_headers.keys()),
+                        has_authorization=("authorization" in auth_headers),
                     )
             except Exception as e:
-                self._logger.warning(f"Failed to get auth headers for streaming: {e}")
+                self._logger.error(
+                    "codex_streaming_auth_headers_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+        else:
+            self._logger.warning(
+                "codex_streaming_auth_manager_missing", msg="No auth manager set"
+            )
 
         async def stream_generator() -> AsyncIterator[bytes]:
             try:
+                # Log final headers for streaming (mask auth token)
+                headers_to_log = {k: v for k, v in headers.items()}
+                if "authorization" in headers_to_log:
+                    auth_val = headers_to_log["authorization"]
+                    if auth_val.startswith("Bearer "):
+                        headers_to_log["authorization"] = (
+                            f"Bearer {auth_val[7:27]}..."
+                            if len(auth_val) > 27
+                            else "Bearer [SHORT]"
+                        )
+
+                self._logger.info(
+                    "codex_streaming_request_headers",
+                    headers=headers_to_log,
+                    has_auth="authorization" in headers,
+                    url=target_url,
+                )
+
                 # Make the streaming HTTP request
                 async with self._http_client.stream(
                     "POST",
