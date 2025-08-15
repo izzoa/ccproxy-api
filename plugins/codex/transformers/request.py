@@ -1,538 +1,141 @@
-"""Codex-specific transformers for request/response transformation."""
+"""Codex request transformer - headers and auth only."""
 
 import json
 from typing import Any
 
 import structlog
-from typing_extensions import TypedDict
-
-from ccproxy.adapters.openai.adapter import OpenAIAdapter
-from ccproxy.core.transformers import RequestTransformer
-from ccproxy.core.types import ProxyRequest, TransformContext
-from ccproxy.models.detection import CodexCacheData
-
 
 logger = structlog.get_logger(__name__)
 
 
-class CodexRequestData(TypedDict):
-    """Typed structure for transformed Codex request data."""
-
-    method: str
-    url: str
-    headers: dict[str, str]
-    body: bytes | None
-
-
-class CodexRequestTransformer(RequestTransformer):
-    """Codex request transformer for header and instructions field injection."""
-
-    def __init__(self) -> None:
-        """Initialize Codex request transformer."""
-        super().__init__()
-        self._openai_adapter = OpenAIAdapter()
-
-    async def _transform_request(
-        self, request: ProxyRequest, context: TransformContext | None = None
-    ) -> ProxyRequest:
-        """Transform a proxy request for Codex API.
-
+class CodexRequestTransformer:
+    """Transform requests for Codex API.
+    
+    Handles:
+    - Header transformation and auth injection
+    - Session ID header addition
+    - Codex CLI headers injection from detection service
+    - Minimal instructions field injection
+    """
+    
+    def __init__(self, detection_service: Any | None = None):
+        """Initialize the request transformer.
+        
         Args:
-            request: The structured proxy request to transform
-            context: Optional transformation context
-
-        Returns:
-            The transformed proxy request
+            detection_service: CodexDetectionService for header/instructions injection
         """
-        # Extract required data from context
-        access_token = ""
-        session_id = ""
-        account_id = ""
-        codex_detection_data = None
-
-        if context:
-            if hasattr(context, "access_token"):
-                access_token = context.access_token
-            elif isinstance(context, dict):
-                access_token = context.get("access_token", "")
-
-            if hasattr(context, "session_id"):
-                session_id = context.session_id
-            elif isinstance(context, dict):
-                session_id = context.get("session_id", "")
-
-            if hasattr(context, "account_id"):
-                account_id = context.account_id
-            elif isinstance(context, dict):
-                account_id = context.get("account_id", "")
-
-            if hasattr(context, "codex_detection_data"):
-                codex_detection_data = context.codex_detection_data
-            elif isinstance(context, dict):
-                codex_detection_data = context.get("codex_detection_data")
-
-        # Transform URL - remove codex prefix and forward to ChatGPT backend
-        transformed_url = self._transform_codex_url(request.url)
-
-        # Convert request body to bytes for header processing
-        body_bytes = None
-        if request.body:
-            if isinstance(request.body, bytes):
-                body_bytes = request.body
-            elif isinstance(request.body, str):
-                body_bytes = request.body.encode("utf-8")
-            elif isinstance(request.body, dict):
-                body_bytes = json.dumps(request.body).encode("utf-8")
-
-        # Transform headers with Codex CLI identity
-        transformed_headers = self.create_codex_headers(
-            request.headers,
-            access_token,
-            session_id,
-            account_id,
-            body_bytes,
-            codex_detection_data,
-        )
-
-        # Transform body to inject instructions
-        transformed_body = request.body
-        if request.body:
-            if isinstance(request.body, bytes):
-                transformed_body = self.transform_codex_body(
-                    request.body, codex_detection_data
-                )
-            else:
-                # Convert to bytes if needed
-                body_bytes = (
-                    json.dumps(request.body).encode("utf-8")
-                    if isinstance(request.body, dict)
-                    else str(request.body).encode("utf-8")
-                )
-                transformed_body = self.transform_codex_body(
-                    body_bytes, codex_detection_data
-                )
-
-        # Create new transformed request
-        return ProxyRequest(
-            method=request.method,
-            url=transformed_url,
-            headers=transformed_headers,
-            params={},  # Query params handled in URL
-            body=transformed_body,
-            protocol=request.protocol,
-            timeout=request.timeout,
-            metadata=request.metadata,
-        )
-
-    async def transform_codex_request(
-        self,
-        method: str,
-        path: str,
+        self.detection_service = detection_service
+    
+    def transform_headers(
+        self, 
         headers: dict[str, str],
-        body: bytes | None,
-        access_token: str,
         session_id: str,
-        account_id: str,
-        codex_detection_data: CodexCacheData | None = None,
-        target_base_url: str = "https://chatgpt.com/backend-api/codex",
-    ) -> CodexRequestData:
-        """Transform Codex request using direct parameters from ProxyService.
-
-        Args:
-            method: HTTP method
-            path: Request path
-            headers: Request headers
-            body: Request body
-            access_token: OAuth access token
-            session_id: Codex session ID
-            account_id: ChatGPT account ID
-            codex_detection_data: Optional Codex detection data
-            target_base_url: Base URL for the Codex API
-
-        Returns:
-            Dictionary with transformed request data (method, url, headers, body)
-        """
-        # Transform URL path
-        transformed_path = self._transform_codex_path(path)
-        target_url = f"{target_base_url.rstrip('/')}{transformed_path}"
-
-        # Transform body first (inject instructions)
-        codex_body = None
-        if body:
-            # body is guaranteed to be bytes due to parameter type
-            codex_body = self.transform_codex_body(body, codex_detection_data)
-
-        # Transform headers with Codex CLI identity and authentication
-        codex_headers = self.create_codex_headers(
-            headers, access_token, session_id, account_id, body, codex_detection_data
-        )
-
-        # Update Content-Length if body was transformed and size changed
-        if codex_body and body and len(codex_body) != len(body):
-            # Remove any existing content-length headers (case-insensitive)
-            codex_headers = {
-                k: v for k, v in codex_headers.items() if k.lower() != "content-length"
-            }
-            codex_headers["Content-Length"] = str(len(codex_body))
-        elif codex_body and not body:
-            # New body was created where none existed
-            codex_headers["Content-Length"] = str(len(codex_body))
-
-        return CodexRequestData(
-            method=method,
-            url=target_url,
-            headers=codex_headers,
-            body=codex_body,
-        )
-
-    def _transform_codex_url(self, url: str) -> str:
-        """Transform URL from proxy format to ChatGPT backend format."""
-        # Extract base URL and path
-        if "://" in url:
-            protocol, rest = url.split("://", 1)
-            if "/" in rest:
-                domain, path = rest.split("/", 1)
-                path = "/" + path
-            else:
-                path = "/"
-        else:
-            path = url if url.startswith("/") else "/" + url
-
-        # Transform path and build target URL
-        transformed_path = self._transform_codex_path(path)
-        return f"https://chatgpt.com/backend-api/codex{transformed_path}"
-
-    def _transform_codex_path(self, path: str) -> str:
-        """Transform request path for Codex API."""
-        # Remove /codex prefix if present
-        if path.startswith("/codex"):
-            path = path[6:]  # Remove "/codex" prefix
-
-        # Ensure we have a valid path
-        if not path or path == "/":
-            path = "/responses"
-
-        # Handle session_id in path for /codex/{session_id}/responses pattern
-        if path.startswith("/") and "/" in path[1:]:
-            # This might be /{session_id}/responses - extract the responses part
-            parts = path.strip("/").split("/")
-            if len(parts) >= 2 and parts[-1] == "responses":
-                # Keep the /responses endpoint, session_id will be in headers
-                path = "/responses"
-
-        return path
-
-    def create_codex_headers(
-        self,
-        headers: dict[str, str],
-        access_token: str,
-        session_id: str,
-        account_id: str,
-        body: bytes | None = None,
-        codex_detection_data: CodexCacheData | None = None,
+        auth_token: str | None = None
     ) -> dict[str, str]:
-        """Create Codex headers with CLI identity and authentication."""
-        codex_headers = {}
-
-        # Strip potentially problematic headers
-        excluded_headers = {
-            "host",
-            "x-forwarded-for",
-            "x-forwarded-proto",
-            "x-forwarded-host",
-            "forwarded",
-            # Authentication headers to be replaced
-            "authorization",
-            "x-api-key",
-            # Compression headers to avoid decompression issues
-            "accept-encoding",
-            "content-encoding",
-            # CORS headers - should not be forwarded to upstream
-            "origin",
-            "access-control-request-method",
-            "access-control-request-headers",
-            "access-control-allow-origin",
-            "access-control-allow-methods",
-            "access-control-allow-headers",
-            "access-control-allow-credentials",
-            "access-control-max-age",
-            "access-control-expose-headers",
+        """Transform request headers for Codex API.
+        
+        Args:
+            headers: Original request headers
+            session_id: Codex session ID
+            auth_token: Optional Bearer token for authorization
+            
+        Returns:
+            Transformed headers with Codex-specific headers
+        """
+        transformed = headers.copy()
+        
+        # Remove hop-by-hop headers
+        hop_by_hop = {
+            "host", "connection", "keep-alive", "transfer-encoding",
+            "content-length", "upgrade", "proxy-authenticate",
+            "proxy-authorization", "te", "trailer"
         }
-
-        # Copy important headers (excluding problematic ones)
-        for key, value in headers.items():
-            lower_key = key.lower()
-            if lower_key not in excluded_headers:
-                codex_headers[key] = value
-
-        # Set authentication with OAuth token
-        if access_token:
-            codex_headers["Authorization"] = f"Bearer {access_token}"
-
-        # Set defaults for essential headers
-        if "content-type" not in [k.lower() for k in codex_headers]:
-            codex_headers["Content-Type"] = "application/json"
-        if "accept" not in [k.lower() for k in codex_headers]:
-            codex_headers["Accept"] = "application/json"
-
-        # Use detected Codex CLI headers when available
-        if codex_detection_data:
-            detected_headers = codex_detection_data.headers.to_headers_dict()
-            # Override with session-specific values
-            detected_headers["session_id"] = session_id
-            if account_id:
-                detected_headers["chatgpt-account-id"] = account_id
-            codex_headers.update(detected_headers)
-            logger.debug(
-                "using_detected_codex_headers",
-                version=codex_detection_data.codex_version,
-            )
+        transformed = {
+            k: v for k, v in transformed.items() 
+            if k.lower() not in hop_by_hop
+        }
+        
+        # Add session ID
+        transformed["session_id"] = session_id
+        
+        # Add authorization if provided
+        if auth_token:
+            # Remove any existing authorization headers and add the JWT token
+            transformed.pop("authorization", None)  # Remove lowercase variant
+            transformed.pop("Authorization", None)   # Remove capitalized variant  
+            transformed["Authorization"] = f"Bearer {auth_token}"
+            logger.info("codex_auth_token_added", token_preview=f"{auth_token[:20]}..." if len(auth_token) > 20 else auth_token)
+        
+        # Inject detected Codex CLI headers if available
+        if self.detection_service:
+            cached_data = self.detection_service.get_cached_data()
+            if cached_data and cached_data.headers:
+                detected_headers = cached_data.headers.to_headers_dict()
+                logger.debug(
+                    "injecting_detected_codex_headers",
+                    version=cached_data.codex_version,
+                    header_count=len(detected_headers)
+                )
+                # Override with detected headers (except session_id)
+                for key, value in detected_headers.items():
+                    if key.lower() != "session_id":
+                        transformed[key] = value
         else:
-            # Fallback to hardcoded Codex headers
-            codex_headers.update(
-                {
-                    "session_id": session_id,
-                    "originator": "codex_cli_rs",
-                    "openai-beta": "responses=experimental",
-                    "version": "0.21.0",
-                }
-            )
-            if account_id:
-                codex_headers["chatgpt-account-id"] = account_id
-            logger.debug("using_fallback_codex_headers")
-
-        # Don't set Accept header - let the backend handle it based on stream parameter
-        # Setting Accept: text/event-stream with stream:true in body causes 400 Bad Request
-        # The backend will determine the response format based on the stream parameter
-
-        return codex_headers
-
-    def _is_streaming_request(self, body: bytes | None) -> bool:
-        """Check if the request body indicates a streaming request (including injected default)."""
-        if not body:
-            return False
-
-        try:
-            data = json.loads(body.decode("utf-8"))
-            return data.get("stream", False) is True
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return False
-
-    def _is_user_streaming_request(self, body: bytes | None) -> bool:
-        """Check if the user explicitly requested streaming (has 'stream' field in original body)."""
-        if not body:
-            return False
-
-        try:
-            data = json.loads(body.decode("utf-8"))
-            # Only return True if user explicitly included "stream" field (regardless of its value)
-            return "stream" in data and data.get("stream") is True
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return False
-
-    def transform_codex_body(
-        self, body: bytes, codex_detection_data: CodexCacheData | None = None
-    ) -> bytes:
-        """Transform request body to inject Codex CLI instructions."""
+            # Fallback headers
+            transformed.update({
+                "originator": "codex_cli_rs",
+                "openai-beta": "responses=experimental",
+                "version": "0.21.0",
+            })
+        
+        # Set standard headers
+        if "content-type" not in [k.lower() for k in transformed]:
+            transformed["Content-Type"] = "application/json"
+        if "accept" not in [k.lower() for k in transformed]:
+            transformed["Accept"] = "application/json"
+        
+        logger.info("codex_headers_final", headers=dict(transformed), session_id=session_id)
+        return transformed
+    
+    def transform_body(self, body: bytes | None) -> bytes | None:
+        """Minimal body transformation - inject instructions if missing.
+        
+        Args:
+            body: Original request body
+            
+        Returns:
+            Body with instructions injected if needed
+        """
+        logger.debug("transform_body_called", body_length=len(body) if body else 0)
         if not body:
             return body
-
+        
         try:
             data = json.loads(body.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            # Return original if not valid JSON
-            logger.warning(
-                "codex_transform_json_decode_failed",
-                error=str(e),
-                body_preview=body[:200].decode("utf-8", errors="replace")
-                if body
-                else None,
-                body_length=len(body) if body else 0,
-            )
+            logger.warning("body_decode_failed", error=str(e))
             return body
-
-        # Check if this request already has the full Codex instructions
-        # If instructions field exists and is longer than 1000 chars, it's already set
-        if (
-            "instructions" in data
-            and data["instructions"]
-            and len(data["instructions"]) > 1000
-        ):
-            # This already has full Codex instructions, don't replace them
-            logger.debug("skipping_codex_transform_has_full_instructions")
-            return body
-
-        # Get the instructions to inject
-        detected_instructions = None
-        if codex_detection_data:
-            detected_instructions = codex_detection_data.instructions.instructions_field
-        else:
-            # Fallback instructions from req.json
-            detected_instructions = (
-                "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. "
-                "Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.\n\n"
-                "Your capabilities:\n"
-                "- Receive user prompts and other context provided by the harness, such as files in the workspace.\n"
-                "- Communicate with the user by streaming thinking & responses, and by making & updating plans.\n"
-                "- Emit function calls to run terminal commands and apply patches. Depending on how this specific run is configured, "
-                "you can request that these function calls be escalated to the user for approval before running. "
-                'More on this in the "Sandbox and approvals" section.\n\n'
-                "Within this context, Codex refers to the open-source agentic coding interface "
-                "(not the old Codex language model built by OpenAI)."
-            )
-
-        # Always inject/override the instructions field
-        data["instructions"] = detected_instructions
-
-        # Only inject stream: true if user explicitly requested streaming or didn't specify
-        # For now, we'll inject stream: true by default since Codex seems to expect it
-        if "stream" not in data:
-            data["stream"] = True
-
-        return json.dumps(data, separators=(",", ":")).encode("utf-8")
+        
+        # Only inject instructions if missing or None
+        if "instructions" not in data or data.get("instructions") is None:
+            instructions = self._get_instructions()
+            if instructions:
+                data["instructions"] = instructions
+                logger.debug("injected_codex_instructions", instructions_preview=f"{instructions[:50]}...")
+            else:
+                logger.warning("no_codex_instructions_available")
+        
+        return json.dumps(data).encode("utf-8")
     
-    def transform_chat_to_codex(
-        self, 
-        request_data: dict[str, Any],
-        codex_instructions: str | None = None,
-    ) -> dict[str, Any]:
-        """Transform OpenAI Chat Completions request to Codex format.
+    def _get_instructions(self) -> str | None:
+        """Get Codex instructions from detection service or fallback."""
+        if self.detection_service:
+            cached_data = self.detection_service.get_cached_data()
+            if cached_data and cached_data.instructions:
+                return cached_data.instructions.instructions_field
         
-        Args:
-            request_data: The OpenAI format request data
-            codex_instructions: Optional Codex CLI instructions to inject
-            
-        Returns:
-            Transformed request in Codex Response API format
-        """
-        # Use OpenAI adapter to convert format
-        transformed = self._openai_adapter.adapt_chat_to_response_request(request_data)
-        
-        # Inject Codex instructions if provided and not already present
-        if codex_instructions and not transformed.get("instructions"):
-            transformed["instructions"] = codex_instructions
-            logger.debug(
-                "codex_instructions_injected",
-                instructions_length=len(codex_instructions),
-            )
-        
-        # Ensure required Codex fields are present
-        self._ensure_codex_fields(transformed)
-        
-        return transformed
-    
-    def validate_codex_request(
-        self,
-        request_data: dict[str, Any],
-        codex_instructions: str | None = None,
-    ) -> dict[str, Any]:
-        """Transform or validate a native Codex request.
-        
-        Args:
-            request_data: The Codex format request data
-            codex_instructions: Optional Codex CLI instructions to inject
-            
-        Returns:
-            Validated/enhanced Codex request
-        """
-        # Make a copy to avoid modifying original
-        transformed = request_data.copy()
-        
-        # Inject instructions if not present
-        if codex_instructions and not transformed.get("instructions"):
-            transformed["instructions"] = codex_instructions
-            logger.debug(
-                "codex_instructions_added_to_native",
-                instructions_length=len(codex_instructions),
-            )
-        
-        # Ensure required Codex fields are present
-        self._ensure_codex_fields(transformed)
-        
-        return transformed
-    
-    def _ensure_codex_fields(self, request_data: dict[str, Any]) -> None:
-        """Ensure required Codex fields are present with defaults.
-        
-        Args:
-            request_data: The request data to validate/enhance (modified in-place)
-        """
-        # Set default model if not present
-        if "model" not in request_data:
-            request_data["model"] = "gpt-5"
-            logger.debug("codex_default_model_set", model="gpt-5")
-        
-        # Ensure stream field is present
-        if "stream" not in request_data:
-            request_data["stream"] = False
-            logger.debug("codex_default_stream_set", stream=False)
-        
-        # Log final request structure
-        logger.debug(
-            "codex_request_fields",
-            has_instructions="instructions" in request_data,
-            has_input="input" in request_data,
-            model=request_data.get("model"),
-            stream=request_data.get("stream"),
-            keys=list(request_data.keys()),
+        # Fallback instructions
+        return (
+            "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. "
+            "Codex CLI is an open source project led by OpenAI."
         )
-    
-    def prepare_headers(
-        self,
-        headers: dict[str, str],
-        session_id: str,
-        auth_headers: dict[str, str] | None = None,
-    ) -> dict[str, str]:
-        """Prepare headers for Codex API request.
-        
-        Args:
-            headers: Original request headers
-            session_id: Session ID for the request
-            auth_headers: Optional authentication headers to add
-            
-        Returns:
-            Prepared headers for Codex API
-        """
-        # Copy headers to avoid modifying original
-        prepared = dict(headers)
-        
-        # Add session ID
-        prepared["session_id"] = session_id
-        
-        # Remove headers that shouldn't be forwarded
-        prepared.pop("host", None)
-        prepared.pop("content-length", None)
-        
-        # Add authentication if provided
-        if auth_headers:
-            prepared.update(auth_headers)
-            logger.debug(
-                "codex_auth_headers_added",
-                auth_keys=list(auth_headers.keys()),
-            )
-        
-        return prepared
-    
-    def prepare_streaming_headers(
-        self,
-        headers: dict[str, str],
-        session_id: str,
-        auth_headers: dict[str, str] | None = None,
-    ) -> dict[str, str]:
-        """Prepare headers for Codex streaming request.
-        
-        Args:
-            headers: Original request headers
-            session_id: Session ID for the request
-            auth_headers: Optional authentication headers to add
-            
-        Returns:
-            Prepared headers for Codex streaming API
-        """
-        # Start with regular header preparation
-        prepared = self.prepare_headers(headers, session_id, auth_headers)
-        
-        # Add streaming-specific headers
-        prepared["accept"] = "text/event-stream"
-        
-        return prepared

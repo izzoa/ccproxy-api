@@ -26,7 +26,7 @@ class ClaudeAPIRequestTransformer:
         """
         self.detection_service = detection_service
     
-    def transform_headers(self, headers: dict[str, str]) -> dict[str, str]:
+    def transform_headers(self, headers: dict[str, str], session_id: str = "", access_token: str | None = None) -> dict[str, str]:
         """Transform request headers.
         
         Injects detected Claude CLI headers for proper authentication.
@@ -51,6 +51,7 @@ class ClaudeAPIRequestTransformer:
         }
         
         # Inject detected headers if available
+        has_detected_headers = False
         if self.detection_service:
             cached_data = self.detection_service.get_cached_data()
             if cached_data and cached_data.headers:
@@ -62,14 +63,27 @@ class ClaudeAPIRequestTransformer:
                 )
                 # Detected headers take precedence
                 transformed.update(detected_headers)
+                has_detected_headers = True
         
-        # Convert Authorization header to x-api-key if needed
-        if "Authorization" in transformed and "x-api-key" not in transformed:
-            auth_header = transformed.pop("Authorization")
-            if auth_header.startswith("Bearer "):
-                token = auth_header.replace("Bearer ", "")
-                transformed["x-api-key"] = token
+        # Only convert to x-api-key if we don't have detected headers
+        # (detected headers should include proper Authorization)
+        if not has_detected_headers:
+            # Convert Authorization header to x-api-key if needed
+            # First check if we got an access_token parameter (from new interface)
+            if access_token and "x-api-key" not in transformed:
+                transformed["x-api-key"] = access_token
+                # Remove any Authorization header since we're using x-api-key
+                transformed.pop("Authorization", None)
                 logger.debug("converted_bearer_to_api_key")
+            # Fallback to old method if no access_token parameter
+            elif "Authorization" in transformed and "x-api-key" not in transformed:
+                auth_header = transformed.pop("Authorization")
+                if auth_header.startswith("Bearer "):
+                    token = auth_header.replace("Bearer ", "")
+                    transformed["x-api-key"] = token
+                    logger.debug("converted_bearer_to_api_key")
+        else:
+            logger.debug("using_detected_headers_for_auth")
         
         return transformed
     

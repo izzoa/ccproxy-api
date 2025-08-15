@@ -19,8 +19,13 @@ def claude_api_path_transformer(path: str) -> str:
     """Transform stripped paths for Claude API.
 
     The path comes in already stripped of the /claude-api prefix,
-    so we just need to return it as-is for the upstream API.
+    so we need to map OpenAI-style paths to Anthropic equivalents.
     """
+    # Map OpenAI chat completions to Anthropic messages
+    if path == "/v1/chat/completions":
+        return "/v1/messages"
+    
+    # Pass through native Anthropic paths
     return path
 
 

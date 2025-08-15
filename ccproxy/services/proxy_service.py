@@ -994,8 +994,12 @@ class ProxyService:
                 injection_mode=injection_mode,
                 proxy_mode=self.proxy_mode,
             )
-        # Codex transformations are now handled by the plugin itself
-
+        # Apply request transformer for body transformation if provided
+        if hasattr(provider_context, "request_transformer") and provider_context.request_transformer:
+            if hasattr(provider_context.request_transformer, "transform_body"):
+                # New object-based transformer can also transform body
+                body = provider_context.request_transformer.transform_body(body)
+        
         return body
 
     async def _prepare_headers(
@@ -1015,8 +1019,14 @@ class ProxyService:
         # Extract access token from auth headers
         # For Claude, we use OAuth Bearer token authentication
         access_token = ""
-        if "Authorization" in auth_headers:
-            access_token = auth_headers["Authorization"].replace("Bearer ", "")
+        # Handle both capitalized and lowercase Authorization headers
+        auth_header_key = None
+        for key in auth_headers:
+            if key.lower() == "authorization":
+                auth_header_key = key
+                break
+        if auth_header_key:
+            access_token = auth_headers[auth_header_key].replace("Bearer ", "")
         # Note: x-api-key would be for direct API key auth, not OAuth
 
         # Apply provider-specific transformations
@@ -1029,14 +1039,12 @@ class ProxyService:
                 app_state=self.app_state,
                 proxy_mode=self.proxy_mode,
             )
-            # Add authentication headers (could be Bearer token OR x-api-key)
-            headers.update(auth_headers)
+            # Don't add auth_headers here - they'll be added later by request_transformer
         # Codex header transformations are now handled by the plugin itself
         else:
             # Default: start with request headers
             headers = dict(request_headers)
-            # Add authentication
-            headers.update(auth_headers)
+            # Don't add auth_headers here - they'll be added later by request_transformer
 
         # IMPORTANT: Always remove hop-by-hop headers and Content-Length for streaming
         # These headers should never be forwarded as they cause issues with streaming responses
@@ -1056,10 +1064,30 @@ class ProxyService:
         headers.update(extra_headers)
 
         # Apply request transformer if provided (for custom transformations)
-        if hasattr(provider_context, "request_transformer") and callable(
-            provider_context.request_transformer
-        ):
-            headers = provider_context.request_transformer(headers)
+        # Pass both headers and auth_headers for proper transformation
+        if hasattr(provider_context, "request_transformer") and provider_context.request_transformer:
+            if callable(provider_context.request_transformer):
+                # Legacy function-based transformer
+                headers.update(auth_headers)
+                headers = provider_context.request_transformer(headers)
+            elif hasattr(provider_context.request_transformer, "transform_headers"):
+                # New object-based transformer (for plugin system)
+                session_id = getattr(provider_context, "session_id", None)
+                access_token = None
+                # Handle both capitalized and lowercase Authorization headers
+                auth_header_key = None
+                for key in auth_headers:
+                    if key.lower() == "authorization":
+                        auth_header_key = key
+                        break
+                if auth_header_key:
+                    access_token = auth_headers[auth_header_key].replace("Bearer ", "")
+                headers = provider_context.request_transformer.transform_headers(
+                    headers, session_id or "", access_token
+                )
+        else:
+            # No transformer, just add auth headers
+            headers.update(auth_headers)
 
         return headers
 
@@ -1356,11 +1384,19 @@ class ProxyService:
                         fallback="using_original_response",
                     )
 
+            # Apply response transformer if provided (for header transformation)
+            response_headers = dict(response.headers)
+            if hasattr(provider_context, "response_transformer") and provider_context.response_transformer:
+                if hasattr(provider_context.response_transformer, "transform_headers"):
+                    response_headers = provider_context.response_transformer.transform_headers(response_headers)
+                if hasattr(provider_context.response_transformer, "transform_body"):
+                    response_body = provider_context.response_transformer.transform_body(response_body)
+
             # Build response
             return Response(
                 content=response_body,
                 status_code=response.status_code,
-                headers=dict(response.headers),
+                headers=response_headers,
                 media_type=response.headers.get("content-type", "application/json"),
             )
 
@@ -1385,7 +1421,7 @@ class ProxyService:
 
         return f"data: {json.dumps(error_json)}\n\n".encode()
 
-    async def initialize_plugins(self, scheduler=None) -> None:
+    async def initialize_plugins(self, scheduler: Any = None) -> None:
         """Initialize and load plugins.
 
         This method should be called during application startup to discover

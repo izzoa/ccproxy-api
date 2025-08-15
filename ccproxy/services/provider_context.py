@@ -26,6 +26,9 @@ class ProviderContext:
 
     # Optional request transformer (for headers, etc.)
     request_transformer: Callable[[dict[str, str]], dict[str, str]] | None = None
+    
+    # Optional response transformer (for headers, etc.)
+    response_transformer: Callable[[dict[str, str]], dict[str, str]] | None = None
 
     # Optional path transformer (for path mapping after prefix stripping)
     path_transformer: Callable[[str], str] | None = None
