@@ -123,12 +123,17 @@ class CodexRequestTransformer:
         Returns:
             Body with instructions injected if needed
         """
-        logger.debug("transform_body_called", body_length=len(body) if body else 0)
+        logger.info("transform_body_called", body_length=len(body) if body else 0)
         if not body:
             return body
 
         try:
             data = json.loads(body.decode("utf-8"))
+            logger.info(
+                "parsed_request_body",
+                keys=list(data.keys()),
+                has_instructions="instructions" in data,
+            )
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.warning("body_decode_failed", error=str(e))
             return body
@@ -136,16 +141,30 @@ class CodexRequestTransformer:
         # Only inject instructions if missing or None
         if "instructions" not in data or data.get("instructions") is None:
             instructions = self._get_instructions()
+            logger.info(
+                "getting_instructions",
+                has_detection_service=bool(self.detection_service),
+                instructions_length=len(instructions) if instructions else 0,
+            )
             if instructions:
                 data["instructions"] = instructions
-                logger.debug(
+                logger.info(
                     "injected_codex_instructions",
-                    instructions_preview=f"{instructions[:50]}...",
+                    instructions_length=len(instructions),
+                    instructions_preview=f"{instructions[:100]}..."
+                    if len(instructions) > 100
+                    else instructions,
                 )
             else:
                 logger.warning("no_codex_instructions_available")
+        else:
+            logger.info(
+                "instructions_already_present", length=len(data.get("instructions", ""))
+            )
 
-        return json.dumps(data).encode("utf-8")
+        result = json.dumps(data).encode("utf-8")
+        logger.info("transform_body_result", result_length=len(result))
+        return result
 
     def _get_instructions(self) -> str | None:
         """Get Codex instructions from detection service or fallback."""

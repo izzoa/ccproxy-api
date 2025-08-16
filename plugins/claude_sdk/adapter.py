@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from fastapi import HTTPException, Request
@@ -234,7 +234,11 @@ class ClaudeSDKAdapter(BaseAdapter):
                             )
 
                             # Process the stream and yield SSE formatted chunks
-                            async for sse_chunk in processor.process_stream(result):  # type: ignore[union-attr]
+                            # Cast to AsyncIterator since we know stream=True
+                            stream_result = cast(AsyncIterator[dict[str, Any]], result)
+                            async for sse_chunk in processor.process_stream(
+                                stream_result
+                            ):
                                 # sse_chunk is already a formatted SSE string when output_format="sse"
                                 if isinstance(sse_chunk, str):
                                     yield sse_chunk.encode()
@@ -243,18 +247,13 @@ class ClaudeSDKAdapter(BaseAdapter):
                                     yield str(sse_chunk).encode()
                         else:
                             # Pass through Claude SSE format as-is
-                            async for chunk in result:  # type: ignore[union-attr]
-                                if isinstance(chunk, dict):
-                                    import json
+                            # Cast to AsyncIterator since we know stream=True
+                            stream_result = cast(AsyncIterator[dict[str, Any]], result)
+                            async for chunk in stream_result:
+                                import json
 
-                                    data = json.dumps(chunk)
-                                    yield f"data: {data}\n\n".encode()
-                                else:
-                                    yield (
-                                        chunk
-                                        if isinstance(chunk, bytes)
-                                        else str(chunk).encode()
-                                    )
+                                data = json.dumps(chunk)
+                                yield f"data: {data}\n\n".encode()
                     except Exception as e:
                         self.logger.error(f"Streaming error: {e}")
                         error_chunk = {"error": str(e)}
@@ -277,7 +276,8 @@ class ClaudeSDKAdapter(BaseAdapter):
                 if isinstance(result, MessageResponse):
                     response_data = result.model_dump()
                 else:
-                    response_data = result
+                    # This shouldn't happen when stream=False, but handle it
+                    response_data = cast(dict[str, Any], result)
 
                 # Convert to OpenAI format if needed
                 if needs_conversion and self.format_adapter:

@@ -65,6 +65,16 @@ class ServerSettings(BaseModel):
         description="Enable terminal UI for permission prompts. Set to False to use external handler via SSE (not implemented)",
     )
 
+    verbose_api: bool = Field(
+        default=False,
+        description="Enable verbose API request/response logging",
+    )
+
+    request_log_dir: str | None = Field(
+        default=None,
+        description="Directory to save individual request/response logs when verbose_api is enabled",
+    )
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v: str) -> str:

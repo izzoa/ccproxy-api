@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import httpx
 import structlog
 
 
@@ -74,10 +75,7 @@ class ProxyConfiguration:
 
         # Check if SSL verification should be disabled
         ssl_verify = os.getenv("SSL_VERIFY", "true").lower()
-        if ssl_verify in ("false", "0", "no", "off"):
-            return False
-
-        return True
+        return ssl_verify not in ("false", "0", "no", "off")
 
     @property
     def proxy_url(self) -> str | None:
@@ -92,7 +90,7 @@ class ProxyConfiguration:
     def get_httpx_client_config(self) -> dict[str, Any]:
         """Build configuration dict for httpx.AsyncClient.
 
-        - Includes 'proxies' if proxy configured
+        - Includes 'proxy' if proxy configured
         - Includes 'verify' for SSL settings
         - Ready to pass to client constructor
         """
@@ -100,17 +98,14 @@ class ProxyConfiguration:
             "verify": self._ssl_verify,
             "timeout": 120.0,  # Default timeout
             "follow_redirects": False,
-            "limits": {
-                "max_keepalive_connections": 100,
-                "max_connections": 1000,
-                "keepalive_expiry": 30.0,
-            },
+            "limits": httpx.Limits(
+                max_keepalive_connections=100,
+                max_connections=1000,
+                keepalive_expiry=30.0,
+            ),
         }
 
         if self._proxy_url:
-            config["proxies"] = {
-                "http://": self._proxy_url,
-                "https://": self._proxy_url,
-            }
+            config["proxy"] = self._proxy_url
 
         return config

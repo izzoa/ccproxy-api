@@ -3,6 +3,8 @@
 import asyncio
 import json
 import random
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import structlog
 from fastapi.responses import StreamingResponse
@@ -113,8 +115,8 @@ class MockResponseHandler:
             mock_response = self.mock_generator.generate_short_response(model=model)
 
         # Convert to OpenAI format if needed
-        if is_openai_format and not message_type == "tool_use":
-            mock_response = self.openai_adapter.adapt_response(mock_response)
+        if is_openai_format and message_type != "tool_use":
+            mock_response = await self.openai_adapter.adapt_response(mock_response)
 
         # Update context with metrics
         if ctx:
@@ -142,7 +144,7 @@ class MockResponseHandler:
         - Includes [DONE] marker
         """
 
-        async def stream_generator():
+        async def stream_generator() -> AsyncGenerator[bytes, None]:
             # Generate base response
             if message_type == "tool_use":
                 base_response = self.mock_generator.generate_tool_use_response(
@@ -262,7 +264,7 @@ class MockResponseHandler:
     def _generate_error_response(self, is_openai_format: bool) -> bytes:
         """Generate a mock error response."""
         if is_openai_format:
-            error = {
+            error: dict[str, Any] = {
                 "error": {
                     "message": "Rate limit exceeded (mock error)",
                     "type": "rate_limit_error",

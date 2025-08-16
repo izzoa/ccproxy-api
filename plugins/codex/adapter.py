@@ -147,10 +147,9 @@ class CodexAdapter(BaseAdapter):
             route_prefix="/codex",
             request_adapter=self.format_adapter if needs_conversion else None,
             response_adapter=self.format_adapter if needs_conversion else None,
-            # Note: ProviderContext type annotation only allows Callable, but proxy service
-            # actually supports object-based transformers with transform_headers method
-            request_transformer=self.request_transformer,  # type: ignore[arg-type]
-            response_transformer=self.response_transformer,  # type: ignore[arg-type]
+            # Object-based transformers with transform_headers/transform_body methods
+            request_transformer=self.request_transformer,
+            response_transformer=self.response_transformer,
             supports_streaming=True,
             requires_session=True,
             session_id=session_id,

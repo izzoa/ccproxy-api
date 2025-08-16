@@ -42,6 +42,22 @@ class MockAdapter(APIAdapter):
             yield {"adapted": True, **chunk}
 
 
+class MockTransformer:
+    """Mock transformer that implements the protocol."""
+
+    def transform_headers(
+        self, headers: dict[str, str], **kwargs: Any
+    ) -> dict[str, str]:
+        """Mock header transformer."""
+        result = headers.copy()
+        result["x-transformed"] = "true"
+        return result
+
+    def transform_body(self, body: Any) -> Any:
+        """Mock body transformer."""
+        return body
+
+
 @pytest.mark.asyncio
 async def test_provider_context_creation():
     """Test ProviderContext can be created with required fields."""
@@ -126,11 +142,7 @@ async def test_auth_manager_interface():
 def test_provider_context_with_transformer():
     """Test ProviderContext with request transformer."""
     auth = MockAuthManager()
-
-    def transformer(headers: dict[str, str]) -> dict[str, str]:
-        """Mock request transformer."""
-        headers["x-transformed"] = "true"
-        return headers
+    transformer = MockTransformer()
 
     context = ProviderContext(
         provider_name="test-provider",
@@ -143,7 +155,7 @@ def test_provider_context_with_transformer():
 
     # Test transformer works
     headers = {"x-original": "value"}
-    transformed = context.request_transformer(headers)
+    transformed = context.request_transformer.transform_headers(headers)
     assert transformed == {"x-original": "value", "x-transformed": "true"}
 
 

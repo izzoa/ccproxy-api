@@ -2,9 +2,25 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
 
 from ccproxy.adapters.base import APIAdapter
 from ccproxy.auth.base import AuthManager
+
+
+@runtime_checkable
+class PluginTransformerProtocol(Protocol):
+    """Protocol for plugin-based transformers with header and body methods."""
+
+    def transform_headers(
+        self, headers: dict[str, str], *args: Any, **kwargs: Any
+    ) -> dict[str, str]:
+        """Transform request headers."""
+        ...
+
+    def transform_body(self, body: Any) -> Any:
+        """Transform request body."""
+        ...
 
 
 @dataclass
@@ -25,10 +41,10 @@ class ProviderContext:
     response_adapter: APIAdapter | None = None
 
     # Optional request transformer (for headers, etc.)
-    request_transformer: Callable[[dict[str, str]], dict[str, str]] | None = None
+    request_transformer: PluginTransformerProtocol | None = None
 
     # Optional response transformer (for headers, etc.)
-    response_transformer: Callable[[dict[str, str]], dict[str, str]] | None = None
+    response_transformer: PluginTransformerProtocol | None = None
 
     # Optional path transformer (for path mapping after prefix stripping)
     path_transformer: Callable[[str], str] | None = None

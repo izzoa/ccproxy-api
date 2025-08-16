@@ -1006,7 +1006,13 @@ class ProxyService:
             and provider_context.request_transformer
         ) and hasattr(provider_context.request_transformer, "transform_body"):
             # New object-based transformer can also transform body
+            logger.info(
+                "calling_transform_body", provider=provider_context.provider_name
+            )
             body = provider_context.request_transformer.transform_body(body)
+            logger.info(
+                "transform_body_completed", body_length=len(body) if body else 0
+            )
 
         return body
 

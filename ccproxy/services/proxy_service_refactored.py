@@ -10,8 +10,8 @@ import structlog
 from fastapi import HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
-from ccproxy.clients.base import BaseProxyClient
 from ccproxy.config.settings import Settings
+from ccproxy.core.http import BaseProxyClient
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.config import ProxyConfiguration
@@ -105,7 +105,7 @@ class ProxyService:
             auth_headers = {}
             if provider_context.auth_manager:
                 auth_headers = await provider_context.auth_manager.get_auth_headers()
-            elif provider_context.requires_auth:
+            elif getattr(provider_context, "requires_auth", False):
                 # Get OAuth token for providers that need it
                 token = await self.auth_service.get_access_token()
                 auth_headers = {"Authorization": f"Bearer {token}"}
@@ -168,19 +168,27 @@ class ProxyService:
 
             # 7. Trace response (if not streaming)
             if not isinstance(response, StreamingResponse):
+                response_body = b""
+                if hasattr(response, "body"):
+                    if isinstance(response.body, memoryview):
+                        response_body = bytes(response.body)
+                    else:
+                        response_body = response.body
                 await tracer.trace_response(
                     request_id,
                     response.status_code,
                     dict(response.headers),
-                    response.body,
+                    response_body,
                 )
 
             # 8. Update metrics
             if self.metrics:
                 self.metrics.record_request(
-                    provider_context.provider_name,
-                    response.status_code,
-                    ctx.metrics.get("duration_ms", 0),
+                    method=ctx.method or "unknown",
+                    endpoint=ctx.endpoint or "unknown",
+                    model=ctx.model,
+                    status=response.status_code,
+                    service_type=provider_context.provider_name,
                 )
 
             return response
@@ -193,7 +201,7 @@ class ProxyService:
                 error=str(e),
                 provider=provider_context.provider_name,
             )
-            raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}") from e
 
     async def _route_request(
         self,
@@ -214,7 +222,7 @@ class ProxyService:
         4. Regular → _handle_regular_request
         """
         # 1. Check bypass mode
-        if self.settings.server.bypass_mode:
+        if getattr(self.settings.server, "bypass_mode", False):
             logger.info("Bypass mode: generating mock response")
 
             message_type = self.mock_handler.extract_message_type(body)
@@ -222,7 +230,10 @@ class ProxyService:
 
             if is_streaming:
                 return await self.mock_handler.generate_streaming_response(
-                    request_context.model, is_openai, request_context, message_type
+                    request_context.model or "unknown",
+                    is_openai,
+                    request_context.base_context,
+                    message_type,
                 )
             else:
                 (
@@ -230,7 +241,10 @@ class ProxyService:
                     mock_headers,
                     mock_body,
                 ) = await self.mock_handler.generate_standard_response(
-                    request_context.model, is_openai, request_context, message_type
+                    request_context.model or "unknown",
+                    is_openai,
+                    request_context.base_context,
+                    message_type,
                 )
                 return Response(
                     content=mock_body, status_code=status, headers=mock_headers
@@ -256,7 +270,7 @@ class ProxyService:
                     "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
                 }
 
-                async def receive():
+                async def receive() -> dict[str, bytes]:
                     return {"body": body}
 
                 mock_request = FastAPIRequest(scope, receive=receive)
@@ -281,7 +295,7 @@ class ProxyService:
                 headers,
                 body,
                 provider_context,
-                request_context,
+                request_context.base_context,
                 self.config.get_httpx_client_config(),
             )
 
@@ -342,11 +356,26 @@ class ProxyService:
 
                 # Apply response transformer if provided
                 if provider_context.response_transformer:
-                    transformed_headers = (
-                        provider_context.response_transformer.transform_headers(
-                            dict(response.headers)
+                    if hasattr(
+                        provider_context.response_transformer, "transform_headers"
+                    ):
+                        # It's a transformer object with methods
+                        transformed_headers = (
+                            provider_context.response_transformer.transform_headers(
+                                dict(response.headers)
+                            )
                         )
-                    )
+                    else:
+                        # It's a callable - cast to indicate it's the correct type
+                        from collections.abc import Callable
+                        from typing import cast
+
+                        transformer_func = cast(
+                            Callable[[dict[str, str]], dict[str, str]],
+                            provider_context.response_transformer,
+                        )
+                        transformed_headers = transformer_func(dict(response.headers))
+
                     if transformed_headers:
                         response_headers = transformed_headers
                     else:
@@ -365,12 +394,14 @@ class ProxyService:
                     headers=response_headers,
                 )
 
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as e:
             logger.error("Request timeout", url=url)
-            raise HTTPException(status_code=504, detail="Request timeout")
+            raise HTTPException(status_code=504, detail="Request timeout") from e
         except Exception as e:
             logger.error("Request failed", url=url, error=str(e))
-            raise HTTPException(status_code=502, detail=f"Upstream error: {str(e)}")
+            raise HTTPException(
+                status_code=502, detail=f"Upstream error: {str(e)}"
+            ) from e
 
     def _format_error_response(
         self, status_code: int, body: bytes, provider_context: ProviderContext

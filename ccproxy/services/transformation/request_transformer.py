@@ -75,12 +75,21 @@ class RequestTransformer:
                 request_data = adapter.adapt_request(request_data)
 
             # Apply provider-specific transformation
-            if provider_context.request_transformer:
+            if provider_context.request_transformer and hasattr(
+                provider_context.request_transformer, "transform_body"
+            ):
+                logger.info(
+                    "calling_transform_body", provider=provider_context.provider_name
+                )
                 transformed = provider_context.request_transformer.transform_body(
                     request_data
                 )
                 if transformed is not None:
                     request_data = transformed
+                logger.info(
+                    "transform_body_completed",
+                    body_length=len(json.dumps(request_data)) if request_data else 0,
+                )
 
             # Return transformed body
             return json.dumps(request_data).encode()
@@ -152,12 +161,8 @@ class RequestTransformer:
         if provider_context.path_transformer:
             path = self._apply_path_transformer(path, provider_context.path_transformer)
 
-        # Apply legacy path mappings if present
-        if provider_context.legacy_path_mappings:
-            for pattern, replacement in provider_context.legacy_path_mappings.items():
-                if pattern in path:
-                    path = path.replace(pattern, replacement)
-                    break
+        # Apply legacy path mappings if present (removed - no longer supported)
+        # Legacy path mappings have been replaced by path_transformer
 
         # Build full URL
         url = urljoin(base_url, path)

@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 import httpx
 import structlog
 
+from ccproxy.plugins.loader import PluginLoader
 from ccproxy.plugins.registry import PluginRegistry
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.tracing.interfaces import RequestTracer
@@ -62,31 +63,30 @@ class PluginManager:
             # Store HTTP client reference
             self._http_client = core_services.http_client
 
-            # Discover all plugins
-            plugins = self.plugin_registry.discover_plugins()
-            logger.info(f"Discovered {len(plugins)} plugins")
+            # Discover all plugins using loader
+            loader = PluginLoader()
+            plugin_instances = await loader.discover_plugins()
+            logger.info(f"Discovered {len(plugin_instances)} plugins")
 
             # Initialize each plugin
-            for plugin_name, plugin_module in plugins.items():
+            for plugin_instance in plugin_instances:
+                plugin_name = plugin_instance.name
                 try:
-                    # Get the adapter from the plugin
-                    if hasattr(plugin_module, "adapter"):
-                        adapter = plugin_module.adapter
+                    # Create adapter from the plugin
+                    adapter = plugin_instance.create_adapter()
 
-                        # Set proxy service reference if adapter supports it
-                        if hasattr(adapter, "set_proxy_service"):
-                            adapter.set_proxy_service(core_services.proxy_service)
+                    # Set proxy service reference if adapter supports it
+                    if hasattr(adapter, "set_proxy_service"):
+                        adapter.set_proxy_service(core_services.proxy_service)
 
-                        # Store adapter for routing
-                        self.adapters[plugin_name] = adapter
+                    # Store adapter for routing
+                    self.adapters[plugin_name] = adapter
 
-                        logger.info(
-                            "Plugin initialized",
-                            plugin=plugin_name,
-                            adapter_type=type(adapter).__name__,
-                        )
-                    else:
-                        logger.warning("Plugin missing adapter", plugin=plugin_name)
+                    logger.info(
+                        "Plugin initialized",
+                        plugin=plugin_name,
+                        adapter_type=type(adapter).__name__,
+                    )
 
                 except Exception as e:
                     logger.error(

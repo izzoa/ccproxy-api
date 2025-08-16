@@ -1,7 +1,7 @@
 """Streaming request handler for SSE and chunked responses."""
 
 import json
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, MutableMapping
 from typing import Any
 
 import httpx
@@ -78,7 +78,7 @@ class StreamingHandler:
         - Returns StreamingResponseWithLogging wrapper
         """
 
-        async def stream_generator():
+        async def stream_generator() -> AsyncGenerator[bytes, None]:
             """Generate streaming response chunks."""
             total_chunks = 0
             total_bytes = 0
@@ -86,39 +86,40 @@ class StreamingHandler:
             try:
                 # Create HTTP client with appropriate config
                 config = client_config or {}
-                async with httpx.AsyncClient(**config) as client:
-                    # Make streaming request
-                    async with client.stream(
+                async with (
+                    httpx.AsyncClient(**config) as client,
+                    client.stream(
                         method=method,
                         url=url,
                         headers=headers,
                         content=body,
                         timeout=httpx.Timeout(300.0),  # 5 minute timeout for streaming
-                    ) as response:
-                        # Check for error status
-                        if response.status_code >= 400:
-                            error_body = await response.aread()
-                            yield error_body
-                            return
+                    ) as response,
+                ):
+                    # Check for error status
+                    if response.status_code >= 400:
+                        error_body = await response.aread()
+                        yield error_body
+                        return
 
-                        # Stream the response
-                        if provider_context.response_adapter:
-                            # Process SSE events with adapter
-                            async for chunk in self._process_sse_events(
-                                response, provider_context.response_adapter
-                            ):
-                                total_chunks += 1
-                                total_bytes += len(chunk)
-                                yield chunk
-                        else:
-                            # Pass through raw chunks
-                            async for chunk in response.aiter_bytes():
-                                total_chunks += 1
-                                total_bytes += len(chunk)
-                                yield chunk
+                    # Stream the response
+                    if provider_context.response_adapter:
+                        # Process SSE events with adapter
+                        async for chunk in self._process_sse_events(
+                            response, provider_context.response_adapter
+                        ):
+                            total_chunks += 1
+                            total_bytes += len(chunk)
+                            yield chunk
+                    else:
+                        # Pass through raw chunks
+                        async for chunk in response.aiter_bytes():
+                            total_chunks += 1
+                            total_bytes += len(chunk)
+                            yield chunk
 
-                # Update metrics
-                if request_context:
+                # Update metrics if available
+                if request_context and hasattr(request_context, "metrics"):
                     request_context.metrics["stream_chunks"] = total_chunks
                     request_context.metrics["stream_bytes"] = total_bytes
 
@@ -144,74 +145,99 @@ class StreamingHandler:
             metrics=self.metrics,
         )
 
-    async def _process_sse_events(
-        self, response: httpx.Response, adapter: APIAdapter
-    ) -> AsyncGenerator[bytes, None]:
-        """Parse and adapt SSE events from response stream.
+    async def _parse_sse_to_json_stream(
+        self, raw_stream: AsyncIterator[bytes]
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Parse raw SSE bytes stream into JSON chunks.
 
-        - Maintains buffer for incomplete events
-        - Splits on double newline boundaries
-        - Applies adapter transformation to each event
-        - Handles [DONE] marker specially
+        Yields JSON objects extracted from SSE events without buffering
+        the entire response.
         """
         buffer = b""
 
-        async for chunk in response.aiter_bytes():
-            buffer += chunk
+        async for chunk_bytes in raw_stream:
+            buffer += chunk_bytes
 
-            # Process complete events (separated by double newline)
+            # Process complete SSE events in buffer
             while b"\n\n" in buffer:
-                event_end = buffer.index(b"\n\n")
-                event_data = buffer[:event_end]
-                buffer = buffer[event_end + 2 :]
+                # Split at the first complete event
+                event_bytes, buffer = buffer.split(b"\n\n", 1)
 
-                # Skip empty events
-                if not event_data:
+                try:
+                    # Decode the complete event
+                    event_str = event_bytes.decode("utf-8")
+
+                    # Skip empty events
+                    if not event_str.strip():
+                        continue
+
+                    # Check if this is a data event
+                    if "data: " in event_str:
+                        # Extract data from the event
+                        for line in event_str.split("\n"):
+                            if line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str == "[DONE]":
+                                    # Don't yield DONE marker as JSON
+                                    continue
+                                else:
+                                    try:
+                                        chunk_json = json.loads(data_str)
+                                        yield chunk_json
+                                    except json.JSONDecodeError:
+                                        # Skip invalid JSON
+                                        logger.warning(
+                                            "Failed to parse SSE data as JSON",
+                                            data=data_str[:100],
+                                        )
+                                        continue
+                except Exception as e:
+                    logger.warning("Failed to process SSE event", error=str(e))
                     continue
 
-                # Check for [DONE] marker
-                if event_data == b"data: [DONE]":
-                    yield b"data: [DONE]\n\n"
-                    continue
+    async def _serialize_json_to_sse_stream(
+        self, json_stream: AsyncIterator[dict[str, Any]]
+    ) -> AsyncIterator[bytes]:
+        """Serialize JSON chunks back to SSE format.
 
-                # Parse and adapt event
-                adapted_event = await self._adapt_sse_event(event_data, adapter)
-                if adapted_event:
-                    yield adapted_event + b"\n\n"
-
-        # Process any remaining data in buffer
-        if buffer and buffer != b"\n":
-            adapted_event = await self._adapt_sse_event(buffer, adapter)
-            if adapted_event:
-                yield adapted_event + b"\n\n"
-
-    async def _adapt_sse_event(
-        self, event_bytes: bytes, adapter: APIAdapter
-    ) -> bytes | None:
-        """Adapt a single SSE event using the adapter."""
-        try:
-            # Extract JSON from SSE event
-            event_str = event_bytes.decode("utf-8")
-            if not event_str.startswith("data: "):
-                return event_bytes  # Pass through non-data events
-
-            json_str = event_str[6:]  # Remove "data: " prefix
-            if json_str == "[DONE]":
-                return event_bytes
-
-            # Parse JSON and adapt
+        Converts adapted JSON objects back into SSE events.
+        """
+        async for chunk in json_stream:
             try:
-                event_data = json.loads(json_str)
-                adapted_data = adapter.adapt_response(event_data)
-                adapted_json = json.dumps(adapted_data)
-                return f"data: {adapted_json}".encode()
-            except json.JSONDecodeError:
-                # Pass through malformed events
-                return event_bytes
+                # Serialize JSON chunk to SSE format
+                json_str = json.dumps(chunk, separators=(",", ":"))
+                sse_event = f"data: {json_str}\n\n"
+                yield sse_event.encode()
+            except Exception as e:
+                logger.warning(
+                    "Failed to serialize JSON to SSE",
+                    error=str(e),
+                    chunk_type=type(chunk).__name__,
+                )
+                continue
 
-        except Exception as e:
-            logger.error("Failed to adapt SSE event", error=str(e))
-            return event_bytes
+        # Send final DONE marker
+        yield b"data: [DONE]\n\n"
+
+    async def _process_sse_events(
+        self, response: httpx.Response, adapter: APIAdapter
+    ) -> AsyncGenerator[bytes, None]:
+        """Parse and adapt SSE events from response stream using new pipeline.
+
+        - Parse raw SSE bytes to JSON chunks
+        - Pass entire JSON stream through adapter (maintains state)
+        - Serialize adapted chunks back to SSE format
+        """
+        # Create streaming pipeline:
+        # 1. Parse raw SSE bytes to JSON chunks
+        json_stream = self._parse_sse_to_json_stream(response.aiter_bytes())
+
+        # 2. Pass entire JSON stream through adapter (maintains state)
+        adapted_stream = await adapter.adapt_stream(json_stream)
+
+        # 3. Serialize adapted chunks back to SSE format
+        async for sse_bytes in self._serialize_json_to_sse_stream(adapted_stream):
+            yield sse_bytes
 
 
 class StreamingResponseWithLogging(StreamingResponse):
@@ -230,22 +256,41 @@ class StreamingResponseWithLogging(StreamingResponse):
         self.request_context = request_context
         self.metrics = metrics
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(
+        self, scope: MutableMapping[str, Any], receive: Any, send: Any
+    ) -> None:
         """Override to log streaming completion."""
         try:
             await super().__call__(scope, receive, send)
         finally:
             if self.request_context:
+                # Log completion with available metrics
+                log_metrics = {}
+                if hasattr(self.request_context, "metrics"):
+                    log_metrics = self.request_context.metrics
+
                 logger.info(
                     "Streaming response complete",
                     request_id=self.request_context.request_id,
-                    metrics=self.request_context.metrics,
+                    metrics=log_metrics,
                 )
 
-                # Update Prometheus metrics if available
-                if self.metrics:
-                    self.metrics.record_streaming_complete(
-                        self.request_context.provider,
-                        self.request_context.metrics.get("stream_chunks", 0),
-                        self.request_context.metrics.get("stream_bytes", 0),
+                # Update Prometheus metrics if available and context has needed attributes
+                if (
+                    self.metrics
+                    and hasattr(self.request_context, "provider")
+                    and hasattr(self.request_context, "metrics")
+                ):
+                    # Record streaming completion metrics using available methods
+                    provider = getattr(self.request_context, "provider", "unknown")
+                    stream_chunks = self.request_context.metrics.get("stream_chunks", 0)
+                    stream_bytes = self.request_context.metrics.get("stream_bytes", 0)
+
+                    # Use existing methods to record streaming metrics
+                    self.metrics.record_request(
+                        method="STREAM",
+                        endpoint="streaming",
+                        model=getattr(self.request_context, "model", None),
+                        status="200",
+                        service_type=provider,
                     )

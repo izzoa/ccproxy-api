@@ -54,10 +54,7 @@ def create_anthropic_context(
 
     if detection_service:
         # Use proper transformers that handle both headers and body
-        transformer = ClaudeAPIRequestTransformer(detection_service)
-
-        def request_transformer(headers: dict[str, str]) -> dict[str, str]:
-            return transformer.transform_headers(headers)
+        request_transformer = ClaudeAPIRequestTransformer(detection_service)
 
     # Always use response transformer to preserve server headers
     response_transformer_obj = ClaudeAPIResponseTransformer()

@@ -1,10 +1,12 @@
 """Dependency injection container for all services."""
 
+from typing import TYPE_CHECKING
+
 import structlog
 
 from ccproxy.adapters.openai.adapter import OpenAIAdapter
-from ccproxy.clients.base import BaseProxyClient
 from ccproxy.config.settings import Settings
+from ccproxy.core.http import BaseProxyClient
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.plugins.registry import PluginRegistry
 from ccproxy.services.auth import AuthenticationService
@@ -16,6 +18,10 @@ from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
 from ccproxy.services.transformation import RequestTransformer
 from ccproxy.testing import RealisticMockResponseGenerator
+
+
+if TYPE_CHECKING:
+    from ccproxy.services.proxy_service_refactored import ProxyService
 
 
 logger = structlog.get_logger(__name__)
