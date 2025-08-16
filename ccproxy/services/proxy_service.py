@@ -5,7 +5,7 @@ import json
 import os
 import random
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -1135,6 +1135,80 @@ class ProxyService:
         except Exception:
             return False
 
+    async def _parse_sse_to_json_stream(
+        self, raw_stream: AsyncIterator[bytes]
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Parse raw SSE bytes stream into JSON chunks.
+
+        Yields JSON objects extracted from SSE events without buffering
+        the entire response.
+        """
+        buffer = b""
+
+        async for chunk_bytes in raw_stream:
+            buffer += chunk_bytes
+
+            # Process complete SSE events in buffer
+            while b"\n\n" in buffer:
+                # Split at the first complete event
+                event_bytes, buffer = buffer.split(b"\n\n", 1)
+
+                try:
+                    # Decode the complete event
+                    event_str = event_bytes.decode("utf-8")
+
+                    # Skip empty events
+                    if not event_str.strip():
+                        continue
+
+                    # Check if this is a data event
+                    if "data: " in event_str:
+                        # Extract data from the event
+                        for line in event_str.split("\n"):
+                            if line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str == "[DONE]":
+                                    # Don't yield DONE marker as JSON
+                                    continue
+                                else:
+                                    try:
+                                        chunk_json = json.loads(data_str)
+                                        yield chunk_json
+                                    except json.JSONDecodeError:
+                                        # Skip invalid JSON
+                                        logger.warning(
+                                            "Failed to parse SSE data as JSON",
+                                            data=data_str[:100],
+                                        )
+                                        continue
+                except Exception as e:
+                    logger.warning("Failed to process SSE event", error=str(e))
+                    continue
+
+    async def _serialize_json_to_sse_stream(
+        self, json_stream: AsyncIterator[dict[str, Any]]
+    ) -> AsyncIterator[bytes]:
+        """Serialize JSON chunks back to SSE format.
+
+        Converts adapted JSON objects back into SSE events.
+        """
+        async for chunk in json_stream:
+            try:
+                # Serialize JSON chunk to SSE format
+                json_str = json.dumps(chunk, separators=(",", ":"))
+                sse_event = f"data: {json_str}\n\n"
+                yield sse_event.encode()
+            except Exception as e:
+                logger.warning(
+                    "Failed to serialize JSON to SSE",
+                    error=str(e),
+                    chunk_type=type(chunk).__name__,
+                )
+                continue
+
+        # Send final DONE marker
+        yield b"data: [DONE]\n\n"
+
     async def _handle_streaming_request_unified(
         self,
         method: str,
@@ -1175,134 +1249,24 @@ class ProxyService:
                         adapter_type=type(provider_context.response_adapter).__name__,
                     )
 
-                    buffer = b""  # Buffer for incomplete SSE events
-                    chunk_count = 0
-                    event_count = 0
+                    # Create streaming pipeline:
+                    # 1. Parse raw SSE bytes to JSON chunks
+                    json_stream = self._parse_sse_to_json_stream(response.aiter_bytes())
 
-                    async for chunk_bytes in response.aiter_bytes():
-                        chunk_count += 1
-                        logger.debug(
-                            "stream_chunk_received",
-                            chunk_number=chunk_count,
-                            chunk_size=len(chunk_bytes),
-                            buffer_size_before=len(buffer),
-                            first_50_bytes=chunk_bytes[:50]
-                            if len(chunk_bytes) > 0
-                            else None,
-                        )
+                    # 2. Pass entire JSON stream through adapter (maintains state)
+                    adapted_stream = provider_context.response_adapter.adapt_stream(
+                        json_stream
+                    )
 
-                        # Add to buffer
-                        buffer += chunk_bytes
+                    # 3. Serialize adapted chunks back to SSE format
+                    async for sse_bytes in self._serialize_json_to_sse_stream(
+                        adapted_stream
+                    ):
+                        yield sse_bytes
 
-                        # Process complete SSE events (separated by double newlines)
-                        while b"\n\n" in buffer:
-                            event_count += 1
-                            # Split at the first complete event
-                            event_bytes, buffer = buffer.split(b"\n\n", 1)
-
-                            logger.debug(
-                                "complete_sse_event_found",
-                                event_number=event_count,
-                                event_size=len(event_bytes),
-                                remaining_buffer=len(buffer),
-                            )
-
-                            try:
-                                # Decode the complete event
-                                event_str = event_bytes.decode("utf-8")
-                                logger.debug(
-                                    "event_decoded",
-                                    event_number=event_count,
-                                    event_preview=event_str[:200],
-                                )
-
-                                # Skip empty events
-                                if not event_str.strip():
-                                    continue
-
-                                # Check if this is a data event
-                                if "data: " in event_str:
-                                    # Extract data from the event
-                                    for line in event_str.split("\n"):
-                                        if line.startswith("data: "):
-                                            data_str = line[6:].strip()
-                                            if data_str == "[DONE]":
-                                                logger.debug(
-                                                    "done_marker_found",
-                                                    event_number=event_count,
-                                                )
-                                                yield b"data: [DONE]\n\n"
-                                            else:
-                                                try:
-                                                    chunk_json = json.loads(data_str)
-                                                    logger.debug(
-                                                        "json_parsed",
-                                                        event_number=event_count,
-                                                        json_keys=list(
-                                                            chunk_json.keys()
-                                                        )
-                                                        if isinstance(chunk_json, dict)
-                                                        else None,
-                                                    )
-
-                                                    # Create async generator for single chunk
-                                                    async def single_chunk_gen(
-                                                        data: Any = chunk_json,
-                                                    ) -> AsyncGenerator[Any, None]:
-                                                        yield data
-
-                                                    # Adapt the chunk
-                                                    logger.debug(
-                                                        "adapting_event",
-                                                        event_number=event_count,
-                                                    )
-                                                    async for adapted_chunk in provider_context.response_adapter.adapt_stream(
-                                                        single_chunk_gen()
-                                                    ):
-                                                        adapted_json = json.dumps(
-                                                            adapted_chunk
-                                                        )
-                                                        logger.debug(
-                                                            "event_adapted",
-                                                            event_number=event_count,
-                                                            adapted_size=len(
-                                                                adapted_json
-                                                            ),
-                                                        )
-                                                        yield f"data: {adapted_json}\n\n".encode()
-
-                                                except json.JSONDecodeError as je:
-                                                    logger.debug(
-                                                        "json_decode_error",
-                                                        event_number=event_count,
-                                                        error=str(je),
-                                                        data_preview=data_str[:100],
-                                                    )
-                                                    # Pass through the original event
-                                                    yield event_bytes + b"\n\n"
-                                else:
-                                    # Pass through non-data events
-                                    logger.debug(
-                                        "passing_through_non_data_event",
-                                        event_number=event_count,
-                                    )
-                                    yield event_bytes + b"\n\n"
-
-                            except Exception as e:
-                                logger.warning(
-                                    "stream_event_processing_failed",
-                                    error=str(e),
-                                    event_number=event_count,
-                                )
-                                # Pass through the original event
-                                yield event_bytes + b"\n\n"
-
-                    # Log final state
                     logger.debug(
                         "stream_adaptation_completed",
-                        total_chunks=chunk_count,
-                        total_events=event_count,
-                        remaining_buffer_size=len(buffer),
+                        provider=provider_context.provider_name,
                     )
                 else:
                     # Pass through raw SSE stream

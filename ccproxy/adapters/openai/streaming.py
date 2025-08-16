@@ -620,9 +620,9 @@ class OpenAIStreamProcessor:
                     tool_call.get("function", {}).get("arguments"),
                 )
             else:
-                # Empty delta
-                return self.formatter.format_final_chunk(
-                    self.message_id, self.model, self.created, "stop"
+                # Empty delta - send chunk with null finish_reason
+                return self.formatter.format_content_chunk(
+                    self.message_id, self.model, self.created, ""
                 )
 
 
