@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any, Literal, cast
 
 import structlog
@@ -496,9 +496,9 @@ class OpenAIAdapter(APIAdapter):
             + usage_info.get("output_tokens", 0),
         )
 
-    async def adapt_stream(  # type: ignore[override,misc]
+    async def adapt_stream(  # type: ignore[override]
         self, stream: AsyncIterator[dict[str, Any]]
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Convert Anthropic streaming response to OpenAI streaming format.
 
         Args:

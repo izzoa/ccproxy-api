@@ -21,7 +21,7 @@ from ccproxy.testing import RealisticMockResponseGenerator
 
 
 if TYPE_CHECKING:
-    from ccproxy.services.proxy_service_refactored import ProxyService
+    from ccproxy.services.proxy_service import ProxyService
 
 
 logger = structlog.get_logger(__name__)
@@ -63,7 +63,7 @@ class ServiceContainer:
         - Returns ready-to-use ProxyService instance
         """
         # Import here to avoid circular dependency
-        from ccproxy.services.proxy_service_refactored import ProxyService
+        from ccproxy.services.proxy_service import ProxyService
 
         # Store metrics if provided
         if metrics:

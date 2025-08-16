@@ -1,7 +1,7 @@
 """Codex plugin routes."""
 
 import uuid
-from typing import Any, cast
+from typing import Any
 
 from fastapi import APIRouter, Request
 from starlette.responses import Response, StreamingResponse
@@ -42,11 +42,11 @@ async def codex_responses(
     Uses the adapter pattern to ensure instructions are properly injected.
     """
     # Get the codex plugin and its adapter
-    plugin = None
-    if hasattr(proxy_service, "plugin_registry"):
-        plugin = proxy_service.plugin_registry.get_plugin("codex")
+    adapter = None
+    if hasattr(proxy_service, "plugin_manager"):
+        adapter = proxy_service.plugin_manager.get_plugin_adapter("codex")
 
-    if not plugin or not hasattr(plugin, "_adapter"):
+    if not adapter:
         from fastapi import HTTPException
 
         raise HTTPException(status_code=503, detail="Codex plugin not initialized")
@@ -56,10 +56,10 @@ async def codex_responses(
     session_id = header_session_id or str(uuid.uuid4())
 
     # Delegate to adapter which handles all transformations including instruction injection
-    result = await plugin._adapter.handle_request(
+    result = await adapter.handle_request(
         request, endpoint="/responses", method="POST", session_id=session_id
     )
-    return cast(StreamingResponse | Response, result)
+    return result
 
 
 @router.post("/{session_id}/responses", response_model=None)
@@ -74,23 +74,23 @@ async def codex_responses_with_session(
     Uses the adapter pattern to ensure instructions are properly injected.
     """
     # Get the codex plugin and its adapter
-    plugin = None
-    if hasattr(proxy_service, "plugin_registry"):
-        plugin = proxy_service.plugin_registry.get_plugin("codex")
+    adapter = None
+    if hasattr(proxy_service, "plugin_manager"):
+        adapter = proxy_service.plugin_manager.get_plugin_adapter("codex")
 
-    if not plugin or not hasattr(plugin, "_adapter"):
+    if not adapter:
         from fastapi import HTTPException
 
         raise HTTPException(status_code=503, detail="Codex plugin not initialized")
 
     # Delegate to adapter which handles all transformations including instruction injection
-    result = await plugin._adapter.handle_request(
+    result = await adapter.handle_request(
         request,
         endpoint=f"/{session_id}/responses",
         method="POST",
         session_id=session_id,
     )
-    return cast(StreamingResponse | Response, result)
+    return result
 
 
 @router.post("/chat/completions", response_model=None)
@@ -105,11 +105,11 @@ async def codex_chat_completions(
     to/from Codex Response API format transparently.
     """
     # Get the codex plugin and its adapter
-    plugin = None
-    if hasattr(proxy_service, "plugin_registry"):
-        plugin = proxy_service.plugin_registry.get_plugin("codex")
+    adapter = None
+    if hasattr(proxy_service, "plugin_manager"):
+        adapter = proxy_service.plugin_manager.get_plugin_adapter("codex")
 
-    if not plugin or not hasattr(plugin, "_adapter"):
+    if not adapter:
         from fastapi import HTTPException
 
         raise HTTPException(status_code=503, detail="Codex plugin not initialized")
@@ -119,10 +119,10 @@ async def codex_chat_completions(
     session_id = header_session_id or str(uuid.uuid4())
 
     # Delegate to adapter which handles format conversion and instruction injection
-    result = await plugin._adapter.handle_request(
+    result = await adapter.handle_request(
         request, endpoint="/chat/completions", method="POST", session_id=session_id
     )
-    return cast(StreamingResponse | Response, result)
+    return result
 
 
 @router.post("/{session_id}/chat/completions", response_model=None)
@@ -137,23 +137,23 @@ async def codex_chat_completions_with_session(
     This endpoint handles OpenAI format requests with a specific session_id.
     """
     # Get the codex plugin and its adapter
-    plugin = None
-    if hasattr(proxy_service, "plugin_registry"):
-        plugin = proxy_service.plugin_registry.get_plugin("codex")
+    adapter = None
+    if hasattr(proxy_service, "plugin_manager"):
+        adapter = proxy_service.plugin_manager.get_plugin_adapter("codex")
 
-    if not plugin or not hasattr(plugin, "_adapter"):
+    if not adapter:
         from fastapi import HTTPException
 
         raise HTTPException(status_code=503, detail="Codex plugin not initialized")
 
     # Delegate to adapter which handles format conversion and instruction injection
-    result = await plugin._adapter.handle_request(
+    result = await adapter.handle_request(
         request,
         endpoint=f"/{session_id}/chat/completions",
         method="POST",
         session_id=session_id,
     )
-    return cast(StreamingResponse | Response, result)
+    return result
 
 
 @router.post("/v1/chat/completions", response_model=None)

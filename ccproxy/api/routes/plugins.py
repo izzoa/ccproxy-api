@@ -83,8 +83,8 @@ async def list_plugins(
     # All providers come from the plugin system
 
     # Plugin providers
-    for name in proxy.plugin_registry.list_plugins():
-        plugin = proxy.plugin_registry.get_plugin(name)
+    for name in proxy.plugin_manager.plugin_registry.list_plugins():
+        plugin = proxy.plugin_manager.plugin_registry.get_plugin(name)
         plugins.append(
             PluginInfo(
                 name=name,
@@ -122,10 +122,10 @@ async def plugin_health(
         )
 
     # Check plugin providers
-    adapter = proxy.get_plugin_adapter(plugin_name)
+    adapter = proxy.plugin_manager.get_plugin_adapter(plugin_name)
     if adapter:
         # Get the plugin and run its health check if available
-        plugin = proxy.plugin_registry.get_plugin(plugin_name)
+        plugin = proxy.plugin_manager.plugin_registry.get_plugin(plugin_name)
         if plugin and hasattr(plugin, "health_check"):
             try:
                 health_result = await plugin.health_check()
@@ -201,7 +201,7 @@ async def reload_plugin(
         )
 
     # Check if plugin exists
-    if plugin_name not in proxy.plugin_registry.list_plugins():
+    if plugin_name not in proxy.plugin_manager.plugin_registry.list_plugins():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Plugin '{plugin_name}' not found",
@@ -235,7 +235,7 @@ async def discover_plugins(
         Updated list of all plugins
     """
     # Re-initialize plugins
-    proxy._plugins_initialized = False
+    proxy.plugin_manager.initialized = False
     await proxy.initialize_plugins()
 
     # Return updated list
@@ -265,12 +265,12 @@ async def unregister_plugin(
         )
 
     # Unregister the plugin
-    success = await proxy.plugin_registry.unregister(plugin_name)
+    success = await proxy.plugin_manager.plugin_registry.unregister(plugin_name)
 
     if success:
         # Also remove from proxy's adapter list
-        if plugin_name in proxy._plugin_adapters:
-            del proxy._plugin_adapters[plugin_name]
+        if plugin_name in proxy.plugin_manager.adapters:
+            del proxy.plugin_manager.adapters[plugin_name]
 
         return {
             "status": "success",

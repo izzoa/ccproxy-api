@@ -72,20 +72,23 @@ class RequestTransformer:
 
             # Apply adapter transformation first (format conversion)
             if adapter:
-                request_data = adapter.adapt_request(request_data)
+                request_data = await adapter.adapt_request(request_data)
 
-            # Apply provider-specific transformation
+            # Apply provider-specific transformation (pass original bytes)
             if provider_context.request_transformer and hasattr(
                 provider_context.request_transformer, "transform_body"
             ):
                 logger.info(
                     "calling_transform_body", provider=provider_context.provider_name
                 )
-                transformed = provider_context.request_transformer.transform_body(
-                    request_data
+                # Convert back to bytes for transformer that expects bytes
+                body_bytes = json.dumps(request_data).encode() if adapter else body
+                transformed_bytes = provider_context.request_transformer.transform_body(
+                    body_bytes
                 )
-                if transformed is not None:
-                    request_data = transformed
+                if transformed_bytes is not None:
+                    # Parse the transformed bytes back to dict
+                    request_data = json.loads(transformed_bytes.decode())
                 logger.info(
                     "transform_body_completed",
                     body_length=len(json.dumps(request_data)) if request_data else 0,
@@ -121,11 +124,23 @@ class RequestTransformer:
 
         # Apply provider-specific header transformation
         if provider_context.request_transformer:
-            transformed = provider_context.request_transformer.transform_headers(
-                headers, provider_name=provider_context.provider_name
-            )
-            if transformed:
-                headers = transformed
+            # Extract access token from auth headers if available
+            access_token = None
+            if "Authorization" in auth_headers:
+                access_token = auth_headers["Authorization"].replace("Bearer ", "")
+
+            # Check if transformer has transform_headers method
+            if hasattr(provider_context.request_transformer, "transform_headers"):
+                # Call with proper arguments for compatibility
+                session_id = getattr(provider_context, "session_id", "")
+                transformed = provider_context.request_transformer.transform_headers(
+                    headers,
+                    session_id=session_id,
+                    access_token=access_token,
+                    provider_name=provider_context.provider_name,
+                )
+                if transformed:
+                    headers = transformed
 
         # Merge auth headers (these should override request headers)
         headers.update(auth_headers)
@@ -150,7 +165,7 @@ class RequestTransformer:
 
         - Strips route prefix if configured
         - Applies path transformer function
-        - Handles legacy path mappings
+        - Handles plugin protocols (preserves non-http/https schemes)
         - Appends query string if present
         """
         # Strip route prefix if configured
@@ -161,11 +176,19 @@ class RequestTransformer:
         if provider_context.path_transformer:
             path = self._apply_path_transformer(path, provider_context.path_transformer)
 
-        # Apply legacy path mappings if present (removed - no longer supported)
-        # Legacy path mappings have been replaced by path_transformer
+        # Build full URL - handle plugin protocols specially
+        from urllib.parse import urlparse
 
-        # Build full URL
-        url = urljoin(base_url, path)
+        parsed_base = urlparse(base_url)
+        if parsed_base.scheme not in ("http", "https", ""):
+            # This is a plugin protocol - manually construct URL to preserve scheme
+            # Ensure path starts with / for proper joining
+            if not path.startswith("/"):
+                path = "/" + path
+            url = f"{base_url.rstrip('/')}{path}"
+        else:
+            # Standard HTTP/HTTPS - use urljoin
+            url = urljoin(base_url, path)
 
         # Append query string if present
         if query:

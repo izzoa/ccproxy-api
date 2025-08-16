@@ -86,22 +86,17 @@ async def create_anthropic_message(
     """
     # Get detection service from plugin registry
     detection_service = None
-    if hasattr(proxy_service, "plugin_registry"):
-        plugin = proxy_service.plugin_registry.get_plugin("claude_api")
+    if hasattr(proxy_service, "plugin_manager"):
+        plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("claude_api")
         if plugin and hasattr(plugin, "_detection_service"):
             detection_service = plugin._detection_service
-
-    # Create request transformer for header and body transformation
-    request_adapter = None
-    if detection_service:
-        request_adapter = ClaudeAPIRequestTransformer(detection_service)
 
     # Create provider context for native Anthropic format
     context = create_anthropic_context(
         provider_name="claude-api-native",
         proxy_service=proxy_service,
         detection_service=detection_service,
-        request_adapter=request_adapter,
+        request_adapter=None,  # No format conversion needed for native Anthropic
         response_adapter=None,  # Pass through native format
     )
 
@@ -122,8 +117,8 @@ async def create_openai_chat_completion(
     """
     # Get detection service from plugin registry
     detection_service = None
-    if hasattr(proxy_service, "plugin_registry"):
-        plugin = proxy_service.plugin_registry.get_plugin("claude_api")
+    if hasattr(proxy_service, "plugin_manager"):
+        plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("claude_api")
         if plugin and hasattr(plugin, "_detection_service"):
             detection_service = plugin._detection_service
 

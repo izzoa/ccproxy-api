@@ -6,6 +6,8 @@ from urllib.parse import urlparse
 import httpx
 import structlog
 
+from ccproxy.config.settings import get_settings
+from ccproxy.core.services import CoreServices
 from ccproxy.plugins.loader import PluginLoader
 from ccproxy.plugins.registry import PluginRegistry
 from ccproxy.services.adapters.base import BaseAdapter
@@ -13,20 +15,6 @@ from ccproxy.services.tracing.interfaces import RequestTracer
 
 
 logger = structlog.get_logger(__name__)
-
-
-class CoreServices:
-    """Container for core services passed to plugins."""
-
-    def __init__(
-        self,
-        http_client: httpx.AsyncClient,
-        proxy_service: Any,  # Avoid circular import
-        scheduler: Any | None = None,
-    ):
-        self.http_client = http_client
-        self.proxy_service = proxy_service
-        self.scheduler = scheduler
 
 
 class PluginManager:
@@ -46,7 +34,10 @@ class PluginManager:
         self._http_client: httpx.AsyncClient | None = None
 
     async def initialize_plugins(
-        self, core_services: CoreServices, scheduler: Any | None = None
+        self,
+        http_client: httpx.AsyncClient,
+        proxy_service: Any,
+        scheduler: Any | None = None,
     ) -> None:
         """Discover and initialize all plugins.
 
@@ -61,36 +52,54 @@ class PluginManager:
 
         try:
             # Store HTTP client reference
-            self._http_client = core_services.http_client
+            self._http_client = http_client
+
+            # Get settings for CoreServices
+            settings = get_settings()
+
+            # Create proper CoreServices for plugins
+            core_services = CoreServices(
+                http_client=http_client,
+                logger=logger,
+                settings=settings,
+                scheduler=scheduler,
+            )
 
             # Discover all plugins using loader
             loader = PluginLoader()
             plugin_instances = await loader.discover_plugins()
             logger.info(f"Discovered {len(plugin_instances)} plugins")
 
-            # Initialize each plugin
+            # Set services on registry so it can initialize plugins
+            self.plugin_registry._services = core_services
+
+            # Register and initialize each plugin using the registry
             for plugin_instance in plugin_instances:
-                plugin_name = plugin_instance.name
                 try:
-                    # Create adapter from the plugin
-                    adapter = plugin_instance.create_adapter()
+                    # Use the registry's proper registration method
+                    await self.plugin_registry.register_and_initialize(plugin_instance)
+
+                    # Get the adapter from registry
+                    adapter = self.plugin_registry._adapters.get(plugin_instance.name)
 
                     # Set proxy service reference if adapter supports it
-                    if hasattr(adapter, "set_proxy_service"):
-                        adapter.set_proxy_service(core_services.proxy_service)
+                    if adapter and hasattr(adapter, "set_proxy_service"):
+                        adapter.set_proxy_service(proxy_service)
 
-                    # Store adapter for routing
-                    self.adapters[plugin_name] = adapter
-
-                    logger.info(
-                        "Plugin initialized",
-                        plugin=plugin_name,
-                        adapter_type=type(adapter).__name__,
-                    )
+                    # Store adapter reference locally for quick access
+                    if adapter:
+                        self.adapters[plugin_instance.name] = adapter
+                        logger.info(
+                            "Plugin initialized",
+                            plugin=plugin_instance.name,
+                            adapter_type=type(adapter).__name__,
+                        )
 
                 except Exception as e:
                     logger.error(
-                        "Failed to initialize plugin", plugin=plugin_name, error=str(e)
+                        "Failed to initialize plugin",
+                        plugin=plugin_instance.name,
+                        error=str(e),
                     )
 
             self.initialized = True
@@ -107,10 +116,19 @@ class PluginManager:
         """Retrieve plugin adapter by provider name.
 
         - Looks up in adapter cache
+        - Handles scheme-to-name mapping for URL schemes with hyphens
         - Returns None if not found
         - Thread-safe access
         """
-        return self.adapters.get(name)
+        # Direct lookup first
+        adapter = self.adapters.get(name)
+        if adapter:
+            return adapter
+
+        # Handle scheme-to-name mapping (e.g., claude-sdk -> claude_sdk)
+        # URL schemes use hyphens but Python identifiers use underscores
+        name_with_underscores = name.replace("-", "_")
+        return self.adapters.get(name_with_underscores)
 
     def list_active_providers(self) -> list[str]:
         """Get list of all registered provider names.

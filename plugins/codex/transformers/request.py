@@ -32,14 +32,19 @@ class CodexRequestTransformer:
         self.detection_service = detection_service
 
     def transform_headers(
-        self, headers: dict[str, str], session_id: str, auth_token: str | None = None
+        self,
+        headers: dict[str, str],
+        session_id: str,
+        access_token: str | None = None,
+        **kwargs: str,
     ) -> dict[str, str]:
         """Transform request headers for Codex API.
 
         Args:
             headers: Original request headers
             session_id: Codex session ID
-            auth_token: Optional Bearer token for authorization
+            access_token: Optional Bearer token for authorization
+            **kwargs: Additional arguments
 
         Returns:
             Transformed headers with Codex-specific headers
@@ -67,16 +72,16 @@ class CodexRequestTransformer:
         transformed["session_id"] = session_id
 
         # Add authorization if provided
-        if auth_token:
+        if access_token:
             # Remove any existing authorization headers and add the JWT token
             transformed.pop("authorization", None)  # Remove lowercase variant
             transformed.pop("Authorization", None)  # Remove capitalized variant
-            transformed["Authorization"] = f"Bearer {auth_token}"
+            transformed["Authorization"] = f"Bearer {access_token}"
             logger.info(
                 "codex_auth_token_added",
-                token_preview=f"{auth_token[:20]}..."
-                if len(auth_token) > 20
-                else auth_token,
+                token_preview=f"{access_token[:20]}..."
+                if len(access_token) > 20
+                else access_token,
             )
 
         # Inject detected Codex CLI headers if available

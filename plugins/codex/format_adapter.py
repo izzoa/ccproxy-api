@@ -1,6 +1,6 @@
 """Codex format adapter for OpenAI conversion."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any
 
 import structlog
@@ -76,9 +76,9 @@ class CodexFormatAdapter(APIAdapter):
 
         return response_data
 
-    async def adapt_stream(  # type: ignore[override,misc]
+    async def adapt_stream(  # type: ignore[override]
         self, stream: AsyncIterator[dict[str, Any]]
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Convert individual Response API events to Chat Completions format.
 
         Uses the same pattern as OpenAI adapter's streaming processor.

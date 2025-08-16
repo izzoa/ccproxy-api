@@ -21,7 +21,6 @@ from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
 from ccproxy.scheduler.errors import SchedulerError
 from ccproxy.scheduler.manager import start_scheduler, stop_scheduler
 from ccproxy.services.credentials.manager import CredentialsManager
-from ccproxy.services.proxy_service import ProxyService
 
 
 # Note: get_permission_service is imported locally to avoid circular imports
@@ -291,6 +290,7 @@ async def initialize_proxy_service_startup(app: FastAPI, settings: Settings) -> 
     try:
         # Create HTTP client for proxy
         from ccproxy.core.http import BaseProxyClient, HTTPXClient
+        from ccproxy.services.container import ServiceContainer
 
         http_client = HTTPXClient()
         proxy_client = BaseProxyClient(http_client)
@@ -301,16 +301,17 @@ async def initialize_proxy_service_startup(app: FastAPI, settings: Settings) -> 
         # Create credentials manager
         credentials_manager = CredentialsManager(config=settings.auth)
 
-        # Create ProxyService instance
-        proxy_service = ProxyService(
+        # Create ServiceContainer and use it to create ProxyService
+        container = ServiceContainer(settings)
+        proxy_service = container.create_proxy_service(
             proxy_client=proxy_client,
             credentials_manager=credentials_manager,
-            settings=settings,
-            proxy_mode="full",
-            target_base_url=settings.reverse_proxy.target_url,
             metrics=metrics,
-            app_state=app.state,  # Pass app state for detection data access
         )
+
+        # Initialize plugins
+        scheduler = getattr(app.state, "scheduler", None)
+        await proxy_service.initialize_plugins(scheduler)
 
         # Store in app state for reuse in dependencies
         app.state.proxy_service = proxy_service

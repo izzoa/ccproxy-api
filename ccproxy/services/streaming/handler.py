@@ -233,10 +233,10 @@ class StreamingHandler:
         json_stream = self._parse_sse_to_json_stream(response.aiter_bytes())
 
         # 2. Pass entire JSON stream through adapter (maintains state)
-        adapted_stream = await adapter.adapt_stream(json_stream)
+        adapted_stream = adapter.adapt_stream(json_stream)
 
         # 3. Serialize adapted chunks back to SSE format
-        async for sse_bytes in self._serialize_json_to_sse_stream(adapted_stream):
+        async for sse_bytes in self._serialize_json_to_sse_stream(adapted_stream):  # type: ignore[arg-type]
             yield sse_bytes
 
 

@@ -93,6 +93,7 @@ def get_proxy_service(
 
     # Create HTTP client for proxy
     from ccproxy.core.http import HTTPXClient
+    from ccproxy.services.container import ServiceContainer
 
     http_client = HTTPXClient()
     proxy_client = BaseProxyClient(http_client)
@@ -100,14 +101,12 @@ def get_proxy_service(
     # Get global metrics instance
     metrics = get_metrics()
 
-    return ProxyService(
+    # Use ServiceContainer to create ProxyService
+    container = ServiceContainer(settings)
+    return container.create_proxy_service(
         proxy_client=proxy_client,
         credentials_manager=credentials_manager,
-        settings=settings,
-        proxy_mode="full",
-        target_base_url=settings.reverse_proxy.target_url,
         metrics=metrics,
-        app_state=request.app.state,  # Pass app state for detection data access
     )
 
 
