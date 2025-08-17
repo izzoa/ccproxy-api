@@ -139,36 +139,14 @@ async def check_version_updates_startup(app: FastAPI, settings: Settings) -> Non
 async def check_claude_cli_startup(app: FastAPI, settings: Settings) -> None:
     """Check Claude CLI availability at startup.
 
+    Note: The plugin will handle Claude CLI detection and validation.
+
     Args:
         app: FastAPI application instance
         settings: Application settings
     """
-    try:
-        from ccproxy.api.routes.health import get_claude_cli_info
-
-        claude_info = await get_claude_cli_info()
-
-        if claude_info.status == "available":
-            logger.info(
-                "claude_cli_available",
-                status=claude_info.status,
-                version=claude_info.version,
-                binary_path=claude_info.binary_path,
-            )
-        else:
-            logger.warning(
-                "claude_cli_unavailable",
-                status=claude_info.status,
-                error=claude_info.error,
-                binary_path=claude_info.binary_path,
-                message=f"Claude CLI status: {claude_info.status}",
-            )
-    except Exception as e:
-        logger.error(
-            "claude_cli_check_failed",
-            error=str(e),
-            message="Failed to check Claude CLI status during startup",
-        )
+    # Claude CLI check is now handled by the plugin
+    pass
 
 
 async def initialize_log_storage_startup(app: FastAPI, settings: Settings) -> None:
@@ -324,84 +302,30 @@ async def initialize_proxy_service_startup(app: FastAPI, settings: Settings) -> 
 async def initialize_permission_service_startup(
     app: FastAPI, settings: Settings
 ) -> None:
-    """Initialize permission service (conditional on builtin_permissions).
+    """Initialize permission service.
+
+    Note: The plugin will handle builtin_permissions configuration.
 
     Args:
         app: FastAPI application instance
         settings: Application settings
     """
-    if settings.claude.builtin_permissions:
-        try:
-            from ccproxy.api.services.permission_service import get_permission_service
-
-            permission_service = get_permission_service()
-
-            # Only connect terminal handler if not using external handler
-            if settings.server.use_terminal_permission_handler:
-                # terminal_handler = TerminalPermissionHandler()
-
-                # TODO: Terminal handler should subscribe to events from the service
-                # instead of trying to set a handler directly
-                # The service uses an event-based architecture, not direct handlers
-
-                # logger.info(
-                #     "permission_handler_configured",
-                #     handler_type="terminal",
-                #     message="Connected terminal handler to permission service",
-                # )
-                # app.state.terminal_handler = terminal_handler
-                pass
-            else:
-                logger.debug(
-                    "permission_handler_configured",
-                    handler_type="external_sse",
-                    message="Terminal permission handler disabled - use 'ccproxy permission-handler connect' to handle permissions",
-                )
-                logger.warning(
-                    "permission_handler_required",
-                    message="Start external handler with: ccproxy permission-handler connect",
-                )
-
-            # Start the permission service
-            await permission_service.start()
-
-            # Store references in app state
-            app.state.permission_service = permission_service
-
-            logger.debug(
-                "permission_service_initialized",
-                timeout_seconds=permission_service._timeout_seconds,
-                terminal_handler_enabled=settings.server.use_terminal_permission_handler,
-                builtin_permissions_enabled=True,
-            )
-        except Exception as e:
-            logger.error("permission_service_initialization_failed", error=str(e))
-            # Continue without permission service (API will work but without prompts)
-    else:
-        logger.debug(
-            "permission_service_skipped",
-            builtin_permissions_enabled=False,
-            message="Built-in permission handling disabled - users can configure custom MCP servers and permission tools",
-        )
+    # Permission service initialization is now handled by the plugin
+    # The plugin will check its own builtin_permissions setting
+    pass
 
 
 async def setup_permission_service_shutdown(app: FastAPI, settings: Settings) -> None:
     """Stop permission service (if it was initialized).
 
+    Note: The plugin will handle permission service cleanup.
+
     Args:
         app: FastAPI application instance
         settings: Application settings
     """
-    if (
-        hasattr(app.state, "permission_service")
-        and app.state.permission_service
-        and settings.claude.builtin_permissions
-    ):
-        try:
-            await app.state.permission_service.stop()
-            logger.debug("permission_service_stopped")
-        except Exception as e:
-            logger.error("permission_service_stop_failed", error=str(e))
+    # Permission service cleanup is now handled by the plugin
+    pass
 
 
 async def flush_streaming_batches_shutdown(app: FastAPI) -> None:

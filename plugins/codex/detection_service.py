@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shutil
 import socket
 import subprocess
 from pathlib import Path
@@ -56,7 +55,7 @@ class CodexDetectionService:
 
             self._cached_data = detected_data
 
-            logger.info(
+            logger.debug(
                 "detection_codex_headers_completed",
                 version=current_version,
                 cached=cached,
@@ -87,47 +86,32 @@ class CodexDetectionService:
         data = self.get_cached_data()
         return data.codex_version if data else "unknown"
 
-    def get_binary_path(self) -> str | list[str] | None:
-        """Get the Codex CLI binary path or command.
+    def get_cli_path(self) -> list[str] | None:
+        """Get the Codex CLI command.
 
         Returns:
-            Path to codex binary, command list, or None if not found
+            Command list to execute Codex CLI if found, None otherwise
         """
-        # Try to find codex in PATH
-        codex_path = shutil.which("codex")
-        if codex_path:
-            return codex_path
-
-        # Check common locations
-        common_paths = [
-            Path.home() / ".cache" / ".bun" / "bin" / "codex",
-            Path.home() / ".local" / "bin" / "codex",
-            Path("/usr/local/bin/codex"),
-            Path("/usr/bin/codex"),
-        ]
-
-        for path in common_paths:
-            if path.exists() and path.is_file():
-                return str(path)
-
-        # Try package manager fallback
-        resolver = BinaryResolver()
-        result = resolver.find_binary("codex", "@anthropic-ai/codex")
-        if result:
-            # If it's a package manager command, return the command list
-            if not result.is_direct:
+        try:
+            resolver = BinaryResolver()
+            result = resolver.find_binary("codex", "@openai/codex")
+            if result:
+                # Always return as command list for consistency
                 return result.command
-            # Otherwise return the direct path
-            return result.command[0] if result.command else None
+            return None
+        except Exception:
+            return None
 
-        return None
+    def get_binary_path(self) -> list[str] | None:
+        """Alias for get_cli_path for backward compatibility."""
+        return self.get_cli_path()
 
     async def _get_codex_version(self) -> str:
         """Get Codex CLI version."""
         try:
             # Try to find codex command
             resolver = BinaryResolver()
-            result = resolver.find_binary("codex", "@anthropic-ai/codex")
+            result = resolver.find_binary("codex", "@openai/codex")
 
             if not result:
                 raise FileNotFoundError("Codex CLI not found")
@@ -204,7 +188,7 @@ class CodexDetectionService:
 
             # Find codex command
             resolver = BinaryResolver()
-            result = resolver.find_binary("codex", "@anthropic-ai/codex")
+            result = resolver.find_binary("codex", "@openai/codex")
 
             if not result:
                 raise FileNotFoundError("Codex CLI not found for header detection")
@@ -311,7 +295,7 @@ class CodexDetectionService:
 
         # Load fallback data from package data file
         package_data_file = (
-            Path(__file__).parent.parent / "data" / "codex_headers_fallback.json"
+            Path(__file__).parent / "data" / "codex_headers_fallback.json"
         )
         with package_data_file.open("r") as f:
             fallback_data_dict = json.load(f)

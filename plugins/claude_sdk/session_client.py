@@ -450,7 +450,7 @@ class SessionClient:
 
             return
 
-        # Legacy path - should not happen with queue-based architecture
+        # Should not happen with queue-based architecture
         logger.warning(
             "session_no_handle_for_drain",
             session_id=self.session_id,

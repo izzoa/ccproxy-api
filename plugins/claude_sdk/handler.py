@@ -21,13 +21,13 @@ from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.utils.model_mapping import map_model_to_claude
 from ccproxy.utils.simple_request_logger import append_streaming_log, write_request_log
+from plugins.claude_sdk.exceptions import StreamTimeoutError
+from plugins.claude_sdk.manager import SessionManager
+from plugins.claude_sdk.options import OptionsHandler
 
 from .client import ClaudeSDKClient
-from .config import SDKMessageMode
+from .config import ClaudeSDKSettings, SDKMessageMode
 from .converter import MessageConverter
-from .exceptions import StreamTimeoutError
-from .manager import SessionManager
-from .options import OptionsHandler
 from .streaming import ClaudeStreamProcessor
 
 
@@ -57,21 +57,21 @@ class ClaudeSDKHandler:
 
     def __init__(
         self,
+        config: ClaudeSDKSettings,
         sdk_client: ClaudeSDKClient | None = None,
         auth_manager: AuthManager | None = None,
         metrics: PrometheusMetrics | None = None,
-        settings: Settings | None = None,
         session_manager: SessionManager | None = None,
     ) -> None:
         """Initialize Claude SDK handler."""
+        self.config = config
         self.sdk_client = sdk_client or ClaudeSDKClient(
-            settings=settings, session_manager=session_manager
+            config=config, session_manager=session_manager
         )
         self.auth_manager = auth_manager
         self.metrics = metrics
-        self.settings = settings
         self.message_converter = MessageConverter()
-        self.options_handler = OptionsHandler(settings=settings)
+        self.options_handler = OptionsHandler(config=config)
         self.stream_processor = ClaudeStreamProcessor(
             message_converter=self.message_converter,
             metrics=self.metrics,
@@ -278,11 +278,11 @@ class ClaudeSDKHandler:
 
         logger.debug("claude_sdk_completion_received")
         mode = (
-            _convert_sdk_message_mode(self.settings.claude.sdk_message_mode)
-            if self.settings
+            _convert_sdk_message_mode(self.config.sdk_message_mode)
+            if self.config
             else SDKMessageMode.FORWARD
         )
-        pretty_format = self.settings.claude.pretty_format if self.settings else True
+        pretty_format = self.config.pretty_format if self.config else True
 
         response = self.message_converter.convert_to_anthropic_response(
             assistant_message, result_message, model, mode, pretty_format
@@ -371,11 +371,11 @@ class ClaudeSDKHandler:
         """Stream completion responses with business logic."""
         request_id = ctx.request_id
         sdk_message_mode = (
-            _convert_sdk_message_mode(self.settings.claude.sdk_message_mode)
-            if self.settings
+            _convert_sdk_message_mode(self.config.sdk_message_mode)
+            if self.config
             else SDKMessageMode.FORWARD
         )
-        pretty_format = self.settings.claude.pretty_format if self.settings else True
+        pretty_format = self.config.pretty_format if self.config else True
 
         # Convert messages to single SDKMessage
         sdk_message = self._convert_messages_to_sdk_message(messages, session_id)

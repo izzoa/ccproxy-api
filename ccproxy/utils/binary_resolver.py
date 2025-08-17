@@ -19,6 +19,7 @@ class BinaryCommand(NamedTuple):
 
     command: list[str]
     is_direct: bool
+    is_in_path: bool
     package_manager: str | None = None
 
 
@@ -41,12 +42,14 @@ class BinaryResolver:
 
     KNOWN_PACKAGES = {
         "claude": "@anthropic-ai/claude-code",
-        "codex": "@anthropic-ai/codex",
+        "codex": "@openai/codex",
+        "gemini": "@google/gemini-cli",
     }
 
     def __init__(
         self,
         fallback_enabled: bool = True,
+        package_manager_only: bool = False,
         preferred_package_manager: str | None = None,
         package_manager_priority: list[str] | None = None,
     ):
@@ -54,10 +57,12 @@ class BinaryResolver:
 
         Args:
             fallback_enabled: Whether to use package manager fallback
+            package_manager_only: Skip direct binary lookup and use package managers exclusively
             preferred_package_manager: Preferred package manager (bunx, pnpm, npx)
             package_manager_priority: Custom priority order for package managers
         """
         self.fallback_enabled = fallback_enabled
+        self.package_manager_only = package_manager_only
         self.preferred_package_manager = preferred_package_manager
         self.package_manager_priority = package_manager_priority or [
             "bunx",
@@ -67,25 +72,65 @@ class BinaryResolver:
         self._available_managers: dict[str, bool] | None = None
 
     def find_binary(
-        self, binary_name: str, package_name: str | None = None
+        self,
+        binary_name: str,
+        package_name: str | None = None,
+        package_manager_only: bool | None = None,
+        fallback_enabled: bool | None = None,
     ) -> BinaryCommand | None:
         """Find a binary with optional package manager fallback.
 
         Args:
-            binary_name: Name of the binary to find
+            binary_name: Name of the binary to find. Can be:
+                - Simple binary name (e.g., "claude")
+                - Full package name (e.g., "@anthropic-ai/claude-code")
             package_name: NPM package name if different from binary name
 
         Returns:
             BinaryCommand with resolved command or None if not found
         """
-        # First, try direct binary lookup
+        if package_manager_only is None:
+            package_manager_only = self.package_manager_only
+        if fallback_enabled is None:
+            fallback_enabled = self.fallback_enabled
+
+        # Determine if binary_name is a full package name (contains @ or /)
+        is_full_package = "@" in binary_name or "/" in binary_name
+
+        if is_full_package and package_name is None:
+            # If binary_name is a full package name, use it as the package
+            # and extract the binary name from it
+            package_name = binary_name
+            # Extract binary name from package (last part after /)
+            binary_name = binary_name.split("/")[-1]
+
+        # If package_manager_only mode, skip direct binary lookup
+        if package_manager_only:
+            logger.debug("package_manager_only_mode", binary=binary_name)
+            package_name = package_name or self.KNOWN_PACKAGES.get(
+                binary_name, binary_name
+            )
+            return self._find_via_package_manager(binary_name, package_name)
+
+        # First, try direct binary lookup in PATH
         direct_path = shutil.which(binary_name)
         if direct_path:
             logger.debug("binary_found_directly", binary=binary_name, path=direct_path)
-            return BinaryCommand(command=[direct_path], is_direct=True)
+            return BinaryCommand(command=[direct_path], is_direct=True, is_in_path=True)
+
+        # Check common installation locations
+        common_paths = self._get_common_paths(binary_name)
+        for path in common_paths:
+            if path.exists() and path.is_file():
+                logger.debug(
+                    "binary_found_in_common_path", binary=binary_name, path=str(path)
+                )
+                return BinaryCommand(
+                    command=[str(path)], is_direct=True, is_in_path=False
+                )
 
         # If fallback is disabled, stop here
-        if not self.fallback_enabled:
+        if not fallback_enabled:
             logger.debug("binary_fallback_disabled", binary=binary_name)
             return None
 
@@ -126,6 +171,7 @@ class BinaryResolver:
                 return BinaryCommand(
                     command=cmd,
                     is_direct=False,
+                    is_in_path=False,
                     package_manager=self.preferred_package_manager,
                 )
 
@@ -143,7 +189,10 @@ class BinaryResolver:
                     command=cmd,
                 )
                 return BinaryCommand(
-                    command=cmd, is_direct=False, package_manager=manager_name
+                    command=cmd,
+                    is_direct=False,
+                    is_in_path=False,
+                    package_manager=manager_name,
                 )
 
         logger.debug(
@@ -172,6 +221,38 @@ class BinaryResolver:
             "npx": ["npx", "--yes", package_name],
         }
         return commands.get(manager_name)
+
+    def _get_common_paths(self, binary_name: str) -> list[Path]:
+        """Get common installation paths for a binary.
+
+        Args:
+            binary_name: Name of the binary
+
+        Returns:
+            List of paths to check
+        """
+        paths = [
+            # User-specific locations
+            # Path.home() / ".cache" / ".bun" / "bin" / binary_name,
+            Path.home() / ".local" / "bin" / binary_name,
+            Path.home() / ".local" / "share" / "nvim" / "mason" / "bin" / binary_name,
+            Path.home() / ".npm-global" / "bin" / binary_name,
+            Path.home() / "bin" / binary_name,
+            # System locations
+            Path("/usr/local/bin") / binary_name,
+            Path("/usr/bin") / binary_name,
+            Path("/opt/homebrew/bin") / binary_name,  # macOS ARM
+            # Node/npm locations
+            Path.home()
+            / ".nvm"
+            / "versions"
+            / "node"
+            / "default"
+            / "bin"
+            / binary_name,
+            Path.home() / ".volta" / "bin" / binary_name,
+        ]
+        return paths
 
     def _get_available_managers(self) -> dict[str, bool]:
         """Get available package managers on the system.
@@ -209,6 +290,35 @@ class BinaryResolver:
 
         return self._available_managers
 
+    def get_available_package_managers(self) -> list[str]:
+        """Get list of available package managers on the system.
+
+        Returns:
+            List of package manager names that are available (e.g., ['bunx', 'pnpm'])
+        """
+        available = self._get_available_managers()
+        return [name for name, is_available in available.items() if is_available]
+
+    def get_package_manager_info(self) -> dict[str, dict[str, str | bool | int]]:
+        """Get detailed information about package managers.
+
+        Returns:
+            Dictionary with package manager info including availability and priority
+        """
+        available = self._get_available_managers()
+        info: dict[str, dict[str, str | bool | int]] = {}
+
+        for name, config in self.PACKAGE_MANAGERS.items():
+            exec_cmd = config.get("exec_cmd", name)
+            info[name] = {
+                "available": bool(available.get(name, False)),
+                "priority": int(config["priority"]),
+                "check_command": str(" ".join(config["check_cmd"])),
+                "exec_command": str(exec_cmd if exec_cmd is not None else name),
+            }
+
+        return info
+
     def clear_cache(self) -> None:
         """Clear all caches."""
         # Reset the available managers cache
@@ -226,6 +336,7 @@ class BinaryResolver:
         """
         return cls(
             fallback_enabled=settings.binary.fallback_enabled,
+            package_manager_only=settings.binary.package_manager_only,
             preferred_package_manager=settings.binary.preferred_package_manager,
             package_manager_priority=settings.binary.package_manager_priority,
         )
@@ -243,7 +354,9 @@ def find_binary_with_fallback(
     """Convenience function to find a binary with package manager fallback.
 
     Args:
-        binary_name: Name of the binary to find
+        binary_name: Name of the binary to find. Can be:
+            - Simple binary name (e.g., "claude")
+            - Full package name (e.g., "@anthropic-ai/claude-code")
         package_name: NPM package name if different from binary name
         fallback_enabled: Whether to use package manager fallback
 
@@ -268,3 +381,21 @@ def is_package_manager_command(command: list[str]) -> bool:
         return False
     first_cmd = Path(command[0]).name
     return first_cmd in ["npx", "bunx", "pnpm"]
+
+
+def get_available_package_managers() -> list[str]:
+    """Convenience function to get available package managers using default resolver.
+
+    Returns:
+        List of package manager names that are available
+    """
+    return _default_resolver.get_available_package_managers()
+
+
+def get_package_manager_info() -> dict[str, dict[str, str | bool | int]]:
+    """Convenience function to get package manager info using default resolver.
+
+    Returns:
+        Dictionary with package manager info including availability and priority
+    """
+    return _default_resolver.get_package_manager_info()

@@ -35,21 +35,26 @@ class TestClaudeSDKClient:
 
     def test_init_default_values(self) -> None:
         """Test client initialization with default values."""
-        client: ClaudeSDKClient = ClaudeSDKClient()
+        from plugins.claude_sdk.config import ClaudeSDKSettings
+
+        config = ClaudeSDKSettings()
+        client: ClaudeSDKClient = ClaudeSDKClient(config=config)
 
         assert client._last_api_call_time_ms == 0.0
-        assert client._settings is None
+        assert client.config is config
         assert client._session_manager is None
 
     def test_init_with_session_manager(self) -> None:
         """Test client initialization with session manager."""
-        mock_settings: Mock = Mock()  # Descriptive mock for settings
+        from plugins.claude_sdk.config import ClaudeSDKSettings
+
+        config = ClaudeSDKSettings()
         mock_session_manager: Mock = Mock()  # Descriptive mock for session manager
         client: ClaudeSDKClient = ClaudeSDKClient(
-            settings=mock_settings, session_manager=mock_session_manager
+            config=config, session_manager=mock_session_manager
         )
 
-        assert client._settings is mock_settings
+        assert client.config is config
         assert client._session_manager is mock_session_manager
 
     @pytest.mark.asyncio

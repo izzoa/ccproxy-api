@@ -65,21 +65,5 @@ class CoreServices:
                         self.logger.error(f"Invalid config for {plugin_name}: {e}")
                         return {}
 
-        # Fallback to legacy hardcoded configs for backward compatibility
-        # This will be removed once all plugins are migrated
-        if plugin_name == "claude_sdk":
-            # Check if we have it in plugins dict first
-            if plugin_name in self.settings.plugins:
-                return self.settings.plugins[plugin_name]
-            # Otherwise fallback to legacy claude settings
-            if hasattr(self.settings, "claude"):
-                return self.settings.claude.model_dump()
-        elif plugin_name == "claude_api":
-            # Check plugins dictionary
-            return self.settings.plugins.get(plugin_name, {})
-        elif plugin_name == "codex":
-            # Codex config now comes from plugins dictionary
-            return self.settings.plugins.get("codex", {})
-
         # Default: look in plugins dictionary
         return self.settings.plugins.get(plugin_name, {})

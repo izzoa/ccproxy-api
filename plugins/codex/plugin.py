@@ -79,7 +79,7 @@ class Plugin(ProviderPlugin):
         from ccproxy.auth.openai import OpenAITokenManager
 
         auth_manager = OpenAITokenManager()
-        logger.info(
+        logger.debug(
             "codex_plugin_auth_setup",
             auth_manager_type=type(auth_manager).__name__,
             storage_location=auth_manager.get_storage_location(),
@@ -89,7 +89,7 @@ class Plugin(ProviderPlugin):
         has_creds = await auth_manager.has_credentials()
         if has_creds:
             token = await auth_manager.get_valid_token()
-            logger.info(
+            logger.debug(
                 "codex_plugin_auth_status",
                 has_credentials=True,
                 has_valid_token=bool(token),
@@ -103,7 +103,7 @@ class Plugin(ProviderPlugin):
 
         self._adapter.set_auth_manager(auth_manager)
         self._auth_manager = auth_manager  # Store for health checks
-        logger.info("codex_plugin_auth_manager_set", adapter_has_auth=True)
+        logger.debug("codex_plugin_auth_manager_set", adapter_has_auth=True)
 
         # Set up detection service for the adapter
         from .detection_service import CodexDetectionService
@@ -111,7 +111,7 @@ class Plugin(ProviderPlugin):
         detection_service = CodexDetectionService(services.settings)
 
         # Initialize detection service to capture Codex CLI headers
-        logger.info("codex_plugin_initializing_detection")
+        logger.debug("codex_plugin_initializing_detection")
         try:
             await detection_service.initialize_detection()
 
@@ -120,7 +120,7 @@ class Plugin(ProviderPlugin):
             binary_path = detection_service.get_binary_path()
 
             if binary_path:
-                logger.info(
+                logger.debug(
                     "codex_cli_available",
                     status="available",
                     version=version,
@@ -133,7 +133,7 @@ class Plugin(ProviderPlugin):
                     msg="Codex CLI not found in PATH or common locations",
                 )
 
-            logger.info(
+            logger.debug(
                 "codex_plugin_detection_initialized",
                 has_cached_data=detection_service.get_cached_data() is not None,
                 version=version,
@@ -147,7 +147,63 @@ class Plugin(ProviderPlugin):
 
         self._adapter.set_detection_service(detection_service)
         self._detection_service = detection_service  # Store for health checks
-        logger.info("codex_plugin_detection_service_set", adapter_has_detection=True)
+        logger.debug("codex_plugin_detection_service_set", adapter_has_detection=True)
+
+    def get_summary(self) -> dict[str, Any]:
+        """Get plugin summary for consolidated logging."""
+        summary = {
+            "models": "auto",  # Codex discovers models dynamically
+        }
+
+        # Add basic authentication status (detailed auth info requires async call)
+        if self._auth_manager:
+            summary["auth"] = "configured"
+        else:
+            summary["auth"] = "not_configured"
+
+        # Add CLI information
+        if self._detection_service:
+            cli_path = self._detection_service.get_cli_path()
+            cli_version = self._detection_service.get_version()
+            if cli_path and cli_version:
+                summary["cli_version"] = cli_version
+                summary["cli_path"] = cli_path
+
+                # Determine CLI source
+                if isinstance(cli_path, list) and len(cli_path) > 1:
+                    summary["cli_source"] = "package_manager"
+                    summary["package_manager"] = cli_path[0]
+                else:
+                    summary["cli_source"] = "in_path"
+                    if isinstance(cli_path, list):
+                        summary["cli_path"] = cli_path[0]
+
+        return summary
+
+    async def get_auth_summary(self) -> dict[str, Any]:
+        """Get detailed authentication status (async version for use in plugin manager)."""
+        if not self._auth_manager:
+            return {"auth": "not_configured"}
+
+        try:
+            auth_status = await self._auth_manager.get_auth_status()
+            summary = {"auth": "not_configured"}
+
+            if auth_status.get("auth_configured"):
+                if auth_status.get("token_available"):
+                    summary["auth"] = "authenticated"
+                    if "time_remaining" in auth_status:
+                        summary["auth_expires"] = auth_status["time_remaining"]
+                    if "token_expired" in auth_status:
+                        summary["auth_expired"] = auth_status["token_expired"]
+                else:
+                    summary["auth"] = "no_token"
+            else:
+                summary["auth"] = "not_configured"
+
+            return summary
+        except Exception:
+            return {"auth": "status_error"}
 
     async def shutdown(self) -> None:
         """Cleanup on shutdown."""

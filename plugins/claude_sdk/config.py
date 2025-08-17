@@ -178,6 +178,26 @@ class ClaudeSDKSettings(ProviderConfig):
     )
     sdk_session_pool: SessionPoolSettings | None = None
 
+    # Default session configuration
+    default_session_id: str | None = Field(
+        default=None,
+        description="Default session ID to use when none is provided. "
+        "Useful for single-user setups or development environments.",
+    )
+    auto_generate_default_session: bool = Field(
+        default=False,
+        description="Automatically generate a random default session ID at startup. "
+        "Overrides default_session_id if enabled. Useful for single-user "
+        "setups where you want session persistence during runtime.",
+    )
+
+    @model_validator(mode="after")
+    def ensure_session_pool_settings(self) -> "ClaudeSDKSettings":
+        """Ensure sdk_session_pool is initialized."""
+        if self.sdk_session_pool is None:
+            self.sdk_session_pool = SessionPoolSettings()
+        return self
+
     class Config:
         """Pydantic configuration."""
 

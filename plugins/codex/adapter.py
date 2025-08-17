@@ -107,7 +107,10 @@ class CodexAdapter(BaseAdapter):
             self.logger.debug("codex_adapter_initialized")
 
         except Exception as e:
-            self.logger.error(f"Failed to initialize Codex adapter: {e}")
+            self.logger.error(
+                "codex_adapter_initialization_failed",
+                error=str(e),
+            )
             raise HTTPException(
                 status_code=503, detail=f"Codex initialization failed: {str(e)}"
             ) from e

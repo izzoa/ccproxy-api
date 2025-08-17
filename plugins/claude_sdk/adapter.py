@@ -11,8 +11,10 @@ from starlette.responses import Response, StreamingResponse
 from ccproxy.services.adapters.base import BaseAdapter
 
 from .auth import NoOpAuthManager
+from .config import ClaudeSDKSettings
 from .format_adapter import ClaudeSDKFormatAdapter
 from .handler import ClaudeSDKHandler
+from .manager import SessionManager
 from .transformers.request import ClaudeSDKRequestTransformer
 from .transformers.response import ClaudeSDKResponseTransformer
 
@@ -27,17 +29,62 @@ class ClaudeSDKAdapter(BaseAdapter):
     following the same pattern as claude_api and codex plugins.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config: ClaudeSDKSettings) -> None:
         """Initialize the Claude SDK adapter."""
+        import uuid
+
         self.logger = structlog.get_logger(__name__)
-        self.proxy_service: Any | None = None
-        self.handler: ClaudeSDKHandler | None = None
-        self.format_adapter: ClaudeSDKFormatAdapter | None = None
-        self.request_transformer: ClaudeSDKRequestTransformer | None = None
-        self.response_transformer: ClaudeSDKResponseTransformer | None = None
-        self.auth_manager: NoOpAuthManager | None = None
-        self._initialized = False
+        self.config = config
+
+        # Generate or set default session ID
+        self._runtime_default_session_id = None
+        if (
+            config.auto_generate_default_session
+            and config.sdk_session_pool
+            and config.sdk_session_pool.enabled
+        ):
+            # Generate a random session ID for this runtime
+            self._runtime_default_session_id = f"auto-{uuid.uuid4().hex[:12]}"
+            self.logger.info(
+                "claude_sdk_auto_generated_session",
+                session_id=self._runtime_default_session_id,
+                lifetime="runtime",
+            )
+        elif config.default_session_id:
+            self._runtime_default_session_id = config.default_session_id
+            self.logger.debug(
+                "claude_sdk_using_configured_default_session",
+                session_id=self._runtime_default_session_id,
+            )
+
+        # Initialize SessionManager if session pool is enabled
+        session_manager = None
+        if config.sdk_session_pool and config.sdk_session_pool.enabled:
+            session_manager = SessionManager(config=config)
+            self.logger.debug(
+                "claude_sdk_adapter_session_pool_enabled",
+                session_ttl=config.sdk_session_pool.session_ttl,
+                max_sessions=config.sdk_session_pool.max_sessions,
+                has_default_session=bool(self._runtime_default_session_id),
+                auto_generated=config.auto_generate_default_session,
+            )
+
+        self.session_manager = session_manager
+        self.handler = ClaudeSDKHandler(config=config, session_manager=session_manager)
+        self.format_adapter = ClaudeSDKFormatAdapter()
+        self.request_transformer = ClaudeSDKRequestTransformer()
+        self.response_transformer = ClaudeSDKResponseTransformer()
+        self.auth_manager = NoOpAuthManager()
         self._detection_service: Any | None = None
+        self._initialized = False
+
+    async def initialize(self) -> None:
+        """Initialize the adapter and start session manager if needed."""
+        if not self._initialized:
+            if self.session_manager:
+                await self.session_manager.start()
+                self.logger.info("claude_sdk_adapter_session_manager_started")
+            self._initialized = True
 
     def set_detection_service(self, detection_service: Any) -> None:
         """Set the detection service.
@@ -55,74 +102,11 @@ class ClaudeSDKAdapter(BaseAdapter):
         """
         self.proxy_service = proxy_service
 
-    def _ensure_initialized(self, request: Request) -> None:
-        """Ensure adapter is properly initialized.
-
-        Args:
-            request: FastAPI request object
-
-        Raises:
-            HTTPException: If initialization fails
-        """
-        if self._initialized:
-            return
-
-        try:
-            # Get proxy service from app state if not set
-            if not self.proxy_service:
-                proxy_service = getattr(request.app.state, "proxy_service", None)
-                if not proxy_service:
-                    raise HTTPException(
-                        status_code=503, detail="Proxy service not available"
-                    )
-                self.proxy_service = proxy_service
-
-            # Initialize components
-            from ccproxy.config.settings import get_settings
-
-            settings = get_settings()
-
-            # Create handler with SDK service logic
-            self.handler = ClaudeSDKHandler(settings=settings)
-
-            # Create format adapter for OpenAI conversion
-            self.format_adapter = ClaudeSDKFormatAdapter()
-
-            # Create transformers
-            self.request_transformer = ClaudeSDKRequestTransformer()
-            self.response_transformer = ClaudeSDKResponseTransformer()
-
-            # Create auth manager (no-op for SDK)
-            self.auth_manager = NoOpAuthManager()
-
-            self._initialized = True
-            self.logger.debug("Claude SDK adapter initialized successfully")
-
-        except Exception as e:
-            self.logger.error(f"Failed to initialize Claude SDK adapter: {e}")
-            raise HTTPException(
-                status_code=503, detail=f"Claude SDK initialization failed: {str(e)}"
-            ) from e
-
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
     ) -> Response | StreamingResponse:
-        """Handle a request through Claude SDK.
-
-        This method is called by ProxyService when it encounters the special
-        claude-sdk:// protocol. We handle the request directly using the handler
-        rather than delegating back to avoid circular routing.
-
-        Args:
-            request: FastAPI request object
-            endpoint: Target endpoint path
-            method: HTTP method
-            **kwargs: Additional arguments
-
-        Returns:
-            Response from Claude SDK
-        """
-        self._ensure_initialized(request)
+        # Ensure adapter is initialized
+        await self.initialize()
 
         # Parse request body
         body = await request.body()
@@ -147,7 +131,51 @@ class ClaudeSDKAdapter(BaseAdapter):
         temperature = request_data.get("temperature")
         max_tokens = request_data.get("max_tokens")
         stream = request_data.get("stream", False)
-        session_id = request_data.get("session_id")
+
+        # Get session_id from multiple sources (in priority order):
+        # 1. URL path (stored in request.state by the route handler)
+        # 2. Query parameters
+        # 3. Request body
+        # 4. Default from config (if session pool is enabled)
+        session_id = getattr(request.state, "session_id", None)
+        source = "path" if session_id else None
+
+        if not session_id and request.query_params:
+            session_id = request.query_params.get("session_id")
+            source = "query" if session_id else None
+
+        if not session_id:
+            session_id = request_data.get("session_id")
+            source = "body" if session_id else None
+
+        if (
+            not session_id
+            and self._runtime_default_session_id
+            and self.config.sdk_session_pool
+            and self.config.sdk_session_pool.enabled
+        ):
+            # Use runtime default session_id (either configured or auto-generated)
+            session_id = self._runtime_default_session_id
+            source = (
+                "default"
+                if not self.config.auto_generate_default_session
+                else "auto-generated"
+            )
+
+        # Log session_id source for debugging
+        if session_id:
+            self.logger.debug(
+                "session_id_extracted",
+                session_id=session_id,
+                source=source,
+                has_default_configured=bool(self.config.default_session_id),
+                auto_generate_enabled=self.config.auto_generate_default_session,
+                runtime_default=self._runtime_default_session_id,
+                session_pool_enabled=bool(
+                    self.config.sdk_session_pool
+                    and self.config.sdk_session_pool.enabled
+                ),
+            )
 
         # Get or create request context for observability
         request_context = getattr(request.state, "context", None)
@@ -255,7 +283,10 @@ class ClaudeSDKAdapter(BaseAdapter):
                                 data = json.dumps(chunk)
                                 yield f"data: {data}\n\n".encode()
                     except Exception as e:
-                        self.logger.error(f"Streaming error: {e}")
+                        self.logger.error(
+                            "claude_sdk_streaming_error",
+                            error=str(e),
+                        )
                         error_chunk = {"error": str(e)}
                         yield f"data: {json.dumps(error_chunk)}\n\n".encode()
                         # Don't add extra [DONE] here as OpenAIStreamProcessor already adds it
@@ -294,7 +325,10 @@ class ClaudeSDKAdapter(BaseAdapter):
                 )
 
         except Exception as e:
-            self.logger.error(f"Failed to handle SDK request: {e}")
+            self.logger.error(
+                "claude_sdk_request_handling_failed",
+                error=str(e),
+            )
             raise HTTPException(
                 status_code=500, detail=f"SDK request failed: {str(e)}"
             ) from e
@@ -315,7 +349,8 @@ class ClaudeSDKAdapter(BaseAdapter):
         Returns:
             Streaming response from Claude SDK
         """
-        self._ensure_initialized(request)
+        if not self._initialized:
+            await self.initialize()
 
         # Parse and modify request to ensure stream=true
         body = await request.body()
@@ -351,7 +386,11 @@ class ClaudeSDKAdapter(BaseAdapter):
         # Ensure we return a streaming response
         if not isinstance(result, StreamingResponse):
             # This shouldn't happen since we forced stream=true, but handle it gracefully
-            self.logger.warning("Expected StreamingResponse but got regular Response")
+            self.logger.warning(
+                "claude_sdk_unexpected_response_type",
+                expected="StreamingResponse",
+                actual=type(result).__name__,
+            )
             return StreamingResponse(
                 iter([result.body if hasattr(result, "body") else b""]),
                 media_type="text/event-stream",
@@ -362,7 +401,9 @@ class ClaudeSDKAdapter(BaseAdapter):
 
     async def close(self) -> None:
         """Cleanup resources when shutting down."""
+        if self.session_manager:
+            await self.session_manager.shutdown()
         if self.handler:
             await self.handler.close()
         self._initialized = False
-        self.logger.debug("Claude SDK adapter cleaned up")
+        self.logger.debug("claude_sdk_adapter_cleanup_completed")

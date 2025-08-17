@@ -93,7 +93,7 @@ class CodexDetectionRefreshTask(BaseScheduledTask):
 
     async def setup(self) -> None:
         """Perform any setup required before task execution starts."""
-        logger.info(
+        logger.debug(
             "codex_detection_refresh_setup",
             task_name=self.name,
             interval_seconds=self.interval_seconds,

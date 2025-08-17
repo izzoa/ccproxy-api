@@ -11,6 +11,11 @@ class BinarySettings(BaseModel):
         description="Enable package manager fallback when binaries are not found",
     )
 
+    package_manager_only: bool = Field(
+        default=True,
+        description="Skip direct binary lookup and use package managers exclusively",
+    )
+
     preferred_package_manager: str | None = Field(
         default=None,
         description="Preferred package manager (bunx, pnpm, npx). If not set, auto-detects based on availability",

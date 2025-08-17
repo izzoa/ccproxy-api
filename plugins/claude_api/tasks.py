@@ -40,13 +40,19 @@ class ClaudeAPIDetectionRefreshTask(BaseScheduledTask):
         """Execute the detection refresh."""
         if self._first_run and self.skip_initial_run:
             self._first_run = False
-            logger.debug(f"Skipping initial run for {self.name}")
+            logger.debug(
+                "claude_api_detection_refresh_skipped_initial",
+                task_name=self.name,
+            )
             return True
 
         self._first_run = False
 
         try:
-            logger.info(f"Starting Claude API detection refresh for {self.name}")
+            logger.info(
+                "claude_api_detection_refresh_starting",
+                task_name=self.name,
+            )
             detection_data = await self.detection_service.initialize_detection()
 
             logger.info(
@@ -57,13 +63,23 @@ class ClaudeAPIDetectionRefreshTask(BaseScheduledTask):
             return True
 
         except Exception as e:
-            logger.error(f"Claude API detection refresh failed: {e}")
+            logger.error(
+                "claude_api_detection_refresh_failed",
+                task_name=self.name,
+                error=str(e),
+            )
             return False
 
     async def setup(self) -> None:
         """Setup before task execution starts."""
-        logger.info(f"Setting up {self.name}")
+        logger.debug(
+            "claude_api_detection_refresh_setup",
+            task_name=self.name,
+        )
 
     async def cleanup(self) -> None:
         """Cleanup after task execution stops."""
-        logger.info(f"Cleaning up {self.name}")
+        logger.info(
+            "claude_api_detection_refresh_cleanup",
+            task_name=self.name,
+        )

@@ -69,7 +69,7 @@ class PluginManager:
             # Discover all plugins using loader
             loader = PluginLoader()
             plugin_instances = await loader.discover_plugins()
-            logger.info(f"Discovered {len(plugin_instances)} plugins")
+            logger.debug(f"Discovered {len(plugin_instances)} plugins")
 
             # Set services on registry so it can initialize plugins
             self.plugin_registry._services = core_services
@@ -90,11 +90,6 @@ class PluginManager:
                     # Store adapter reference locally for quick access
                     if adapter:
                         self.adapters[plugin_instance.name] = adapter
-                        logger.info(
-                            "Plugin initialized",
-                            plugin=plugin_instance.name,
-                            adapter_type=type(adapter).__name__,
-                        )
 
                 except Exception as e:
                     logger.error(
@@ -103,10 +98,57 @@ class PluginManager:
                         error=str(e),
                     )
 
+            # Log consolidated CLI detection summary
+            cli_info = {}
+            for plugin_name in self.adapters:
+                plugin = self.plugin_registry._plugins.get(plugin_name)
+                if (
+                    plugin
+                    and hasattr(plugin, "_detection_service")
+                    and plugin._detection_service
+                ):
+                    detection = plugin._detection_service
+                    if hasattr(detection, "get_cli_path") and hasattr(
+                        detection, "get_version"
+                    ):
+                        cli_path = detection.get_cli_path()
+                        cli_version = detection.get_version()
+                        if cli_path and cli_version:
+                            cli_source = (
+                                "package_manager"
+                                if isinstance(cli_path, list) and len(cli_path) > 1
+                                else "in_path"
+                            )
+                            cli_info[f"{plugin_name}_version"] = cli_version
+                            cli_info[f"{plugin_name}_source"] = cli_source
+
+            if cli_info:
+                cli_info["cache_used"] = True  # Most detection uses cache
+                logger.info("cli_detection_completed", **cli_info)
+
+            # Log consolidated plugin information with auth details
+            for plugin_name in self.adapters:
+                summary = await self.plugin_registry.get_plugin_summary_with_auth(
+                    plugin_name
+                )
+                if summary:
+                    logger.info("plugin_initialized", **summary)
+
+            # Log consolidated background tasks
+            all_tasks = self.plugin_registry.get_all_registered_tasks()
+            if all_tasks:
+                logger.info(
+                    "background_tasks_registered",
+                    tasks=len(all_tasks),
+                    interval_seconds=3600,  # Standard interval for all detection tasks
+                    names=all_tasks,
+                )
+
             self.initialized = True
             logger.info(
-                "Plugin initialization complete",
-                active_plugins=list(self.adapters.keys()),
+                "plugin_system_ready",
+                active_plugins=len(self.adapters),
+                total_routes=len(self.adapters),
             )
 
         except Exception as e:

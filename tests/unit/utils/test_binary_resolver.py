@@ -8,6 +8,8 @@ from ccproxy.config.binary import BinarySettings
 from ccproxy.utils.binary_resolver import (
     BinaryResolver,
     find_binary_with_fallback,
+    get_available_package_managers,
+    get_package_manager_info,
     is_package_manager_command,
 )
 
@@ -32,6 +34,15 @@ class TestBinaryResolver:
         assert resolver.fallback_enabled is False
         assert resolver.preferred_package_manager == "npx"
         assert resolver.package_manager_priority == ["npx", "bunx"]
+
+    def test_init_package_manager_only(self):
+        """Test initialization with package_manager_only mode."""
+        resolver = BinaryResolver(
+            package_manager_only=True,
+            preferred_package_manager="bunx",
+        )
+        assert resolver.package_manager_only is True
+        assert resolver.preferred_package_manager == "bunx"
 
     @patch("shutil.which")
     def test_find_binary_direct_path(self, mock_which):
@@ -162,6 +173,132 @@ class TestBinaryResolver:
 
         assert result is None
 
+    @patch("subprocess.run")
+    @patch("shutil.which")
+    def test_find_binary_with_full_package_name(self, mock_which, mock_run):
+        """Test finding binary with full package name as binary_name."""
+        mock_which.return_value = None
+
+        # Mock package manager availability checks - bunx available
+        def run_side_effect(cmd, **kwargs):
+            if cmd[0] == "bun" and cmd[1] == "--version":
+                return MagicMock(returncode=0, stdout="1.0.0\n")
+            return MagicMock(returncode=1)
+
+        mock_run.side_effect = run_side_effect
+
+        resolver = BinaryResolver()
+        # Pass full package name as binary_name
+        result = resolver.find_binary("@anthropic-ai/claude-code")
+
+        assert result is not None
+        assert result.command == ["bunx", "@anthropic-ai/claude-code"]
+        assert result.is_direct is False
+        assert result.package_manager == "bunx"
+        # Verify that shutil.which was called with extracted binary name
+        mock_which.assert_called_with("claude-code")
+
+    @patch("subprocess.run")
+    @patch("shutil.which")
+    def test_find_binary_with_scoped_package(self, mock_which, mock_run):
+        """Test finding binary with scoped package name."""
+        mock_which.return_value = None
+
+        # Mock package manager availability checks - npx available
+        def run_side_effect(cmd, **kwargs):
+            if cmd[0] == "npx" and cmd[1] == "--version":
+                return MagicMock(returncode=0, stdout="10.2.0\n")
+            return MagicMock(returncode=1)
+
+        mock_run.side_effect = run_side_effect
+
+        resolver = BinaryResolver()
+        # Pass scoped package name
+        result = resolver.find_binary("@myorg/my-tool")
+
+        assert result is not None
+        assert result.command == ["npx", "--yes", "@myorg/my-tool"]
+        assert result.is_direct is False
+        assert result.package_manager == "npx"
+        # Verify that shutil.which was called with extracted binary name
+        mock_which.assert_called_with("my-tool")
+
+    @patch("subprocess.run")
+    @patch("shutil.which")
+    def test_find_binary_package_manager_only_mode(self, mock_which, mock_run):
+        """Test package_manager_only mode skips direct binary lookup."""
+        # Even though binary exists directly, should not use it
+        mock_which.return_value = "/usr/local/bin/claude"
+
+        # Mock package manager availability checks - bunx available
+        def run_side_effect(cmd, **kwargs):
+            if cmd[0] == "bun" and cmd[1] == "--version":
+                return MagicMock(returncode=0, stdout="1.0.0\n")
+            return MagicMock(returncode=1)
+
+        mock_run.side_effect = run_side_effect
+
+        resolver = BinaryResolver(package_manager_only=True)
+        result = resolver.find_binary("claude")
+
+        assert result is not None
+        assert result.command == ["bunx", "@anthropic-ai/claude-code"]
+        assert result.is_direct is False
+        assert result.package_manager == "bunx"
+        # Should not have called shutil.which since we're in package_manager_only mode
+        mock_which.assert_not_called()
+
+    @patch("subprocess.run")
+    @patch("shutil.which")
+    def test_find_binary_package_manager_only_with_full_package(
+        self, mock_which, mock_run
+    ):
+        """Test package_manager_only mode with full package name."""
+        mock_which.return_value = "/usr/local/bin/my-tool"
+
+        # Mock package manager availability checks - npx available
+        def run_side_effect(cmd, **kwargs):
+            if cmd[0] == "npx" and cmd[1] == "--version":
+                return MagicMock(returncode=0, stdout="10.2.0\n")
+            return MagicMock(returncode=1)
+
+        mock_run.side_effect = run_side_effect
+
+        resolver = BinaryResolver(package_manager_only=True)
+        result = resolver.find_binary("@myorg/my-tool")
+
+        assert result is not None
+        assert result.command == ["npx", "--yes", "@myorg/my-tool"]
+        assert result.is_direct is False
+        assert result.package_manager == "npx"
+        # Should not have called shutil.which
+        mock_which.assert_not_called()
+
+    @patch("subprocess.run")
+    @patch("shutil.which")
+    def test_find_binary_with_unscoped_package(self, mock_which, mock_run):
+        """Test finding binary with unscoped package name containing slash."""
+        mock_which.return_value = None
+
+        # Mock package manager availability checks - pnpm available
+        def run_side_effect(cmd, **kwargs):
+            if cmd[0] == "pnpm" and cmd[1] == "--version":
+                return MagicMock(returncode=0, stdout="8.0.0\n")
+            return MagicMock(returncode=1)
+
+        mock_run.side_effect = run_side_effect
+
+        resolver = BinaryResolver()
+        # Pass unscoped package with slash
+        result = resolver.find_binary("some-org/some-package")
+
+        assert result is not None
+        assert result.command == ["pnpm", "dlx", "some-org/some-package"]
+        assert result.is_direct is False
+        assert result.package_manager == "pnpm"
+        # Verify that shutil.which was called with extracted binary name
+        mock_which.assert_called_with("some-package")
+
     def test_find_binary_consistency(self):
         """Test that find_binary returns consistent results."""
         resolver = BinaryResolver()
@@ -206,6 +343,7 @@ class TestBinaryResolver:
         settings = Settings()
         settings.binary = BinarySettings(
             fallback_enabled=False,
+            package_manager_only=True,
             preferred_package_manager="bunx",
             package_manager_priority=["bunx", "npx"],
         )
@@ -213,6 +351,7 @@ class TestBinaryResolver:
         resolver = BinaryResolver.from_settings(settings)
 
         assert resolver.fallback_enabled is False
+        assert resolver.package_manager_only is True
         assert resolver.preferred_package_manager == "bunx"
         assert resolver.package_manager_priority == ["bunx", "npx"]
 
@@ -251,6 +390,45 @@ class TestHelperFunctions:
         assert is_package_manager_command([]) is False
         assert is_package_manager_command(None) is False  # type: ignore
 
+    def test_get_available_package_managers_convenience(self):
+        """Test convenience function for getting available package managers."""
+        # Clear global resolver cache first
+        from ccproxy.utils.binary_resolver import _default_resolver
+
+        _default_resolver.clear_cache()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="1.0.0"),  # bunx
+                MagicMock(returncode=1, stdout=""),  # pnpm
+                MagicMock(returncode=0, stdout="10.2.0"),  # npx
+            ]
+
+            available = get_available_package_managers()
+            assert "bunx" in available
+            assert "npx" in available
+            assert "pnpm" not in available
+
+    def test_get_package_manager_info_convenience(self):
+        """Test convenience function for getting package manager info."""
+        # Clear global resolver cache first
+        from ccproxy.utils.binary_resolver import _default_resolver
+
+        _default_resolver.clear_cache()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="1.0.0"),  # bunx
+                MagicMock(returncode=0, stdout="8.0.0"),  # pnpm
+                MagicMock(returncode=1, stdout=""),  # npx
+            ]
+
+            info = get_package_manager_info()
+            assert info["bunx"]["available"] is True
+            assert info["pnpm"]["available"] is True
+            assert info["npx"]["available"] is False
+            assert all("priority" in mgr_info for mgr_info in info.values())
+
 
 class TestBinarySettings:
     """Test BinarySettings configuration."""
@@ -259,6 +437,7 @@ class TestBinarySettings:
         """Test default binary settings."""
         settings = BinarySettings()
         assert settings.fallback_enabled is True
+        assert settings.package_manager_only is True
         assert settings.preferred_package_manager is None
         assert settings.package_manager_priority == ["bunx", "pnpm", "npx"]
         assert settings.cache_results is True
@@ -267,11 +446,13 @@ class TestBinarySettings:
         """Test custom binary settings."""
         settings = BinarySettings(
             fallback_enabled=False,
+            package_manager_only=True,
             preferred_package_manager="npx",
             package_manager_priority=["npx", "bunx"],
             cache_results=False,
         )
         assert settings.fallback_enabled is False
+        assert settings.package_manager_only is True
         assert settings.preferred_package_manager == "npx"
         assert settings.package_manager_priority == ["npx", "bunx"]
         assert settings.cache_results is False
@@ -294,3 +475,110 @@ class TestBinarySettings:
             package_manager_priority=["npx", "bunx", "npx", "pnpm"]
         )
         assert settings.package_manager_priority == ["npx", "bunx", "pnpm"]
+
+
+class TestPackageManagerListing:
+    """Test package manager listing functionality."""
+
+    def test_get_available_package_managers(self):
+        """Test getting list of available package managers."""
+        with patch("subprocess.run") as mock_run:
+            # Mock bunx and pnpm as available, npx as not available
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="1.0.0"),  # bunx
+                MagicMock(returncode=0, stdout="8.0.0"),  # pnpm
+                MagicMock(returncode=1, stdout=""),  # npx
+            ]
+
+            resolver = BinaryResolver()
+            available = resolver.get_available_package_managers()
+
+            assert "bunx" in available
+            assert "pnpm" in available
+            assert "npx" not in available
+
+    def test_get_package_manager_info(self):
+        """Test getting detailed package manager information."""
+        with patch("subprocess.run") as mock_run:
+            # Mock bunx as available, others as not available
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="1.0.0"),  # bunx
+                MagicMock(returncode=1, stdout=""),  # pnpm
+                MagicMock(returncode=1, stdout=""),  # npx
+            ]
+
+            resolver = BinaryResolver()
+            info = resolver.get_package_manager_info()
+
+            # Check bunx info
+            assert info["bunx"]["available"] is True
+            assert info["bunx"]["priority"] == 1
+            assert info["bunx"]["check_command"] == "bun --version"
+            assert info["bunx"]["exec_command"] == "bunx"
+
+            # Check pnpm info
+            assert info["pnpm"]["available"] is False
+            assert info["pnpm"]["priority"] == 2
+            assert info["pnpm"]["check_command"] == "pnpm --version"
+            assert info["pnpm"]["exec_command"] == "dlx"
+
+            # Check npx info
+            assert info["npx"]["available"] is False
+            assert info["npx"]["priority"] == 3
+            assert info["npx"]["check_command"] == "npx --version"
+            assert info["npx"]["exec_command"] == "npx"
+
+    def test_get_available_package_managers_cached(self):
+        """Test that package manager availability is cached."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="1.0.0"),  # bunx
+                MagicMock(returncode=0, stdout="8.0.0"),  # pnpm
+                MagicMock(returncode=0, stdout="10.2.0"),  # npx
+            ]
+
+            resolver = BinaryResolver()
+
+            # First call should trigger subprocess calls
+            available1 = resolver.get_available_package_managers()
+
+            # Second call should use cache (no more subprocess calls)
+            available2 = resolver.get_available_package_managers()
+
+            assert available1 == available2
+            assert len(available1) == 3
+            assert all(mgr in available1 for mgr in ["bunx", "pnpm", "npx"])
+
+            # Should have called subprocess 3 times (once per manager)
+            assert mock_run.call_count == 3
+
+    def test_clear_cache_resets_package_managers(self):
+        """Test that clearing cache resets package manager detection."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                # First detection
+                MagicMock(returncode=0, stdout="1.0.0"),  # bunx
+                MagicMock(returncode=1, stdout=""),  # pnpm
+                MagicMock(returncode=1, stdout=""),  # npx
+                # Second detection after cache clear
+                MagicMock(returncode=0, stdout="1.0.0"),  # bunx
+                MagicMock(returncode=0, stdout="8.0.0"),  # pnpm
+                MagicMock(returncode=0, stdout="10.2.0"),  # npx
+            ]
+
+            resolver = BinaryResolver()
+
+            # First call - only bunx available
+            available1 = resolver.get_available_package_managers()
+            assert available1 == ["bunx"]
+
+            # Clear cache
+            resolver.clear_cache()
+
+            # Second call - all available
+            available2 = resolver.get_available_package_managers()
+            assert len(available2) == 3
+            assert all(mgr in available2 for mgr in ["bunx", "pnpm", "npx"])
+
+            # Should have called subprocess 6 times total
+            assert mock_run.call_count == 6

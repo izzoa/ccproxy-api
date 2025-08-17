@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shutil
 import socket
 import subprocess
 from pathlib import Path
@@ -56,7 +55,7 @@ class ClaudeAPIDetectionService:
 
             self._cached_data = detected_data
 
-            logger.info(
+            logger.debug(
                 "detection_claude_headers_completed",
                 version=current_version,
                 cached=cached,
@@ -84,29 +83,23 @@ class ClaudeAPIDetectionService:
             return self._cached_data.claude_version
         return None
 
-    def get_cli_path(self) -> str | list[str] | None:
-        """Get the path to the Claude CLI binary or command."""
-        try:
-            # First try direct binary lookup
-            cli_path = shutil.which("claude")
-            if cli_path:
-                return cli_path
+    def get_cli_path(self) -> list[str] | None:
+        """Get the Claude CLI command.
 
-            # Try package manager fallback
+        Returns:
+            Command list to execute Claude CLI if found, None otherwise
+        """
+        try:
             resolver = BinaryResolver()
             result = resolver.find_binary("claude", "@anthropic-ai/claude-code")
             if result:
-                # If it's a package manager command, return the command list
-                if not result.is_direct:
-                    return result.command
-                # Otherwise return the direct path
-                return result.command[0] if result.command else None
-
+                # Always return as command list for consistency
+                return result.command
             return None
         except Exception:
             return None
 
-    def get_binary_path(self) -> str | list[str] | None:
+    def get_binary_path(self) -> list[str] | None:
         """Alias for get_cli_path for consistency with Codex."""
         return self.get_cli_path()
 
@@ -291,7 +284,7 @@ class ClaudeAPIDetectionService:
 
         # Load fallback data from package data file
         package_data_file = (
-            Path(__file__).parent.parent / "data" / "claude_headers_fallback.json"
+            Path(__file__).parent / "data" / "claude_headers_fallback.json"
         )
         with package_data_file.open("r") as f:
             fallback_data_dict = json.load(f)

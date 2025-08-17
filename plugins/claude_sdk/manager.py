@@ -16,18 +16,15 @@ from typing import Any, TypeAlias
 import structlog
 from claude_code_sdk import ClaudeCodeOptions
 
-from ccproxy.config.settings import Settings
 from ccproxy.core.errors import ClaudeProxyError
 
-from .config import SessionPoolSettings
+from .config import ClaudeSDKSettings, SessionPoolSettings
 from .session_client import SessionClient
 from .session_pool import SessionPool
 
 
-logger = structlog.get_logger(__name__)
-
-
-MetricsFactory: TypeAlias = Callable[[], Any | None]
+# Type alias for metrics factory function
+MetricsFactory: TypeAlias = Callable[[], Any]
 
 
 class SessionManager:
@@ -35,13 +32,13 @@ class SessionManager:
 
     def __init__(
         self,
-        settings: Settings,
+        config: ClaudeSDKSettings,
         metrics_factory: MetricsFactory | None = None,
     ) -> None:
         """Initialize SessionManager with optional settings and metrics factory.
 
         Args:
-            settings: Optional settings containing session pool configuration
+            config: Plugin-specific configuration for Claude SDK
             metrics_factory: Optional callable that returns a metrics instance.
                            If None, no metrics will be used.
         """
@@ -49,7 +46,7 @@ class SessionManager:
 
         logger = structlog.get_logger(__name__)
 
-        self._settings = settings
+        self.config = config
         self._session_pool: SessionPool | None = None
         self._lock = asyncio.Lock()
         self._metrics_factory = metrics_factory
@@ -58,14 +55,18 @@ class SessionManager:
         session_pool_enabled = self._should_enable_session_pool()
         logger.debug(
             "session_manager_init",
-            has_settings=bool(settings),
+            has_config=bool(config),
             has_metrics_factory=bool(metrics_factory),
             session_pool_enabled=session_pool_enabled,
         )
 
         if session_pool_enabled:
             # Convert core settings to plugin settings
-            core_pool_settings = settings.claude.sdk_session_pool
+            core_pool_settings = self.config.sdk_session_pool
+            if core_pool_settings is None:
+                logger.debug("session_pool_disabled", reason="no_settings")
+                return
+
             plugin_pool_settings = SessionPoolSettings(
                 enabled=core_pool_settings.enabled,
                 session_ttl=core_pool_settings.session_ttl,
@@ -83,7 +84,7 @@ class SessionManager:
                 ),
             )
             self._session_pool = SessionPool(plugin_pool_settings)
-            logger.info(
+            logger.debug(
                 "session_manager_session_pool_initialized",
                 session_ttl=self._session_pool.config.session_ttl,
                 max_sessions=self._session_pool.config.max_sessions,
@@ -101,17 +102,11 @@ class SessionManager:
 
         logger = structlog.get_logger(__name__)
 
-        if not self._settings:
-            logger.debug("session_pool_check", decision="no_settings", enabled=False)
+        if not self.config:
+            logger.debug("session_pool_check", decision="no_config", enabled=False)
             return False
 
-        if not hasattr(self._settings, "claude"):
-            logger.debug(
-                "session_pool_check", decision="no_claude_settings", enabled=False
-            )
-            return False
-
-        session_pool_settings = getattr(self._settings.claude, "sdk_session_pool", None)
+        session_pool_settings = getattr(self.config, "sdk_session_pool", None)
         if not session_pool_settings:
             logger.debug(
                 "session_pool_check", decision="no_session_pool_settings", enabled=False
@@ -175,12 +170,18 @@ class SessionManager:
             True if session was found and interrupted, False otherwise
         """
         if not self._session_pool:
+            import structlog
+
+            logger = structlog.get_logger(__name__)
             logger.warning(
                 "session_manager_interrupt_session_no_pool",
                 session_id=session_id,
             )
             return False
 
+        import structlog
+
+        logger = structlog.get_logger(__name__)
         logger.info(
             "session_manager_interrupt_session",
             session_id=session_id,
@@ -195,9 +196,15 @@ class SessionManager:
             Number of sessions that were interrupted
         """
         if not self._session_pool:
+            import structlog
+
+            logger = structlog.get_logger(__name__)
             logger.warning("session_manager_interrupt_all_no_pool")
             return 0
 
+        import structlog
+
+        logger = structlog.get_logger(__name__)
         logger.info("session_manager_interrupt_all_sessions")
         return await self._session_pool.interrupt_all_sessions()
 

@@ -75,6 +75,11 @@ class ServerSettings(BaseModel):
         description="Directory to save individual request/response logs when verbose_api is enabled",
     )
 
+    bypass_mode: bool = Field(
+        default=False,
+        description="Enable bypass mode for testing (uses mock responses instead of real API calls)",
+    )
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v: str) -> str:

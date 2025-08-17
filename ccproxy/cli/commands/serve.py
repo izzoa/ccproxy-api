@@ -29,17 +29,6 @@ from ccproxy.docker import (
 from ..docker import (
     _create_docker_adapter_from_settings,
 )
-from ..options.claude_options import (
-    ClaudeOptions,
-    validate_claude_cli_path,
-    validate_cwd,
-    validate_max_thinking_tokens,
-    validate_max_turns,
-    validate_permission_mode,
-    validate_pool_size,
-    validate_sdk_message_mode,
-    validate_system_prompt_injection_mode,
-)
 from ..options.security_options import SecurityOptions, validate_auth_token
 from ..options.server_options import (
     ServerOptions,
@@ -358,135 +347,15 @@ def api(
             rich_help_panel="Security Settings",
         ),
     ] = None,
-    # Claude options
-    max_thinking_tokens: Annotated[
-        int | None,
+    # Plugin settings
+    plugin_setting: Annotated[
+        list[str] | None,
         typer.Option(
-            "--max-thinking-tokens",
-            help="Maximum thinking tokens for Claude Code",
-            callback=validate_max_thinking_tokens,
-            rich_help_panel="Claude Settings",
+            "--plugin-setting",
+            help="Set a plugin setting, e.g., claude_sdk.cli_path=/path/to/claude",
+            rich_help_panel="Plugin Settings",
         ),
     ] = None,
-    allowed_tools: Annotated[
-        str | None,
-        typer.Option(
-            "--allowed-tools",
-            help="List of allowed tools (comma-separated)",
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    disallowed_tools: Annotated[
-        str | None,
-        typer.Option(
-            "--disallowed-tools",
-            help="List of disallowed tools (comma-separated)",
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    claude_cli_path: Annotated[
-        str | None,
-        typer.Option(
-            "--claude-cli-path",
-            help="Path to Claude CLI executable",
-            callback=validate_claude_cli_path,
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    append_system_prompt: Annotated[
-        str | None,
-        typer.Option(
-            "--append-system-prompt",
-            help="Additional system prompt to append",
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    permission_mode: Annotated[
-        str | None,
-        typer.Option(
-            "--permission-mode",
-            help="Permission mode: default, acceptEdits, or bypassPermissions",
-            callback=validate_permission_mode,
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    max_turns: Annotated[
-        int | None,
-        typer.Option(
-            "--max-turns",
-            help="Maximum conversation turns",
-            callback=validate_max_turns,
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    cwd: Annotated[
-        str | None,
-        typer.Option(
-            "--cwd",
-            help="Working directory path",
-            callback=validate_cwd,
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    permission_prompt_tool_name: Annotated[
-        str | None,
-        typer.Option(
-            "--permission-prompt-tool-name",
-            help="Permission prompt tool name",
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    sdk_message_mode: Annotated[
-        str | None,
-        typer.Option(
-            "--sdk-message-mode",
-            help="SDK message handling mode: forward (direct SDK blocks), ignore (skip blocks), formatted (XML tags with JSON data)",
-            callback=validate_sdk_message_mode,
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    sdk_pool: Annotated[
-        bool,
-        typer.Option(
-            "--sdk-pool/--no-sdk-pool",
-            help="Enable/disable general Claude SDK client connection pooling",
-            rich_help_panel="Claude Settings",
-        ),
-    ] = False,
-    sdk_pool_size: Annotated[
-        int | None,
-        typer.Option(
-            "--sdk-pool-size",
-            help="Number of clients to maintain in the general pool (1-20)",
-            callback=validate_pool_size,
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    sdk_session_pool: Annotated[
-        bool,
-        typer.Option(
-            "--sdk-session-pool/--no-sdk-session-pool",
-            help="Enable/disable session-aware Claude SDK client pooling",
-            rich_help_panel="Claude Settings",
-        ),
-    ] = False,
-    system_prompt_injection_mode: Annotated[
-        str | None,
-        typer.Option(
-            "--system-prompt-injection-mode",
-            help="System prompt injection mode: minimal (Claude Code ID only), full (all detected system messages)",
-            callback=validate_system_prompt_injection_mode,
-            rich_help_panel="Claude Settings",
-        ),
-    ] = None,
-    builtin_permissions: Annotated[
-        bool,
-        typer.Option(
-            "--builtin-permissions/--no-builtin-permissions",
-            help="Enable built-in permission handling infrastructure (MCP server and SSE endpoints). When disabled, users can configure custom MCP servers and permission tools.",
-            rich_help_panel="Claude Settings",
-        ),
-    ] = True,
     # Core settings
     docker: Annotated[
         bool,
@@ -632,24 +501,6 @@ def api(
             use_terminal_confirmation_handler=use_terminal_permission_handler,
         )
 
-        claude_options = ClaudeOptions(
-            max_thinking_tokens=max_thinking_tokens,
-            allowed_tools=allowed_tools,
-            disallowed_tools=disallowed_tools,
-            claude_cli_path=claude_cli_path,
-            append_system_prompt=append_system_prompt,
-            permission_mode=permission_mode,
-            max_turns=max_turns,
-            cwd=cwd,
-            permission_prompt_tool_name=permission_prompt_tool_name,
-            sdk_message_mode=sdk_message_mode,
-            sdk_pool=sdk_pool,
-            sdk_pool_size=sdk_pool_size,
-            sdk_session_pool=sdk_session_pool,
-            system_prompt_injection_mode=system_prompt_injection_mode,
-            builtin_permissions=builtin_permissions,
-        )
-
         security_options = SecurityOptions(auth_token=auth_token)
 
         # Handle network control flags
@@ -676,22 +527,8 @@ def api(
             use_terminal_confirmation_handler=server_options.use_terminal_confirmation_handler,
             # Security options
             auth_token=security_options.auth_token,
-            # Claude options
-            claude_cli_path=claude_options.claude_cli_path,
-            max_thinking_tokens=claude_options.max_thinking_tokens,
-            allowed_tools=claude_options.allowed_tools,
-            disallowed_tools=claude_options.disallowed_tools,
-            append_system_prompt=claude_options.append_system_prompt,
-            permission_mode=claude_options.permission_mode,
-            max_turns=claude_options.max_turns,
-            permission_prompt_tool_name=claude_options.permission_prompt_tool_name,
-            cwd=claude_options.cwd,
-            sdk_message_mode=claude_options.sdk_message_mode,
-            sdk_pool=claude_options.sdk_pool,
-            sdk_pool_size=claude_options.sdk_pool_size,
-            sdk_session_pool=claude_options.sdk_session_pool,
-            system_prompt_injection_mode=claude_options.system_prompt_injection_mode,
-            builtin_permissions=claude_options.builtin_permissions,
+            # Plugin settings
+            plugin_setting=plugin_setting,
         )
 
         # Add scheduler overrides if any
@@ -750,7 +587,6 @@ def api(
             duckdb_path=settings.observability.duckdb_path
             if settings.observability.duckdb_enabled
             else None,
-            claude_cli_path=settings.claude.cli_path,
         )
 
         if docker:
@@ -949,17 +785,43 @@ def claude(
                 user_context=user_context,
             )
         else:
-            # Get claude command from settings or binary resolver
-            claude_result = settings.claude.find_claude_cli()
-            if not claude_result[0]:
+            # Get claude command using binary resolver
+            import shutil
+            from pathlib import Path
+
+            from ccproxy.utils.binary_resolver import BinaryResolver
+
+            # Check common installation locations first
+            claude_paths = [
+                shutil.which("claude"),
+                Path.home() / ".cache" / ".bun" / "bin" / "claude",
+                Path.home() / ".local" / "bin" / "claude",
+                Path("/usr/local/bin/claude"),
+            ]
+
+            claude_cmd: str | list[str] | None = None
+            for path in claude_paths:
+                if path and Path(str(path)).exists():
+                    claude_cmd = str(path)
+                    break
+
+            # If not found, try package manager fallback
+            if not claude_cmd:
+                resolver = BinaryResolver()
+                result = resolver.find_binary("claude", "@anthropic-ai/claude-code")
+                if result:
+                    # Store the command as a string for direct binaries, or as the full command for package managers
+                    claude_cmd = (
+                        result.command[0] if result.is_direct else result.command
+                    )
+
+            if not claude_cmd:
                 toolkit.print("Error: Claude CLI not found.", tag="error")
                 toolkit.print(
-                    "Please install Claude CLI or configure claude_cli_path.",
+                    "Please install Claude CLI.",
                     tag="error",
                 )
                 raise typer.Exit(1)
-
-            claude_cmd = claude_result[0]
 
             # Handle both direct path and command list
             if isinstance(claude_cmd, str):
@@ -981,6 +843,8 @@ def claude(
                     raise typer.Exit(1) from e
             else:
                 # Package manager command - use subprocess
+                if not isinstance(claude_cmd, list):
+                    raise ValueError("Expected list for package manager command")
                 full_cmd = claude_cmd + args
                 logger.info(
                     "local_claude_execution_via_package_manager",
@@ -994,8 +858,8 @@ def claude(
                     # Use subprocess.run for package manager execution
                     import subprocess
 
-                    result = subprocess.run(full_cmd, check=False)
-                    raise typer.Exit(result.returncode)
+                    proc_result = subprocess.run(full_cmd, check=False)
+                    raise typer.Exit(proc_result.returncode)
                 except subprocess.SubprocessError as e:
                     toolkit.print(f"Failed to execute command: {e}", tag="error")
                     raise typer.Exit(1) from e

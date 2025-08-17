@@ -3,15 +3,9 @@
 from typing import Any
 
 import structlog
+from claude_code_sdk import ClaudeCodeOptions
 
-from ccproxy.config.settings import Settings
-from ccproxy.core.async_utils import patched_typing
-
-
-with patched_typing():
-    from claude_code_sdk import ClaudeCodeOptions
-
-logger = structlog.get_logger(__name__)
+from .config import ClaudeSDKSettings
 
 
 class OptionsHandler:
@@ -19,14 +13,14 @@ class OptionsHandler:
     Handles creation and management of Claude SDK options.
     """
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, config: ClaudeSDKSettings) -> None:
         """
         Initialize options handler.
 
         Args:
-            settings: Application settings containing default Claude options
+            config: Plugin-specific configuration for Claude SDK
         """
-        self.settings = settings
+        self.config = config
 
     def create_options(
         self,
@@ -50,10 +44,10 @@ class OptionsHandler:
             Configured ClaudeCodeOptions instance
         """
         # Start with configured defaults if available, otherwise create fresh instance
-        if self.settings and self.settings.claude.code_options:
+        if self.config and self.config.code_options:
             # Use the configured options as base - this preserves all default settings
             # including complex objects like mcp_servers and permission_prompt_tool_name
-            configured_opts = self.settings.claude.code_options
+            configured_opts = self.config.code_options
 
             # Create a new instance with the same configuration
             # We need to extract the configuration values properly with type safety

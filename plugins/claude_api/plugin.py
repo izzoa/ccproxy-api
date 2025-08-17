@@ -75,7 +75,7 @@ class Plugin(ProviderPlugin):
         cli_path = self._detection_service.get_cli_path()
 
         if cli_path:
-            logger.info(
+            logger.debug(
                 "claude_cli_available",
                 status="available",
                 version=version,
@@ -98,7 +98,7 @@ class Plugin(ProviderPlugin):
         from ccproxy.services.credentials.manager import CredentialsManager
 
         self._credentials_manager = CredentialsManager()
-        logger.info(
+        logger.debug(
             "claude_api_plugin_initialized",
             status="initialized",
             base_url=self._config.base_url,
@@ -106,11 +106,76 @@ class Plugin(ProviderPlugin):
             has_credentials_manager=True,
         )
 
+    def get_summary(self) -> dict[str, Any]:
+        """Get plugin summary for consolidated logging."""
+        summary: dict[str, Any] = {}
+
+        if self._config:
+            if self._config.models:
+                summary["models"] = len(self._config.models)
+            else:
+                summary["models"] = 0
+            summary["base_url"] = self._config.base_url
+        else:
+            summary["models"] = 0
+
+        # Add basic authentication status (detailed auth info requires async call)
+        if self._credentials_manager:
+            summary["auth"] = "configured"
+        else:
+            summary["auth"] = "not_configured"
+
+        # Add CLI information
+        if self._detection_service:
+            cli_path = self._detection_service.get_cli_path()
+            cli_version = self._detection_service.get_version()
+            if cli_path and cli_version:
+                summary["cli_version"] = cli_version
+                summary["cli_path"] = cli_path
+
+                # Determine CLI source
+                if isinstance(cli_path, list) and len(cli_path) > 1:
+                    summary["cli_source"] = "package_manager"
+                    summary["package_manager"] = cli_path[0]
+                else:
+                    summary["cli_source"] = "in_path"
+                    if isinstance(cli_path, list):
+                        summary["cli_path"] = cli_path[0]
+
+        return summary
+
+    async def get_auth_summary(self) -> dict[str, Any]:
+        """Get detailed authentication status (async version for use in plugin manager)."""
+        if not self._credentials_manager:
+            return {"auth": "not_configured"}
+
+        try:
+            auth_status = await self._credentials_manager.get_auth_status()
+            summary = {"auth": "not_configured"}
+
+            if auth_status.get("auth_configured"):
+                if auth_status.get("token_available"):
+                    summary["auth"] = "authenticated"
+                    if "time_remaining" in auth_status:
+                        summary["auth_expires"] = auth_status["time_remaining"]
+                    if "token_expired" in auth_status:
+                        summary["auth_expired"] = auth_status["token_expired"]
+                    if "subscription_type" in auth_status:
+                        summary["subscription"] = auth_status["subscription_type"]
+                else:
+                    summary["auth"] = "no_token"
+            else:
+                summary["auth"] = "not_configured"
+
+            return summary
+        except Exception:
+            return {"auth": "status_error"}
+
     async def shutdown(self) -> None:
         """Cleanup on shutdown."""
         if self._adapter:
             await self._adapter.cleanup()
-        logger.info("claude_api_plugin_shutdown", status="shutdown")
+        logger.debug("claude_api_plugin_shutdown", status="shutdown")
 
     def create_adapter(self) -> BaseAdapter:
         """Create adapter instance.

@@ -120,10 +120,13 @@ class ClaudeAPIAdapter(BaseAdapter):
                     self._response_transformer = ClaudeAPIResponseTransformer()
 
             self._initialized = True
-            self.logger.debug("Claude API adapter initialized successfully")
+            self.logger.debug("claude_api_adapter_initialized")
 
         except Exception as e:
-            self.logger.error(f"Failed to initialize Claude API adapter: {e}")
+            self.logger.error(
+                "claude_api_adapter_initialization_failed",
+                error=str(e),
+            )
             raise HTTPException(
                 status_code=503, detail=f"Claude API initialization failed: {str(e)}"
             ) from e
@@ -277,4 +280,4 @@ class ClaudeAPIAdapter(BaseAdapter):
     async def cleanup(self) -> None:
         """Cleanup resources when shutting down."""
         self._initialized = False
-        self.logger.debug("Claude API adapter cleaned up")
+        self.logger.debug("claude_api_adapter_cleanup_completed")

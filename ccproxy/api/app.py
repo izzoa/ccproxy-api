@@ -110,7 +110,7 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
 async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
     """Initialize plugin system during startup."""
     if not settings.enable_plugins:
-        logger.info("Plugin system disabled by configuration")
+        logger.info("plugin_system_disabled")
         return
 
     # Get proxy service from app state if available
@@ -137,12 +137,15 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
                         prefix=plugin.router_prefix,
                         tags=[f"plugin-{plugin.name}"],
                     )
-                    logger.info(
-                        f"Registered routes for plugin: {plugin.name} at {plugin.router_prefix}"
+                    logger.debug(
+                        "plugin_routes_registered",
+                        plugin_name=plugin.name,
+                        router_prefix=plugin.router_prefix,
                     )
 
         logger.info(
-            f"Initialized {len(proxy_service.plugin_manager.list_active_providers())} providers"
+            "plugins_initialization_completed",
+            providers=len(proxy_service.plugin_manager.list_active_providers()),
         )
 
 
@@ -197,14 +200,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "server_configured", host=settings.server.host, port=settings.server.port
     )
 
-    # Log Claude CLI configuration
-    if settings.claude.cli_path:
-        logger.debug("claude_cli_configured", cli_path=settings.claude.cli_path)
-    else:
-        logger.debug("claude_cli_auto_detect")
-        logger.debug(
-            "claude_cli_search_paths", paths=settings.claude.get_searched_paths()
-        )
+    # Claude CLI configuration is now handled by the plugin
+    logger.debug("claude_cli_configuration_delegated_to_plugin")
 
     # Execute startup components in order
     for component in LIFECYCLE_COMPONENTS:
@@ -338,12 +335,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(models_router, prefix="/sdk", tags=["claude-sdk", "models"])
     app.include_router(models_router, prefix="/api", tags=["proxy-api", "models"])
 
-    # Confirmation endpoints for SSE streaming and responses (conditional on builtin_permissions)
-    if settings.claude.builtin_permissions:
-        app.include_router(
-            permissions_router, prefix="/permissions", tags=["permissions"]
-        )
-        setup_mcp(app)
+    # Permission endpoints are now handled by the plugin
+    # The plugin will register its own routes if builtin_permissions is enabled
+    # Keep the router registered for now for backward compatibility
+    app.include_router(permissions_router, prefix="/permissions", tags=["permissions"])
+    setup_mcp(app)
 
     # Plugin management endpoints (conditional on plugin system)
     if settings.enable_plugins:

@@ -54,13 +54,19 @@ class ClaudeSDKDetectionRefreshTask(BaseScheduledTask):
         """
         if self._first_run and self.skip_initial_run:
             self._first_run = False
-            logger.debug(f"Skipping initial run for {self.name}")
+            logger.debug(
+                "claude_sdk_detection_refresh_skipped_initial",
+                task_name=self.name,
+            )
             return True
 
         self._first_run = False
 
         try:
-            logger.info(f"Starting Claude SDK detection refresh for {self.name}")
+            logger.info(
+                "claude_sdk_detection_refresh_starting",
+                task_name=self.name,
+            )
 
             # Refresh Claude CLI detection
             detection_data = await self.detection_service.initialize_detection()
@@ -69,7 +75,7 @@ class ClaudeSDKDetectionRefreshTask(BaseScheduledTask):
                 "claude_sdk_detection_refresh_completed",
                 task_name=self.name,
                 version=detection_data.claude_version or "unknown",
-                cli_path=detection_data.cli_path,
+                cli_command=detection_data.cli_command,
                 is_available=detection_data.is_available,
             )
             return True
@@ -85,8 +91,8 @@ class ClaudeSDKDetectionRefreshTask(BaseScheduledTask):
 
     async def setup(self) -> None:
         """Setup before task execution starts."""
-        logger.info(f"Setting up Claude SDK detection refresh task: {self.name}")
+        pass
 
     async def cleanup(self) -> None:
         """Cleanup after task execution stops."""
-        logger.info(f"Cleaning up Claude SDK detection refresh task: {self.name}")
+        pass

@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import structlog
 
@@ -76,7 +77,7 @@ class PluginRegistry:
             # Register scheduled tasks if plugin has them and scheduler is available
             await self._register_plugin_tasks(plugin)
 
-            logger.info(
+            logger.debug(
                 f"Registered and initialized plugin: {plugin.name} v{plugin.version}"
             )
 
@@ -150,7 +151,7 @@ class PluginRegistry:
                 )
 
                 registered_tasks.append(task_name)
-                logger.info(
+                logger.debug(
                     f"Registered scheduled task '{task_name}' for plugin {plugin.name}",
                     interval_seconds=interval_seconds,
                     enabled=enabled,
@@ -165,6 +166,109 @@ class PluginRegistry:
         # Track tasks for this plugin for cleanup
         if registered_tasks:
             self._plugin_tasks[plugin.name] = registered_tasks
+
+    def get_plugin_summary(self, plugin_name: str) -> dict[str, Any] | None:
+        """Get consolidated summary information for a plugin.
+
+        Args:
+            plugin_name: Name of the plugin
+
+        Returns:
+            Dictionary with plugin summary data or None if plugin not found
+        """
+        plugin = self._plugins.get(plugin_name)
+        adapter = self._adapters.get(plugin_name)
+
+        if not plugin or not adapter:
+            return None
+
+        # Start with basic plugin info
+        summary = {
+            "plugin": plugin_name,
+            "status": "ready"
+            if plugin_name in self._initialized_plugins
+            else "not_ready",
+        }
+
+        # Let plugin provide its own summary if it has the method
+        if hasattr(plugin, "get_summary"):
+            plugin_summary = plugin.get_summary()
+            if isinstance(plugin_summary, dict):
+                summary.update(plugin_summary)
+
+        # Add routes information if plugin has router
+        if hasattr(plugin, "router_prefix"):
+            routes_list: list[str] = [plugin.router_prefix]
+            summary["routes"] = routes_list  # type: ignore[assignment]
+
+        return summary
+
+    async def get_plugin_summary_with_auth(
+        self, plugin_name: str
+    ) -> dict[str, Any] | None:
+        """Get consolidated summary information for a plugin including detailed auth status.
+
+        Args:
+            plugin_name: Name of the plugin
+
+        Returns:
+            Dictionary with plugin summary data including auth details or None if plugin not found
+        """
+        plugin = self._plugins.get(plugin_name)
+        adapter = self._adapters.get(plugin_name)
+
+        if not plugin or not adapter:
+            return None
+
+        # Start with basic plugin info
+        summary = {
+            "plugin": plugin_name,
+            "status": "ready"
+            if plugin_name in self._initialized_plugins
+            else "not_ready",
+        }
+
+        # Let plugin provide its own summary if it has the method
+        if hasattr(plugin, "get_summary"):
+            plugin_summary = plugin.get_summary()
+            if isinstance(plugin_summary, dict):
+                summary.update(plugin_summary)
+
+        # Get detailed auth information if plugin supports it
+        if hasattr(plugin, "get_auth_summary"):
+            try:
+                auth_summary = await plugin.get_auth_summary()
+                if isinstance(auth_summary, dict):
+                    summary.update(auth_summary)
+            except Exception as e:
+                logger.debug(f"Failed to get auth summary for {plugin_name}: {e}")
+
+        # Add routes information if plugin has router
+        if hasattr(plugin, "get_routes"):
+            try:
+                router = plugin.get_routes()
+                if router and hasattr(router, "routes"):
+                    routes_list: list[str] = []
+                    for route in router.routes:
+                        if hasattr(route, "path"):
+                            routes_list.append(route.path)
+                        elif hasattr(route, "path_regex"):
+                            routes_list.append(str(route.path_regex))
+                    summary["routes"] = routes_list  # type: ignore[assignment]
+            except Exception as e:
+                logger.debug(
+                    f"Failed to get routes for plugin {plugin_name}: {e}",
+                    exc_info=True,
+                )
+
+        return summary
+
+    def get_all_registered_tasks(self) -> list[str]:
+        """Get list of all registered task names across all plugins."""
+        all_tasks = []
+        for tasks in self._plugin_tasks.values():
+            all_tasks.extend(tasks)
+        return all_tasks
 
     async def shutdown_all(self) -> None:
         """Shutdown all initialized plugins."""

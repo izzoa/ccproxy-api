@@ -2,6 +2,7 @@
 
 import importlib.metadata
 import importlib.util
+import sys
 from pathlib import Path
 
 import structlog
@@ -53,7 +54,7 @@ class PluginLoader:
                 try:
                     plugin_class = entry_point.load()
                     plugins.append(plugin_class())
-                    logger.info(f"Loaded plugin from entry point: {entry_point.name}")
+                    logger.debug("plugin_loaded", plugin=entry_point.name)
                 except Exception as e:
                     logger.error(f"Failed to load plugin {entry_point.name}: {e}")
         except Exception as e:
@@ -106,11 +107,11 @@ class PluginLoader:
                     if hasattr(module, "Plugin"):
                         plugin_instance = module.Plugin()
                         plugins.append(plugin_instance)
-                        logger.info(f"Loaded plugin from directory: {subdir.name}")
+                        logger.debug(f"Loaded plugin from directory: {subdir.name}")
                     else:
                         logger.warning(f"No Plugin class found in {subdir}/plugin.py")
             except Exception as e:
-                logger.error(f"Failed to load plugin from {subdir}: {e}")
+                logger.error(f"Failed to load plugin from {subdir}: {e}", exc_info=e)
 
         return plugins
 

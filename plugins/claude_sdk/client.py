@@ -15,7 +15,7 @@ from ccproxy.models import claude_sdk as sdk_models
 from ccproxy.models.claude_sdk import SDKMessage
 from ccproxy.observability import timed_operation
 
-from .config import SessionPoolSettings
+from .config import ClaudeSDKSettings, SessionPoolSettings
 from .exceptions import ClaudeSDKError, StreamTimeoutError
 from .manager import SessionManager
 from .stream_handle import StreamHandle
@@ -71,17 +71,17 @@ class ClaudeSDKClient:
 
     def __init__(
         self,
-        settings: Settings | None = None,
+        config: ClaudeSDKSettings,
         session_manager: SessionManager | None = None,
     ) -> None:
         """Initialize the Claude SDK client.
 
         Args:
-            settings: Application settings for session pool configuration
+            config: Plugin-specific configuration for Claude SDK
             session_manager: Optional SessionManager instance for dependency injection
         """
         self._last_api_call_time_ms: float = 0.0
-        self._settings = settings
+        self.config = config
         self._session_manager = session_manager
 
     @contextlib.asynccontextmanager
@@ -232,14 +232,10 @@ class ClaudeSDKClient:
             return False
 
         # Check settings using safe attribute chaining
-        if not self._settings:
+        if not self.config:
             return False
 
-        claude_settings = getattr(self._settings, "claude", None)
-        if not claude_settings:
-            return False
-
-        pool_settings = getattr(claude_settings, "sdk_session_pool", None)
+        pool_settings = getattr(self.config, "sdk_session_pool", None)
         if not pool_settings:
             return False
 
@@ -289,8 +285,8 @@ class ClaudeSDKClient:
 
         # Convert core settings to plugin settings if available
         plugin_session_config = None
-        if self._settings and self._settings.claude.sdk_session_pool:
-            core_pool_settings = self._settings.claude.sdk_session_pool
+        if self.config and self.config.sdk_session_pool:
+            core_pool_settings = self.config.sdk_session_pool
             plugin_session_config = SessionPoolSettings(
                 enabled=core_pool_settings.enabled,
                 session_ttl=core_pool_settings.session_ttl,

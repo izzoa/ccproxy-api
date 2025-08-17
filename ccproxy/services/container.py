@@ -49,7 +49,7 @@ class ServiceContainer:
         self._plugin_manager: PluginManager | None = None
         self._metrics: PrometheusMetrics | None = None
 
-        logger.info("ServiceContainer initialized")
+        logger.debug("ServiceContainer initialized")
 
     def create_proxy_service(
         self,
@@ -84,7 +84,7 @@ class ServiceContainer:
             metrics=metrics,
         )
 
-        logger.info("ProxyService created with all dependencies")
+        logger.debug("ProxyService created with all dependencies")
         return proxy_service
 
     def get_request_tracer(self) -> CoreRequestTracer:

@@ -87,3 +87,73 @@ async def claude_sdk_chat_completions(
     )
 
     return await proxy_service.dispatch_request(request, context)
+
+
+@router.post("/{session_id}/v1/messages")
+async def claude_sdk_messages_with_session(
+    request: Request,
+    session_id: str,
+    proxy_service: ProxyServiceDep,
+    auth: ConditionalAuthDep,
+) -> Response:
+    """Handle Anthropic-format messages endpoint via Claude SDK with session ID in path.
+
+    Args:
+        request: FastAPI request object
+        session_id: Session ID from URL path
+        proxy_service: Proxy service dependency
+        auth: Conditional authentication dependency
+
+    Returns:
+        Response from Claude SDK
+    """
+    # Store session_id in request state for the adapter to access
+    request.state.session_id = session_id
+
+    # Create provider context for Claude SDK
+    context = ProviderContext(
+        provider_name="claude_sdk",
+        auth_manager=proxy_service.credentials_manager,
+        target_base_url="claude-sdk://local",  # Special URL for SDK
+        route_prefix="/claude",
+        path_transformer=_path_transformer,
+        timeout=300.0,  # 5 minute timeout for SDK operations
+        supports_streaming=True,
+    )
+
+    return await proxy_service.dispatch_request(request, context)
+
+
+@router.post("/{session_id}/v1/chat/completions")
+async def claude_sdk_chat_completions_with_session(
+    request: Request,
+    session_id: str,
+    proxy_service: ProxyServiceDep,
+    auth: ConditionalAuthDep,
+) -> Response:
+    """Handle OpenAI-format chat completions endpoint via Claude SDK with session ID in path.
+
+    Args:
+        request: FastAPI request object
+        session_id: Session ID from URL path
+        proxy_service: Proxy service dependency
+        auth: Conditional authentication dependency
+
+    Returns:
+        Response from Claude SDK in OpenAI format
+    """
+    # Store session_id in request state for the adapter to access
+    request.state.session_id = session_id
+
+    # Create provider context for Claude SDK with OpenAI compatibility
+    context = ProviderContext(
+        provider_name="claude_sdk",
+        auth_manager=proxy_service.credentials_manager,
+        target_base_url="claude-sdk://local",  # Special URL for SDK
+        route_prefix="/claude",
+        path_transformer=_path_transformer,
+        timeout=300.0,  # 5 minute timeout for SDK operations
+        supports_streaming=True,
+    )
+
+    return await proxy_service.dispatch_request(request, context)

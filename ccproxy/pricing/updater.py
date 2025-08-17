@@ -154,13 +154,13 @@ class PricingUpdater:
                 age_hours = cache_info.get("age_hours")
 
                 if age_hours is not None:
-                    logger.info(
+                    logger.debug(
                         "pricing_loaded_from_external",
                         model_count=len(pricing_data),
                         cache_age_hours=round(age_hours, 2),
                     )
                 else:
-                    logger.info(
+                    logger.debug(
                         "pricing_loaded_from_external", model_count=len(pricing_data)
                     )
                 return pricing_data
