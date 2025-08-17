@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from ccproxy.api.services.permission_service import PermissionRequest
+from ..models import PermissionRequest
 
 
 class ConfirmationHandlerProtocol(Protocol):

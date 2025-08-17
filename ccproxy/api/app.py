@@ -19,13 +19,11 @@ from ccproxy.api.middleware.request_content_logging import (
 from ccproxy.api.middleware.request_id import RequestIDMiddleware
 from ccproxy.api.middleware.server_header import ServerHeaderMiddleware
 from ccproxy.api.routes.health import router as health_router
-from ccproxy.api.routes.mcp import setup_mcp
 from ccproxy.api.routes.metrics import (
     dashboard_router,
     logs_router,
     prometheus_router,
 )
-from ccproxy.api.routes.permissions import router as permissions_router
 from ccproxy.api.routes.plugins import router as plugins_router
 
 # proxy routes are now handled by plugin system
@@ -129,11 +127,26 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
                 plugin_name
             )
             if plugin and hasattr(plugin, "get_routes"):
-                router = plugin.get_routes()
-                if router:
-                    # Register the plugin's routes with the app
+                routes = plugin.get_routes()
+
+                if isinstance(routes, dict):
+                    # New format: dictionary mapping paths to routers
+                    for prefix, router in routes.items():
+                        if router:
+                            app.include_router(
+                                router,
+                                prefix=prefix,
+                                tags=[f"plugin-{plugin.name}"],
+                            )
+                            logger.debug(
+                                "plugin_routes_registered",
+                                plugin_name=plugin.name,
+                                router_prefix=prefix,
+                            )
+                elif routes:
+                    # Backward compatibility: single router
                     app.include_router(
-                        router,
+                        routes,
                         prefix=plugin.router_prefix,
                         tags=[f"plugin-{plugin.name}"],
                     )
@@ -335,11 +348,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(models_router, prefix="/sdk", tags=["claude-sdk", "models"])
     app.include_router(models_router, prefix="/api", tags=["proxy-api", "models"])
 
-    # Permission endpoints are now handled by the plugin
-    # The plugin will register its own routes if builtin_permissions is enabled
-    # Keep the router registered for now for backward compatibility
-    app.include_router(permissions_router, prefix="/permissions", tags=["permissions"])
-    setup_mcp(app)
+    # Permission and MCP endpoints are now handled by the permissions plugin
+    # The plugin will register its own routes including MCP endpoints
 
     # Plugin management endpoints (conditional on plugin system)
     if settings.enable_plugins:

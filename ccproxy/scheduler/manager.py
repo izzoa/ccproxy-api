@@ -195,17 +195,15 @@ async def start_scheduler(settings: Settings) -> Scheduler | None:
         # Setup tasks based on configuration
         await setup_scheduler_tasks(scheduler, settings)
 
+        task_names = scheduler.list_tasks()
         logger.info(
             "scheduler_started",
             max_concurrent_tasks=settings.scheduler.max_concurrent_tasks,
             active_tasks=scheduler.task_count,
             running_tasks=len(
-                [
-                    name
-                    for name in scheduler.list_tasks()
-                    if scheduler.get_task(name).is_running
-                ]
+                [name for name in task_names if scheduler.get_task(name).is_running]
             ),
+            names=task_names,
         )
 
         return scheduler

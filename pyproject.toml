@@ -11,9 +11,7 @@ dependencies = [
   "jsonschema>=0.33.2",
   "fastapi[standard]>=0.115.14",
   "httpx>=0.28.1",
-  "httpx-sse>=0.4.1",
   "keyring>=25.6.0",
-  "openai>=1.93.0",
   "prometheus-client>=0.22.1",
   "pydantic>=2.8.0",
   "pydantic-settings>=2.4.0",
@@ -29,8 +27,6 @@ dependencies = [
   "duckdb-engine>=0.17.0",
   "fastapi-mcp",
   "textual>=3.7.1",
-  "claude-code-sdk>=0.0.19",
-  "pyjwt>=2.10.1",
 ]
 
 [build-system]
@@ -94,6 +90,8 @@ dev = [
   "pytest-httpx>=0.35.0",
   "types-pyyaml>=6.0.12.20250516",
   "types-aiofiles>=24.0.0",
+  "openai>=1.99.9",
+  "pyjwt>=2.10.1",
 ]
 security = [
   "keyring>=25.0.0", # Optional keyring support for secure credential storage
@@ -362,6 +360,15 @@ include = ["ccproxy*"]
 
 [tool.uv]
 package = true
+
+# Workspace configuration for plugins
+[tool.uv.workspace]
+members = [
+    "plugins/claude_sdk",
+    "plugins/claude_api",
+    "plugins/codex",
+    "plugins/permissions",
+]
 
 [tool.uv.sources]
 fastapi-mcp = { git = "https://github.com/tadata-org/fastapi_mcp", rev = "6fdbff6168b2c84b22966886741d1f24a584856c" }

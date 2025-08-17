@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ccproxy.config.discovery import find_toml_config_file

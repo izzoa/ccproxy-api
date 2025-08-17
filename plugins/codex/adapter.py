@@ -137,14 +137,11 @@ class CodexAdapter(BaseAdapter):
         # Read request body
         body = await request.body()
 
-        # Check if format conversion is needed
-        needs_conversion = False
-        if body:
-            try:
-                request_data = json.loads(body)
-                needs_conversion = "messages" in request_data
-            except json.JSONDecodeError:
-                pass
+        # Check if format conversion is needed based on endpoint
+        # OpenAI format endpoints need conversion to Codex format
+        needs_conversion = endpoint.endswith(
+            "/v1/chat/completions"
+        ) or endpoint.endswith("/chat/completions")
 
         # Get authentication headers
         if not self._auth_manager:

@@ -158,11 +158,11 @@ class ClaudeAPIAdapter(BaseAdapter):
         auth_headers = await self._auth_manager.get_auth_headers()
 
         # Determine target URL and format conversion needs
-        if endpoint == "/v1/messages":
+        if endpoint.endswith("/v1/messages"):
             # Native Anthropic format - no conversion needed
             target_url = "https://api.anthropic.com/v1/messages"
             needs_conversion = False
-        elif endpoint == "/v1/chat/completions":
+        elif endpoint.endswith("/v1/chat/completions"):
             # OpenAI format - needs conversion to Anthropic messages format
             target_url = "https://api.anthropic.com/v1/messages"
             needs_conversion = True

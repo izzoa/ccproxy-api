@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from ccproxy.models import claude_sdk as sdk_models
+from ccproxy.adapters.sdk import models as sdk_models
 
 from .exceptions import StreamTimeoutError
 from .message_queue import MessageQueue

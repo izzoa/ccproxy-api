@@ -10,13 +10,14 @@ from sse_starlette.sse import EventSourceResponse
 from structlog import get_logger
 
 from ccproxy.api.dependencies import SettingsDep
-from ccproxy.api.services.permission_service import get_permission_service
 from ccproxy.auth.conditional import ConditionalAuthDep
 from ccproxy.core.errors import (
     PermissionAlreadyResolvedError,
     PermissionNotFoundError,
 )
-from ccproxy.models.permissions import EventType, PermissionEvent, PermissionStatus
+
+from .models import EventType, PermissionEvent, PermissionStatus
+from .service import get_permission_service
 
 
 logger = get_logger(__name__)

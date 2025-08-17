@@ -10,13 +10,13 @@ import httpx
 import pytest
 import typer
 
-from ccproxy.api.services.permission_service import PermissionRequest
-from ccproxy.api.ui.terminal_permission_handler import TerminalPermissionHandler
 from ccproxy.cli.commands.permission_handler import (
     SSEConfirmationHandler,
     connect,
 )
 from ccproxy.config.settings import Settings
+from plugins.permissions.handlers.terminal import TerminalPermissionHandler
+from plugins.permissions.service import PermissionRequest
 
 
 @pytest.fixture

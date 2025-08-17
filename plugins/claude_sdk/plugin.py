@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from ccproxy.core.services import CoreServices
 from ccproxy.plugins.protocol import HealthCheckResult, ProviderPlugin
 from ccproxy.services.adapters.base import BaseAdapter
+from ccproxy.utils.binary_resolver import BinaryResolver
+from ccproxy.utils.cli_logging import log_plugin_summary
 
 from .adapter import ClaudeSDKAdapter
 from .config import ClaudeSDKSettings
@@ -131,31 +133,48 @@ class Plugin(ProviderPlugin):
             temperature_default=self._config.temperature_default,
         )
 
+        # Log plugin summary with dynamic CLI logging
+        log_plugin_summary(self.get_summary(), self.name)
+
     def get_summary(self) -> dict[str, Any]:
         """Get plugin summary for consolidated logging."""
-        summary: dict[str, Any] = {}
+        summary: dict[str, Any] = {
+            "router_prefix": self.router_prefix,
+        }
 
         if self._config and self._config.models:
             summary["models"] = len(self._config.models)
         else:
             summary["models"] = 0
 
-        # Add CLI information
+        # Add CLI information using common format
         if self._detection_service:
-            cli_path = self._detection_service.get_cli_path()
             cli_version = self._detection_service.get_version()
-            if cli_path and cli_version:
-                summary["cli_version"] = cli_version
-                summary["cli_path"] = cli_path
+            cli_path = self._detection_service.get_cli_path()
 
-                # Determine CLI source
+            # Create CLI info using common format
+            resolver = BinaryResolver()
+            cli_info = resolver.get_cli_info(
+                "claude", "@anthropic-ai/claude-code", cli_version
+            )
+
+            # Override with actual detection service results if available
+            if cli_path:
+                cli_info["command"] = cli_path
+                cli_info["is_available"] = True
                 if isinstance(cli_path, list) and len(cli_path) > 1:
-                    summary["cli_source"] = "package_manager"
-                    summary["package_manager"] = cli_path[0]
+                    cli_info["source"] = "package_manager"
+                    cli_info["package_manager"] = cli_path[0]
+                    cli_info["path"] = None
                 else:
-                    summary["cli_source"] = "in_path"
-                    if isinstance(cli_path, list):
-                        summary["cli_path"] = cli_path[0]
+                    cli_info["source"] = "path"
+                    cli_info["path"] = (
+                        cli_path[0] if isinstance(cli_path, list) else cli_path
+                    )
+                    cli_info["package_manager"] = None
+
+            # Store CLI info in a structured way for dynamic logging
+            summary["cli_info"] = {"claude": cli_info}
 
         # Add session pool configuration
         if self._config and self._config.session_pool_enabled:

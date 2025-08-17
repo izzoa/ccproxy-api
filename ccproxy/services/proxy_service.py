@@ -1,6 +1,5 @@
 """Refactored ProxyService - orchestrates proxy requests using injected services."""
 
-import json
 import uuid
 from typing import Any
 
@@ -19,7 +18,6 @@ from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.plugins import PluginManager
 from ccproxy.services.provider_context import ProviderContext
-from ccproxy.services.request_context import create_proxy_context
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
 from ccproxy.services.transformation import RequestTransformer

@@ -1,12 +1,8 @@
-"""MCP (Model Context Protocol) server for CCProxy API Server.
-
-Provides MCP server functionality including permission checking tools.
-"""
+"""MCP (Model Context Protocol) endpoints for permissions plugin."""
 
 from typing import Annotated
 
-from fastapi import FastAPI
-from fastapi_mcp import FastApiMCP  # type: ignore[import-untyped]
+from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 from structlog import get_logger
 
@@ -16,7 +12,9 @@ from ccproxy.models.responses import (
     PermissionToolDenyResponse,
     PermissionToolPendingResponse,
 )
-from plugins.permissions import PermissionStatus, get_permission_service
+
+from .models import PermissionStatus
+from .service import get_permission_service
 
 
 logger = get_logger(__name__)
@@ -44,6 +42,10 @@ class PermissionCheckRequest(BaseModel):
     ] = None
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+# Create MCP router (no prefix - will be mounted at /mcp by plugin)
+mcp_router = APIRouter(tags=["mcp"])
 
 
 async def check_permission(
@@ -124,47 +126,22 @@ async def check_permission(
         return PermissionToolDenyResponse(message="Permission request timed out")
 
 
-def setup_mcp(app: FastAPI) -> None:
-    """Set up MCP server on the given FastAPI app.
-
-    Args:
-        app: The FastAPI application to mount MCP on
-    """
-    # Minimal MCP sub-app without middleware or docs
-    mcp_app = FastAPI(
-        title="CCProxy MCP Server",
-        description="MCP server for Claude Code permission checking",
-        openapi_url=None,
-        docs_url=None,
-        redoc_url=None,
-    )
-
-    @mcp_app.post(
-        "/permission/check",
-        operation_id="check_permission",
-        summary="Check permissions for a tool call",
-        description="Validates whether a tool call should be allowed based on security rules",
-        response_model=PermissionToolAllowResponse
-        | PermissionToolDenyResponse
-        | PermissionToolPendingResponse,
-        tags=["mcp-tools"],
-    )
-    async def permission_endpoint(
-        request: PermissionCheckRequest,
-        settings: SettingsDep,
-    ) -> (
-        PermissionToolAllowResponse
-        | PermissionToolDenyResponse
-        | PermissionToolPendingResponse
-    ):
-        """Check permissions for a tool call."""
-        return await check_permission(request, settings)
-
-    mcp = FastApiMCP(
-        mcp_app,
-        name="CCProxy MCP Server",
-        description="MCP server for Claude Code permission checking",
-        include_operations=["check_permission"],
-    )
-
-    mcp.mount(app, mount_path="/mcp")
+@mcp_router.post(
+    "/permission/check",
+    operation_id="check_permission",
+    summary="Check permissions for a tool call",
+    description="Validates whether a tool call should be allowed based on security rules",
+    response_model=PermissionToolAllowResponse
+    | PermissionToolDenyResponse
+    | PermissionToolPendingResponse,
+)
+async def permission_endpoint(
+    request: PermissionCheckRequest,
+    settings: SettingsDep,
+) -> (
+    PermissionToolAllowResponse
+    | PermissionToolDenyResponse
+    | PermissionToolPendingResponse
+):
+    """Check permissions for a tool call."""
+    return await check_permission(request, settings)

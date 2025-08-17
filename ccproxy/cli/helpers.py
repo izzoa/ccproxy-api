@@ -105,8 +105,6 @@ def merge_claude_code_options(base_options: Any, **overrides: Any) -> Any:
             "cwd",
             "system_prompt",
             "append_system_prompt",
-            "permission_mode",
-            "permission_prompt_tool_name",
             "continue_conversation",
             "resume",
             "allowed_tools",

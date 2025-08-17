@@ -121,7 +121,8 @@ class ClaudeSDKAdapter(BaseAdapter):
             ) from e
 
         # Check if format conversion is needed (OpenAI to Anthropic)
-        needs_conversion = endpoint == "/v1/chat/completions"
+        # The endpoint will contain the path after the prefix, e.g., "/v1/chat/completions"
+        needs_conversion = endpoint.endswith("/v1/chat/completions")
         if needs_conversion and self.format_adapter:
             request_data = await self.format_adapter.adapt_request(request_data)
 

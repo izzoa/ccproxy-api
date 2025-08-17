@@ -2,7 +2,7 @@
 
 import importlib.metadata
 import importlib.util
-import sys
+import subprocess
 from pathlib import Path
 
 import structlog
@@ -15,6 +15,91 @@ logger = structlog.get_logger(__name__)
 
 class PluginLoader:
     """Handles plugin discovery and loading."""
+
+    def _check_plugin_dependencies(self, plugin_dir: Path) -> bool:
+        """Check if plugin dependencies are installed.
+
+        Args:
+            plugin_dir: Path to the plugin directory
+
+        Returns:
+            bool: True if dependencies are satisfied or installed successfully
+        """
+        pyproject_path = plugin_dir / "pyproject.toml"
+        if not pyproject_path.exists():
+            # No pyproject.toml, assume plugin has no extra dependencies
+            return True
+
+        try:
+            # Parse pyproject.toml to check dependencies
+            import tomllib
+
+            with open(pyproject_path, "rb") as f:
+                data = tomllib.load(f)
+
+            dependencies = data.get("project", {}).get("dependencies", [])
+            if not dependencies:
+                return True
+
+            # Check if dependencies are installed
+            missing = []
+            for dep in dependencies:
+                # Extract package name from dependency spec
+                pkg_name = (
+                    dep.split(">=")[0]
+                    .split("==")[0]
+                    .split("<")[0]
+                    .split(">")[0]
+                    .strip()
+                )
+                try:
+                    importlib.metadata.version(pkg_name)
+                except importlib.metadata.PackageNotFoundError:
+                    missing.append(dep)
+
+            if missing:
+                logger.warning(
+                    f"Plugin {plugin_dir.name} has missing dependencies: {missing}. "
+                    "Consider running 'uv sync' to install all workspace dependencies."
+                )
+                # Optionally attempt to install missing dependencies
+                # This is disabled by default for security/stability
+                # return self._install_plugin_dependencies(plugin_dir)
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to check dependencies for {plugin_dir}: {e}")
+            return True  # Continue loading even if check fails
+
+    def _install_plugin_dependencies(self, plugin_dir: Path) -> bool:
+        """Install plugin dependencies using uv.
+
+        Args:
+            plugin_dir: Path to the plugin directory
+
+        Returns:
+            bool: True if installation succeeded
+        """
+        try:
+            logger.info(f"Installing dependencies for plugin {plugin_dir.name}")
+            result = subprocess.run(
+                ["uv", "pip", "install", "-e", str(plugin_dir)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            logger.info(f"Successfully installed dependencies for {plugin_dir.name}")
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error(
+                f"Failed to install dependencies for {plugin_dir.name}: {e.stderr}"
+            )
+            return False
+        except FileNotFoundError:
+            logger.error("uv command not found. Please install uv.")
+            return False
 
     async def discover_plugins(self) -> list[ProviderPlugin]:
         """Discover plugins from multiple sources.
@@ -38,7 +123,9 @@ class PluginLoader:
                 unique_plugins.append(plugin)
                 seen_names.add(plugin.name)
             else:
-                logger.warning(f"Duplicate plugin name found: {plugin.name}")
+                logger.debug(
+                    f"Duplicate plugin name found: {plugin.name} (directory version will be used)"
+                )
 
         return unique_plugins
 
@@ -94,6 +181,13 @@ class PluginLoader:
             if not subdir.is_dir() or subdir.name.startswith("_"):
                 continue
 
+            # Check plugin dependencies if pyproject.toml exists
+            if not self._check_plugin_dependencies(subdir):
+                logger.warning(
+                    f"Skipping plugin {subdir.name} due to missing dependencies"
+                )
+                continue
+
             try:
                 # Import the plugin module
                 spec = importlib.util.spec_from_file_location(
@@ -145,6 +239,13 @@ class PluginLoader:
                 if not subdir.is_dir() or subdir.name.startswith("_"):
                     continue
 
+                # Check plugin dependencies if pyproject.toml exists
+                if not self._check_plugin_dependencies(subdir):
+                    logger.warning(
+                        f"Skipping plugin {subdir.name} due to missing dependencies"
+                    )
+                    continue
+
                 plugin_file = subdir / "plugin.py"
                 try:
                     spec = importlib.util.spec_from_file_location(
@@ -182,6 +283,13 @@ class PluginLoader:
         Returns:
             Plugin instance or None if loading failed
         """
+        # Check plugin dependencies if pyproject.toml exists
+        if not self._check_plugin_dependencies(plugin_dir):
+            logger.warning(
+                f"Cannot load plugin {plugin_dir.name} due to missing dependencies"
+            )
+            return None
+
         try:
             plugin_file = plugin_dir / "plugin.py"
             if not plugin_file.exists():

@@ -329,14 +329,6 @@ def api(
             rich_help_panel="Server Settings",
         ),
     ] = None,
-    use_terminal_permission_handler: Annotated[
-        bool,
-        typer.Option(
-            "--terminal-permission-handler",
-            help="Enable terminal permission terminal handler",
-            rich_help_panel="Server Settings",
-        ),
-    ] = False,
     # Security options
     auth_token: Annotated[
         str | None,
@@ -498,7 +490,6 @@ def api(
             reload=reload,
             log_level=log_level,
             log_file=log_file,
-            use_terminal_confirmation_handler=use_terminal_permission_handler,
         )
 
         security_options = SecurityOptions(auth_token=auth_token)

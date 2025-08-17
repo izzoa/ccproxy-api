@@ -12,12 +12,11 @@ import structlog
 import typer
 from structlog import get_logger
 
-from ccproxy.api.services.permission_service import PermissionRequest
-from ccproxy.api.ui.permission_handler_protocol import ConfirmationHandlerProtocol
-from ccproxy.api.ui.terminal_permission_handler import (
-    TerminalPermissionHandler as TextualPermissionHandler,
-)
 from ccproxy.config.settings import get_settings
+
+from ..models import PermissionRequest
+from .protocol import ConfirmationHandlerProtocol
+from .terminal import TerminalPermissionHandler as TextualPermissionHandler
 
 
 logger = get_logger(__name__)
@@ -84,7 +83,7 @@ class SSEConfirmationHandler:
         if event_type == "ping":
             return
 
-        from ccproxy.models.permissions import EventType
+        from ..models import EventType
 
         handler_map = {
             EventType.PERMISSION_REQUEST.value: self._handle_permission_request,

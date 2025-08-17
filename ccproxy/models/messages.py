@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .claude_sdk import SDKContentBlock
+from ccproxy.adapters.sdk.models import SDKContentBlock
+
 from .requests import Message, ToolDefinition, Usage
 
 

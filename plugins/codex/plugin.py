@@ -1,11 +1,16 @@
 """Codex provider plugin implementation."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
+
+
+if TYPE_CHECKING:
+    from ccproxy.services.credentials.openai_oauth_client import OpenAIOAuthClient
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from ccproxy.auth.openai.credentials import OpenAITokenManager
 from ccproxy.core.services import CoreServices
 from ccproxy.models.provider import ProviderConfig
 from ccproxy.plugins.protocol import (
@@ -13,9 +18,11 @@ from ccproxy.plugins.protocol import (
     ProviderPlugin,
 )
 from ccproxy.services.adapters.base import BaseAdapter
+from ccproxy.utils.binary_resolver import BinaryResolver
 
 from .adapter import CodexAdapter
 from .config import CodexSettings
+from .detection_service import CodexDetectionService
 from .health import codex_health_check
 from .routes import router as codex_router
 from .tasks import CodexDetectionRefreshTask
@@ -34,8 +41,8 @@ class Plugin(ProviderPlugin):
         self._adapter: CodexAdapter | None = None
         self._config: CodexSettings | None = None
         self._services: CoreServices | None = None
-        self._detection_service: Any | None = None  # Will be CodexDetectionService
-        self._auth_manager: Any | None = None  # Will be OpenAITokenManager
+        self._detection_service: CodexDetectionService | None = None
+        self._auth_manager: OpenAITokenManager | None = None
 
     @property
     def name(self) -> str:
@@ -151,7 +158,8 @@ class Plugin(ProviderPlugin):
 
     def get_summary(self) -> dict[str, Any]:
         """Get plugin summary for consolidated logging."""
-        summary = {
+        summary: dict[str, Any] = {
+            "router_prefix": self.router_prefix,
             "models": "auto",  # Codex discovers models dynamically
         }
 
@@ -161,22 +169,32 @@ class Plugin(ProviderPlugin):
         else:
             summary["auth"] = "not_configured"
 
-        # Add CLI information
+        # Add CLI information using common format
         if self._detection_service:
-            cli_path = self._detection_service.get_cli_path()
             cli_version = self._detection_service.get_version()
-            if cli_path and cli_version:
-                summary["cli_version"] = cli_version
-                summary["cli_path"] = cli_path
+            cli_path = self._detection_service.get_cli_path()
 
-                # Determine CLI source
+            # Create CLI info using common format
+            resolver = BinaryResolver()
+            cli_info = resolver.get_cli_info("codex", "@openai/codex", cli_version)
+
+            # Override with actual detection service results if available
+            if cli_path:
+                cli_info["command"] = cli_path
+                cli_info["is_available"] = True
                 if isinstance(cli_path, list) and len(cli_path) > 1:
-                    summary["cli_source"] = "package_manager"
-                    summary["package_manager"] = cli_path[0]
+                    cli_info["source"] = "package_manager"
+                    cli_info["package_manager"] = cli_path[0]
+                    cli_info["path"] = None
                 else:
-                    summary["cli_source"] = "in_path"
-                    if isinstance(cli_path, list):
-                        summary["cli_path"] = cli_path[0]
+                    cli_info["source"] = "path"
+                    cli_info["path"] = (
+                        cli_path[0] if isinstance(cli_path, list) else cli_path
+                    )
+                    cli_info["package_manager"] = None
+
+            # Store CLI info in a structured way for dynamic logging
+            summary["cli_info"] = {"codex": cli_info}
 
         return summary
 
@@ -268,3 +286,97 @@ class Plugin(ProviderPlugin):
             CodexSettings class for plugin configuration
         """
         return CodexSettings
+
+    async def get_oauth_client(self) -> "OpenAIOAuthClient | None":
+        """Get OAuth client for Codex authentication.
+
+        Returns:
+            OpenAI OAuth client instance configured for Codex
+        """
+        from ccproxy.auth.openai import OpenAIOAuthClient
+
+        if not self._config:
+            raise RuntimeError("Plugin not initialized")
+
+        return OpenAIOAuthClient(self._config, self._auth_manager)
+
+    async def get_profile_info(self) -> dict[str, Any] | None:
+        """Get Codex-specific profile information from stored credentials.
+
+        Returns:
+            Dictionary containing Codex-specific profile information
+        """
+        try:
+            import base64
+            import json
+
+            # Get access token from stored credentials
+            if not self._auth_manager:
+                return None
+
+            access_token = await self._auth_manager.get_valid_token()
+            if not access_token:
+                return None
+
+            # For OpenAI/Codex, extract info from JWT token
+            parts = access_token.split(".")
+            if len(parts) != 3:
+                return None
+
+            # Decode JWT payload
+            payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+
+            profile_info = {}
+
+            # Extract OpenAI-specific information
+            openai_auth = payload.get("https://api.openai.com/auth", {})
+            if openai_auth:
+                if "email" in payload:
+                    profile_info["email"] = payload["email"]
+                    profile_info["email_verified"] = payload.get(
+                        "email_verified", False
+                    )
+
+                if openai_auth.get("chatgpt_plan_type"):
+                    profile_info["plan_type"] = openai_auth["chatgpt_plan_type"].upper()
+
+                if openai_auth.get("chatgpt_user_id"):
+                    profile_info["user_id"] = openai_auth["chatgpt_user_id"]
+
+                # Subscription info
+                if openai_auth.get("chatgpt_subscription_active_start"):
+                    profile_info["subscription_start"] = openai_auth[
+                        "chatgpt_subscription_active_start"
+                    ]
+                if openai_auth.get("chatgpt_subscription_active_until"):
+                    profile_info["subscription_until"] = openai_auth[
+                        "chatgpt_subscription_active_until"
+                    ]
+
+                # Organizations
+                orgs = openai_auth.get("organizations", [])
+                if orgs:
+                    for org in orgs:
+                        if org.get("is_default"):
+                            profile_info["organization"] = org.get("title", "Unknown")
+                            profile_info["organization_role"] = org.get(
+                                "role", "member"
+                            )
+                            profile_info["organization_id"] = org.get("id", "Unknown")
+                            break
+
+            return profile_info if profile_info else None
+
+        except Exception as e:
+            logger.debug(f"Failed to get Codex profile info: {e}")
+            return None
+
+    def get_auth_commands(self) -> list[Any] | None:
+        """Get Codex-specific auth command extensions.
+
+        Returns:
+            List of auth command definitions or None
+        """
+        # Codex plugin doesn't need custom auth commands for now
+        return None

@@ -31,6 +31,18 @@ class PackageManagerConfig(TypedDict, total=False):
     exec_cmd: str  # Optional field
 
 
+class CLIInfo(TypedDict):
+    """Common structure for CLI information."""
+
+    name: str  # CLI name (e.g., "claude", "codex")
+    version: str | None  # Version string
+    source: str  # "path" | "package_manager" | "unknown"
+    path: str | None  # Direct path if available
+    command: list[str]  # Full command to execute
+    package_manager: str | None  # Package manager used (if applicable)
+    is_available: bool  # Whether the CLI is accessible
+
+
 class BinaryResolver:
     """Resolves binaries with fallback to package managers."""
 
@@ -318,6 +330,53 @@ class BinaryResolver:
             }
 
         return info
+
+    def get_cli_info(
+        self,
+        binary_name: str,
+        package_name: str | None = None,
+        version: str | None = None,
+    ) -> CLIInfo:
+        """Get comprehensive CLI information in common format.
+
+        Args:
+            binary_name: Name of the binary to find
+            package_name: NPM package name if different from binary name
+            version: Optional version string (if known)
+
+        Returns:
+            CLIInfo dictionary with structured information
+        """
+        result = self.find_binary(binary_name, package_name)
+
+        if not result:
+            return CLIInfo(
+                name=binary_name,
+                version=version,
+                source="unknown",
+                path=None,
+                command=[],
+                package_manager=None,
+                is_available=False,
+            )
+
+        # Determine source and path
+        if result.is_direct:
+            source = "path"
+            path = result.command[0] if result.command else None
+        else:
+            source = "package_manager"
+            path = None
+
+        return CLIInfo(
+            name=binary_name,
+            version=version,
+            source=source,
+            path=path,
+            command=result.command,
+            package_manager=result.package_manager,
+            is_available=True,
+        )
 
     def clear_cache(self) -> None:
         """Clear all caches."""

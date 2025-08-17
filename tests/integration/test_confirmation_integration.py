@@ -10,12 +10,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ccproxy.api.routes.permissions import router as confirmation_router
-from ccproxy.api.services.permission_service import (
+from ccproxy.config.settings import Settings, get_settings
+from plugins.permissions.models import PermissionStatus
+from plugins.permissions.service import (
     PermissionService,
     get_permission_service,
 )
-from ccproxy.config.settings import Settings, get_settings
-from ccproxy.models.permissions import PermissionStatus
 
 
 @pytest.fixture

@@ -10,7 +10,8 @@ from structlog import get_logger
 from ccproxy.core.errors import (
     PermissionNotFoundError,
 )
-from ccproxy.models.permissions import (
+
+from .models import (
     EventType,
     PermissionEvent,
     PermissionRequest,

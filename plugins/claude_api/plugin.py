@@ -1,14 +1,20 @@
 """Claude API provider plugin implementation."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
+
+
+if TYPE_CHECKING:
+    from ccproxy.services.credentials.oauth_client import OAuthClient
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ccproxy.core.services import CoreServices
 from ccproxy.plugins.protocol import HealthCheckResult, ProviderPlugin
 from ccproxy.services.adapters.base import BaseAdapter
+from ccproxy.utils.binary_resolver import BinaryResolver
+from ccproxy.utils.cli_logging import log_plugin_summary
 
 from .adapter import ClaudeAPIAdapter
 from .config import ClaudeAPISettings
@@ -106,9 +112,14 @@ class Plugin(ProviderPlugin):
             has_credentials_manager=True,
         )
 
+        # Log plugin summary with dynamic CLI logging
+        log_plugin_summary(self.get_summary(), self.name)
+
     def get_summary(self) -> dict[str, Any]:
         """Get plugin summary for consolidated logging."""
-        summary: dict[str, Any] = {}
+        summary: dict[str, Any] = {
+            "router_prefix": self.router_prefix,
+        }
 
         if self._config:
             if self._config.models:
@@ -125,22 +136,34 @@ class Plugin(ProviderPlugin):
         else:
             summary["auth"] = "not_configured"
 
-        # Add CLI information
+        # Add CLI information using common format
         if self._detection_service:
-            cli_path = self._detection_service.get_cli_path()
             cli_version = self._detection_service.get_version()
-            if cli_path and cli_version:
-                summary["cli_version"] = cli_version
-                summary["cli_path"] = cli_path
+            cli_path = self._detection_service.get_cli_path()
 
-                # Determine CLI source
+            # Create CLI info using common format
+            resolver = BinaryResolver()
+            cli_info = resolver.get_cli_info(
+                "claude", "@anthropic-ai/claude-code", cli_version
+            )
+
+            # Override with actual detection service results if available
+            if cli_path:
+                cli_info["command"] = cli_path
+                cli_info["is_available"] = True
                 if isinstance(cli_path, list) and len(cli_path) > 1:
-                    summary["cli_source"] = "package_manager"
-                    summary["package_manager"] = cli_path[0]
+                    cli_info["source"] = "package_manager"
+                    cli_info["package_manager"] = cli_path[0]
+                    cli_info["path"] = None
                 else:
-                    summary["cli_source"] = "in_path"
-                    if isinstance(cli_path, list):
-                        summary["cli_path"] = cli_path[0]
+                    cli_info["source"] = "path"
+                    cli_info["path"] = (
+                        cli_path[0] if isinstance(cli_path, list) else cli_path
+                    )
+                    cli_info["package_manager"] = None
+
+            # Store CLI info in a structured way for dynamic logging
+            summary["cli_info"] = {"claude": cli_info}
 
         return summary
 
@@ -261,3 +284,69 @@ class Plugin(ProviderPlugin):
             ClaudeAPISettings class for plugin configuration
         """
         return ClaudeAPISettings
+
+    async def get_oauth_client(self) -> "OAuthClient | None":
+        """Get OAuth client for Claude API authentication.
+
+        Returns:
+            Claude OAuth client instance
+        """
+        from ccproxy.services.credentials.oauth_client import OAuthClient
+
+        return OAuthClient()
+
+    async def get_profile_info(self) -> dict[str, Any] | None:
+        """Get Claude-specific profile information from stored credentials.
+
+        Returns:
+            Dictionary containing Claude-specific profile information
+        """
+        try:
+            if not self._credentials_manager:
+                return None
+
+            # Get profile using credentials manager
+            profile = await self._credentials_manager.get_account_profile()
+            if not profile:
+                # Try to fetch fresh profile
+                profile = await self._credentials_manager.fetch_user_profile()
+
+            if profile:
+                profile_info = {}
+
+                if profile.organization:
+                    profile_info.update(
+                        {
+                            "organization_name": profile.organization.name,
+                            "organization_type": profile.organization.organization_type,
+                            "billing_type": profile.organization.billing_type,
+                            "rate_limit_tier": profile.organization.rate_limit_tier,
+                        }
+                    )
+
+                if profile.account:
+                    profile_info.update(
+                        {
+                            "email": profile.account.email,
+                            "full_name": profile.account.full_name,
+                            "display_name": profile.account.display_name,
+                            "has_claude_pro": profile.account.has_claude_pro,
+                            "has_claude_max": profile.account.has_claude_max,
+                        }
+                    )
+
+                return profile_info
+
+        except Exception as e:
+            logger.debug(f"Failed to get Claude profile info: {e}")
+
+        return None
+
+    def get_auth_commands(self) -> list[Any] | None:
+        """Get Claude-specific auth command extensions.
+
+        Returns:
+            List of auth command definitions or None
+        """
+        # Claude API plugin doesn't need custom auth commands for now
+        return None

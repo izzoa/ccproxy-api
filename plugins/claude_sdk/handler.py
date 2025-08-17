@@ -11,11 +11,10 @@ from uuid import uuid4
 import structlog
 from claude_code_sdk import ClaudeCodeOptions
 
+from ccproxy.adapters.sdk import models as sdk_models
+from ccproxy.adapters.sdk.models import SDKMessage, create_sdk_message
 from ccproxy.auth.manager import AuthManager
-from ccproxy.config.settings import Settings
 from ccproxy.core.errors import ClaudeProxyError, ServiceUnavailableError
-from ccproxy.models import claude_sdk as sdk_models
-from ccproxy.models.claude_sdk import SDKMessage, create_sdk_message
 from ccproxy.models.messages import MessageResponse
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics

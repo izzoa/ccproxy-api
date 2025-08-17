@@ -14,14 +14,14 @@ from ccproxy.api.routes.permissions import (
     event_generator,
     router,
 )
-from ccproxy.api.services.permission_service import (
-    PermissionService,
-    get_permission_service,
-)
 from ccproxy.config.settings import Settings, get_settings
-from ccproxy.models.permissions import (
+from plugins.permissions.models import (
     PermissionRequest,
     PermissionStatus,
+)
+from plugins.permissions.service import (
+    PermissionService,
+    get_permission_service,
 )
 
 

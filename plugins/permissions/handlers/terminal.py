@@ -14,7 +14,7 @@ from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widgets import Label, Static
 
-from ccproxy.api.services.permission_service import PermissionRequest
+from ..models import PermissionRequest
 
 
 logger = get_logger(__name__)

@@ -2,7 +2,6 @@
 
 from typing import Any
 
-import structlog
 from claude_code_sdk import ClaudeCodeOptions
 
 from .config import ClaudeSDKSettings

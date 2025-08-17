@@ -15,7 +15,7 @@ class ClaudeAPISettings(ProviderConfig):
     base_url: str = "https://api.anthropic.com"
     supports_streaming: bool = True
     requires_auth: bool = True
-    auth_type: str = "x-api-key"
+    auth_type: str = "oauth"
 
     # Claude API specific settings
     enabled: bool = True

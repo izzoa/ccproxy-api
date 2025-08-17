@@ -25,8 +25,8 @@ from claude_code_sdk import (
     TextBlock,
 )
 
+from ccproxy.adapters.sdk import models as sdk_models
 from ccproxy.core.errors import ClaudeProxyError, ServiceUnavailableError
-from ccproxy.models import claude_sdk as sdk_models
 from plugins.claude_sdk.client import ClaudeSDKClient
 
 
