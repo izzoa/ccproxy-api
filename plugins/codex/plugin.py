@@ -4,6 +4,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from ccproxy.core.services import CoreServices
 from ccproxy.models.provider import ProviderConfig
@@ -203,3 +204,11 @@ class Plugin(ProviderPlugin):
         }
 
         return [task_def]
+
+    def get_config_class(self) -> type[BaseModel] | None:
+        """Get the Pydantic configuration model for this plugin.
+
+        Returns:
+            CodexSettings class for plugin configuration
+        """
+        return CodexSettings

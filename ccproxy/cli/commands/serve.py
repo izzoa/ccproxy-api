@@ -949,9 +949,9 @@ def claude(
                 user_context=user_context,
             )
         else:
-            # Get claude path from settings
-            claude_path = settings.claude.cli_path
-            if not claude_path:
+            # Get claude command from settings or binary resolver
+            claude_result = settings.claude.find_claude_cli()
+            if not claude_result[0]:
                 toolkit.print("Error: Claude CLI not found.", tag="error")
                 toolkit.print(
                     "Please install Claude CLI or configure claude_cli_path.",
@@ -959,22 +959,46 @@ def claude(
                 )
                 raise typer.Exit(1)
 
-            # Resolve to absolute path
-            if not Path(claude_path).is_absolute():
-                claude_path = str(Path(claude_path).resolve())
+            claude_cmd = claude_result[0]
 
-            logger.info("local_claude_execution", claude_path=claude_path, args=args)
-            toolkit.print(f"Executing: {claude_path} {' '.join(args)}", tag="claude")
-            toolkit.print_line()
+            # Handle both direct path and command list
+            if isinstance(claude_cmd, str):
+                # Direct path - resolve to absolute if needed
+                if not Path(claude_cmd).is_absolute():
+                    claude_cmd = str(Path(claude_cmd).resolve())
 
-            # Execute command directly
-            try:
-                # Use os.execvp to replace current process with claude
-                # This hands over full control to claude, including signal handling
-                os.execvp(claude_path, [claude_path] + args)
-            except OSError as e:
-                toolkit.print(f"Failed to execute command: {e}", tag="error")
-                raise typer.Exit(1) from e
+                logger.info("local_claude_execution", claude_path=claude_cmd, args=args)
+                toolkit.print(f"Executing: {claude_cmd} {' '.join(args)}", tag="claude")
+                toolkit.print_line()
+
+                # Execute command directly
+                try:
+                    # Use os.execvp to replace current process with claude
+                    # This hands over full control to claude, including signal handling
+                    os.execvp(claude_cmd, [claude_cmd] + args)
+                except OSError as e:
+                    toolkit.print(f"Failed to execute command: {e}", tag="error")
+                    raise typer.Exit(1) from e
+            else:
+                # Package manager command - use subprocess
+                full_cmd = claude_cmd + args
+                logger.info(
+                    "local_claude_execution_via_package_manager",
+                    command=full_cmd,
+                    package_manager=claude_cmd[0],
+                )
+                toolkit.print(f"Executing: {' '.join(full_cmd)}", tag="claude")
+                toolkit.print_line()
+
+                try:
+                    # Use subprocess.run for package manager execution
+                    import subprocess
+
+                    result = subprocess.run(full_cmd, check=False)
+                    raise typer.Exit(result.returncode)
+                except subprocess.SubprocessError as e:
+                    toolkit.print(f"Failed to execute command: {e}", tag="error")
+                    raise typer.Exit(1) from e
 
     except ConfigurationError as e:
         logger.error("cli_configuration_error", error=str(e), command="claude")

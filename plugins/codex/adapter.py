@@ -11,6 +11,7 @@ from starlette.responses import Response, StreamingResponse
 
 from ccproxy.auth.base import AuthManager
 from ccproxy.services.adapters.base import BaseAdapter
+from ccproxy.services.http_handler import PluginHTTPHandler
 from ccproxy.services.provider_context import ProviderContext
 from ccproxy.services.proxy_service import ProxyService
 
@@ -47,6 +48,7 @@ class CodexAdapter(BaseAdapter):
         self._initialized = False
         self._auth_manager: AuthManager | None = None
         self._detection_service = None
+        self._http_handler: PluginHTTPHandler | None = None
 
     def set_proxy_service(self, proxy_service: ProxyService) -> None:
         """Set the proxy service for request handling."""
@@ -96,6 +98,11 @@ class CodexAdapter(BaseAdapter):
             if not self.response_transformer:
                 self.response_transformer = CodexResponseTransformer()
 
+            # Initialize HTTP handler with client config from proxy service
+            if not self._http_handler and self.proxy_service:
+                client_config = self.proxy_service.config.get_httpx_client_config()
+                self._http_handler = PluginHTTPHandler(client_config)
+
             self._initialized = True
             self.logger.debug("codex_adapter_initialized")
 
@@ -124,8 +131,10 @@ class CodexAdapter(BaseAdapter):
         # Extract session_id
         session_id = kwargs.get("session_id") or str(uuid.uuid4())
 
-        # Check if format conversion is needed
+        # Read request body
         body = await request.body()
+
+        # Check if format conversion is needed
         needs_conversion = False
         if body:
             try:
@@ -134,12 +143,17 @@ class CodexAdapter(BaseAdapter):
             except json.JSONDecodeError:
                 pass
 
-        # Create provider context
+        # Get authentication headers
         if not self._auth_manager:
             raise HTTPException(
                 status_code=503, detail="Authentication manager not available"
             )
+        auth_headers = await self._auth_manager.get_auth_headers()
 
+        # Build target URL
+        target_url = "https://chatgpt.com/backend-api/codex/responses"
+
+        # Create provider context
         context = ProviderContext(
             provider_name="codex",
             auth_manager=self._auth_manager,
@@ -147,26 +161,54 @@ class CodexAdapter(BaseAdapter):
             route_prefix="/codex",
             request_adapter=self.format_adapter if needs_conversion else None,
             response_adapter=self.format_adapter if needs_conversion else None,
-            # Object-based transformers with transform_headers/transform_body methods
             request_transformer=self.request_transformer,
             response_transformer=self.response_transformer,
             supports_streaming=True,
             requires_session=True,
             session_id=session_id,
-            path_transformer=lambda p: "/backend-api/codex/responses",
+        )
+
+        # Prepare request using HTTP handler
+        if not self._http_handler:
+            raise HTTPException(status_code=503, detail="HTTP handler not initialized")
+
+        (
+            transformed_body,
+            headers,
+            is_streaming,
+        ) = await self._http_handler.prepare_request(
+            request_body=body,
+            provider_context=context,
+            auth_headers=auth_headers,
+            request_headers=dict(request.headers),
+            session_id=session_id,
         )
 
         self.logger.info(
-            "codex_request_delegation",
+            "codex_request",
             session_id=session_id,
             needs_conversion=needs_conversion,
             endpoint=endpoint,
+            is_streaming=is_streaming,
+            target_url=target_url,
         )
 
-        # Delegate to proxy service
+        # Make the actual HTTP request using the shared handler
         if not self.proxy_service:
             raise HTTPException(status_code=503, detail="Proxy service not available")
-        return await self.proxy_service.dispatch_request(request, context)
+
+        return await self._http_handler.handle_request(
+            method=method,
+            url=target_url,
+            headers=headers,
+            body=transformed_body,
+            provider_context=context,
+            is_streaming=is_streaming,
+            streaming_handler=self.proxy_service.streaming_handler
+            if is_streaming
+            else None,
+            request_context={},
+        )
 
     async def handle_streaming(
         self, request: Request, endpoint: str, **kwargs: Any
@@ -208,7 +250,7 @@ class CodexAdapter(BaseAdapter):
         )
         modified_request._body = modified_body
 
-        # Delegate to handle_request which will handle streaming via ProxyService
+        # Delegate to handle_request which will handle streaming
         result = await self.handle_request(modified_request, endpoint, "POST", **kwargs)
 
         # Ensure we return a streaming response

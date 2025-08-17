@@ -1,5 +1,6 @@
 """Claude API adapter implementation."""
 
+import json
 from typing import Any
 
 import structlog
@@ -8,6 +9,8 @@ from httpx import AsyncClient
 from starlette.responses import Response, StreamingResponse
 
 from ccproxy.services.adapters.base import BaseAdapter
+from ccproxy.services.http_handler import PluginHTTPHandler
+from ccproxy.services.provider_context import ProviderContext
 
 
 logger = structlog.get_logger(__name__)
@@ -36,6 +39,11 @@ class ClaudeAPIAdapter(BaseAdapter):
         self.proxy_service: Any | None = None
         self.openai_adapter: Any | None = None
         self._initialized = False
+        self._http_handler: PluginHTTPHandler | None = None
+        self._auth_manager: Any | None = None
+        self._request_transformer: Any | None = None
+        self._response_transformer: Any | None = None
+        self._detection_service: Any | None = None
 
     def set_proxy_service(self, proxy_service: Any) -> None:
         """Set the proxy service for request handling.
@@ -81,6 +89,36 @@ class ClaudeAPIAdapter(BaseAdapter):
 
                 self.openai_adapter = OpenAIAdapter()
 
+            # Initialize HTTP handler with client config from proxy service
+            if not self._http_handler and self.proxy_service:
+                client_config = self.proxy_service.config.get_httpx_client_config()
+                self._http_handler = PluginHTTPHandler(client_config)
+
+            # Get auth manager from proxy service (credentials manager)
+            if not self._auth_manager and self.proxy_service:
+                self._auth_manager = self.proxy_service.credentials_manager
+
+            # Initialize transformers with detection service
+            if not self._request_transformer and hasattr(
+                self.proxy_service, "plugin_manager"
+            ):
+                plugin = self.proxy_service.plugin_manager.plugin_registry.get_plugin(
+                    "claude_api"
+                )
+                if plugin and hasattr(plugin, "_detection_service"):
+                    self._detection_service = plugin._detection_service
+
+                    # Create transformers with detection service
+                    from .transformers import (
+                        ClaudeAPIRequestTransformer,
+                        ClaudeAPIResponseTransformer,
+                    )
+
+                    self._request_transformer = ClaudeAPIRequestTransformer(
+                        self._detection_service
+                    )
+                    self._response_transformer = ClaudeAPIResponseTransformer()
+
             self._initialized = True
             self.logger.debug("Claude API adapter initialized successfully")
 
@@ -92,7 +130,7 @@ class ClaudeAPIAdapter(BaseAdapter):
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
-    ) -> Response:
+    ) -> Response | StreamingResponse:
         """Handle a request to the Claude API.
 
         Args:
@@ -106,59 +144,83 @@ class ClaudeAPIAdapter(BaseAdapter):
         """
         self._ensure_initialized(request)
 
-        # Create provider context based on endpoint
-        from ccproxy.services.provider_context import ProviderContext
+        # Read request body
+        body = await request.body()
 
+        # Get authentication headers
+        if not self._auth_manager:
+            raise HTTPException(
+                status_code=503, detail="Authentication manager not available"
+            )
+        auth_headers = await self._auth_manager.get_auth_headers()
+
+        # Determine target URL and format conversion needs
         if endpoint == "/v1/messages":
             # Native Anthropic format - no conversion needed
-            provider_context = ProviderContext(
-                provider_name="claude-api-native",
-                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[union-attr]
-                target_base_url="https://api.anthropic.com",
-                request_adapter=None,  # No conversion needed
-                response_adapter=None,  # Pass through
-                supports_streaming=True,
-                requires_session=False,
-            )
+            target_url = "https://api.anthropic.com/v1/messages"
+            needs_conversion = False
         elif endpoint == "/v1/chat/completions":
-            # OpenAI format - needs conversion
-            provider_context = ProviderContext(
-                provider_name="claude-api-openai",
-                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[union-attr]
-                target_base_url="https://api.anthropic.com",
-                request_adapter=self.openai_adapter,
-                response_adapter=self.openai_adapter,
-                supports_streaming=True,
-                requires_session=False,
-            )
+            # OpenAI format - needs conversion to Anthropic messages format
+            target_url = "https://api.anthropic.com/v1/messages"
+            needs_conversion = True
         else:
             raise HTTPException(
                 status_code=404,
                 detail=f"Endpoint {endpoint} not supported by Claude API plugin",
             )
 
-        # Dispatch request through proxy service
-        result = await self.proxy_service.dispatch_request(request, provider_context)  # type: ignore[union-attr]
+        # Create provider context with transformers
+        provider_context = ProviderContext(
+            provider_name="claude-api",
+            auth_manager=self._auth_manager,
+            target_base_url="https://api.anthropic.com",
+            request_adapter=self.openai_adapter if needs_conversion else None,
+            response_adapter=self.openai_adapter if needs_conversion else None,
+            request_transformer=self._request_transformer,
+            response_transformer=self._response_transformer,
+            supports_streaming=True,
+            requires_session=False,
+        )
 
-        # Handle different response types
-        if isinstance(result, StreamingResponse):
-            # Check if the original request wanted streaming
-            import json
+        # Prepare request using HTTP handler
+        if not self._http_handler:
+            raise HTTPException(status_code=503, detail="HTTP handler not initialized")
 
-            body = await request.body()
-            try:
-                request_data = json.loads(body) if body else {}
-                if request_data.get("stream", False):
-                    # Return the streaming response as-is
-                    return result
-            except json.JSONDecodeError:
-                pass
+        (
+            transformed_body,
+            headers,
+            is_streaming,
+        ) = await self._http_handler.prepare_request(
+            request_body=body,
+            provider_context=provider_context,
+            auth_headers=auth_headers,
+            request_headers=dict(request.headers),
+        )
 
-            # For non-streaming requests, return the streaming response
-            # The proxy service will handle the conversion
-            return result
+        self.logger.info(
+            "claude_api_request",
+            endpoint=endpoint,
+            target_url=target_url,
+            needs_conversion=needs_conversion,
+            is_streaming=is_streaming,
+        )
 
-        return result  # type: ignore[no-any-return]
+        # Make the actual HTTP request using the shared handler
+        if not self.proxy_service:
+            raise HTTPException(status_code=503, detail="Proxy service not available")
+
+        return await self._http_handler.handle_request(
+            method=method,
+            url=target_url,
+            headers=headers,
+            body=transformed_body,
+            provider_context=provider_context,
+            is_streaming=is_streaming,
+            streaming_handler=self.proxy_service.streaming_handler
+            if is_streaming
+            else None,
+            request_context={},
+        )
 
     async def handle_streaming(
         self, request: Request, endpoint: str, **kwargs: Any
@@ -176,8 +238,6 @@ class ClaudeAPIAdapter(BaseAdapter):
         self._ensure_initialized(request)
 
         # Ensure the request has stream=true
-        import json
-
         body = await request.body()
         try:
             request_data = json.loads(body) if body else {}
@@ -186,75 +246,30 @@ class ClaudeAPIAdapter(BaseAdapter):
 
         # Force streaming
         request_data["stream"] = True
-
-        # Create a new request with modified body
-        # We need to update the request body for streaming
         modified_body = json.dumps(request_data).encode()
 
-        # Create new request scope with updated body
+        # Create modified request with stream=true
         modified_scope = {
             **request.scope,
             "_body": modified_body,
         }
 
-        # Create modified request
         from starlette.requests import Request as StarletteRequest
 
         modified_request = StarletteRequest(
             scope=modified_scope,
             receive=request.receive,
         )
-
-        # Set the body on the request
         modified_request._body = modified_body
 
-        # Create provider context based on endpoint
-        from ccproxy.services.provider_context import ProviderContext
+        # Delegate to handle_request which will handle streaming
+        result = await self.handle_request(modified_request, endpoint, "POST", **kwargs)
 
-        if endpoint == "/v1/messages":
-            # Native Anthropic format
-            provider_context = ProviderContext(
-                provider_name="claude-api-native",
-                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[union-attr]
-                target_base_url="https://api.anthropic.com",
-                request_adapter=None,
-                response_adapter=None,
-                supports_streaming=True,
-                requires_session=False,
-            )
-        elif endpoint == "/v1/chat/completions":
-            # OpenAI format
-            provider_context = ProviderContext(
-                provider_name="claude-api-openai",
-                auth_manager=self.proxy_service.credentials_manager,  # type: ignore[union-attr]
-                target_base_url="https://api.anthropic.com",
-                request_adapter=self.openai_adapter,
-                response_adapter=self.openai_adapter,
-                supports_streaming=True,
-                requires_session=False,
-            )
-        else:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Streaming not supported for endpoint {endpoint}",
-            )
-
-        # Dispatch request through proxy service
-        result = await self.proxy_service.dispatch_request(  # type: ignore[union-attr]
-            modified_request, provider_context
-        )
-
-        # Ensure we got a streaming response
+        # Ensure we return a streaming response
         if not isinstance(result, StreamingResponse):
-            # Convert to streaming response
             return StreamingResponse(
                 iter([result.body if hasattr(result, "body") else b""]),
-                media_type=result.media_type
-                if hasattr(result, "media_type")
-                else "application/json",
-                status_code=result.status_code
-                if hasattr(result, "status_code")
-                else 200,
+                media_type="text/event-stream",
             )
 
         return result

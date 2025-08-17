@@ -4,6 +4,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from ccproxy.core.services import CoreServices
 from ccproxy.plugins.protocol import HealthCheckResult, ProviderPlugin
@@ -181,3 +182,11 @@ class Plugin(ProviderPlugin):
                 "skip_initial_run": True,
             }
         ]
+
+    def get_config_class(self) -> type[BaseModel] | None:
+        """Get the Pydantic configuration model for this plugin.
+
+        Returns:
+            ClaudeSDKSettings class for plugin configuration
+        """
+        return ClaudeSDKSettings

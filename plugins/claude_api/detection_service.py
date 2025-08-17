@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import socket
 import subprocess
 from pathlib import Path
@@ -20,6 +21,7 @@ from ccproxy.models.detection import (
     ClaudeCodeHeaders,
     SystemPromptData,
 )
+from ccproxy.utils.binary_resolver import BinaryResolver
 
 
 logger = structlog.get_logger(__name__)
@@ -82,32 +84,54 @@ class ClaudeAPIDetectionService:
             return self._cached_data.claude_version
         return None
 
-    def get_cli_path(self) -> str | None:
-        """Get the path to the Claude CLI binary."""
+    def get_cli_path(self) -> str | list[str] | None:
+        """Get the path to the Claude CLI binary or command."""
         try:
-            import shutil
-
+            # First try direct binary lookup
             cli_path = shutil.which("claude")
-            return cli_path
+            if cli_path:
+                return cli_path
+
+            # Try package manager fallback
+            resolver = BinaryResolver()
+            result = resolver.find_binary("claude", "@anthropic-ai/claude-code")
+            if result:
+                # If it's a package manager command, return the command list
+                if not result.is_direct:
+                    return result.command
+                # Otherwise return the direct path
+                return result.command[0] if result.command else None
+
+            return None
         except Exception:
             return None
 
-    def get_binary_path(self) -> str | None:
+    def get_binary_path(self) -> str | list[str] | None:
         """Alias for get_cli_path for consistency with Codex."""
         return self.get_cli_path()
 
     async def _get_claude_version(self) -> str:
         """Get Claude CLI version."""
         try:
-            result = subprocess.run(
-                ["claude", "--version"],
+            # Try to find claude command
+            resolver = BinaryResolver()
+            result = resolver.find_binary("claude", "@anthropic-ai/claude-code")
+
+            if not result:
+                raise FileNotFoundError("Claude CLI not found")
+
+            # Prepare command based on result type
+            cmd = result.command + ["--version"]
+
+            proc_result = subprocess.run(
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-            if result.returncode == 0:
+            if proc_result.returncode == 0:
                 # Extract version from output like "1.0.60 (Claude Code)"
-                version_line = result.stdout.strip()
+                version_line = proc_result.stdout.strip()
                 if "/" in version_line:
                     # Handle "claude-cli/1.0.60" format
                     version_line = version_line.split("/")[-1]
@@ -116,7 +140,9 @@ class ClaudeAPIDetectionService:
                     return version_line.split("(")[0].strip()
                 return version_line
             else:
-                raise RuntimeError(f"Claude version command failed: {result.stderr}")
+                raise RuntimeError(
+                    f"Claude version command failed: {proc_result.stderr}"
+                )
 
         except (subprocess.TimeoutExpired, FileNotFoundError, RuntimeError) as e:
             logger.warning("claude_version_detection_failed", error=str(e))
@@ -163,9 +189,18 @@ class ClaudeAPIDetectionService:
             # Execute Claude CLI with proxy
             env = {**dict(os.environ), "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}"}
 
+            # Find claude command
+            resolver = BinaryResolver()
+            result = resolver.find_binary("claude", "@anthropic-ai/claude-code")
+
+            if not result:
+                raise FileNotFoundError("Claude CLI not found for header detection")
+
+            # Prepare command
+            cmd = result.command + ["test"]
+
             process = await asyncio.create_subprocess_exec(
-                "claude",
-                "test",
+                *cmd,
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

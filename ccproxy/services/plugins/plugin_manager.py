@@ -57,12 +57,13 @@ class PluginManager:
             # Get settings for CoreServices
             settings = get_settings()
 
-            # Create proper CoreServices for plugins
+            # Create proper CoreServices for plugins with registry reference
             core_services = CoreServices(
                 http_client=http_client,
                 logger=logger,
                 settings=settings,
                 scheduler=scheduler,
+                plugin_registry=self.plugin_registry,
             )
 
             # Discover all plugins using loader

@@ -90,3 +90,11 @@ class ProviderPlugin(Protocol):
             List of task definitions or None if no scheduled tasks needed
         """
         ...
+
+    def get_config_class(self) -> type[BaseModel] | None:
+        """Get the Pydantic configuration model for this plugin.
+
+        Returns:
+            Pydantic BaseModel class for plugin configuration or None if no configuration needed
+        """
+        ...

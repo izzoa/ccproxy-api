@@ -8,6 +8,7 @@ from typing import NamedTuple
 import structlog
 
 from ccproxy.config.settings import Settings
+from ccproxy.utils.binary_resolver import BinaryResolver
 
 
 logger = structlog.get_logger(__name__)
@@ -17,7 +18,7 @@ class ClaudeDetectionData(NamedTuple):
     """Detection data for Claude CLI."""
 
     claude_version: str | None
-    cli_path: str | None
+    cli_path: str | list[str] | None
     is_available: bool
 
 
@@ -32,7 +33,7 @@ class ClaudeSDKDetectionService:
         """
         self.settings = settings
         self._version: str | None = None
-        self._cli_path: str | None = None
+        self._cli_path: str | list[str] | None = None
         self._is_available = False
 
     async def initialize_detection(self) -> ClaudeDetectionData:
@@ -66,11 +67,11 @@ class ClaudeSDKDetectionService:
             is_available=self._is_available,
         )
 
-    async def _find_claude_cli(self) -> str | None:
-        """Find Claude CLI in common locations.
+    async def _find_claude_cli(self) -> str | list[str] | None:
+        """Find Claude CLI in common locations or via package manager.
 
         Returns:
-            Path to Claude CLI if found, None otherwise
+            Path to Claude CLI or command list if found, None otherwise
         """
         # Check common installation locations
         claude_paths = [
@@ -89,22 +90,39 @@ class ClaudeSDKDetectionService:
             if path and Path(str(path)).exists():
                 return str(path)
 
+        # Try package manager fallback
+        resolver = BinaryResolver()
+        result = resolver.find_binary("claude", "@anthropic-ai/claude-code")
+        if result:
+            # If it's a package manager command, return the command list
+            if not result.is_direct:
+                return result.command
+            # Otherwise return the direct path
+            return result.command[0] if result.command else None
+
         return None
 
-    async def _get_claude_version(self, cli_path: str) -> str | None:
+    async def _get_claude_version(self, cli_path: str | list[str]) -> str | None:
         """Get Claude CLI version.
 
         Args:
-            cli_path: Path to Claude CLI executable
+            cli_path: Path to Claude CLI executable or command list
 
         Returns:
             Version string if successful, None otherwise
         """
         try:
+            # Prepare command based on input type
+            if isinstance(cli_path, list):
+                # It's a package manager command
+                cmd = cli_path + ["--version"]
+            else:
+                # It's a direct path
+                cmd = [cli_path, "--version"]
+
             # Run claude --version with timeout
             process = await asyncio.create_subprocess_exec(
-                cli_path,
-                "--version",
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -126,12 +144,12 @@ class ClaudeSDKDetectionService:
                 return None
 
         except TimeoutError:
-            logger.warning("claude_sdk_version_timeout", cli_path=cli_path)
+            logger.warning("claude_sdk_version_timeout", cli_path=str(cli_path))
             return None
         except Exception as e:
             logger.warning(
                 "claude_sdk_version_error",
-                cli_path=cli_path,
+                cli_path=str(cli_path),
                 error=str(e),
             )
             return None
@@ -144,11 +162,11 @@ class ClaudeSDKDetectionService:
         """
         return self._version
 
-    def get_cli_path(self) -> str | None:
-        """Get the detected Claude CLI path.
+    def get_cli_path(self) -> str | list[str] | None:
+        """Get the detected Claude CLI path or command.
 
         Returns:
-            CLI path if available, None otherwise
+            CLI path or command list if available, None otherwise
         """
         return self._cli_path
 

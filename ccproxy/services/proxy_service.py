@@ -3,7 +3,6 @@
 import json
 import uuid
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 import structlog
@@ -76,20 +75,16 @@ class ProxyService:
     async def dispatch_request(
         self, request: Request, provider_context: ProviderContext
     ) -> Response | StreamingResponse:
-        """Main entry point - orchestrates the request flow.
+        """Main entry point - pure delegation pattern.
 
         Flow:
-        1. Extract request context and ID
-        2. Get authentication headers
-        3. Transform request (body, headers, URL)
-        4. Determine if streaming needed
-        5. Trace request (if not plugin)
-        6. Route to appropriate handler
-        7. Trace response (if not streaming)
-        8. Return response
+        1. Prepare request context
+        2. Check for plugin adapter
+        3. If plugin exists, delegate to adapter
+        4. Otherwise, handle via standard proxy flow
         """
         try:
-            # 1. Extract request context and ID
+            # 1. Prepare request context
             request_id = str(uuid.uuid4())
             ctx = create_proxy_context(
                 request_id=request_id,
@@ -101,97 +96,78 @@ class ProxyService:
             # Read request body
             body = await request.body()
 
-            # 2. Get authentication headers if needed
-            auth_headers = {}
-            if provider_context.auth_manager:
-                auth_headers = await provider_context.auth_manager.get_auth_headers()
-            elif getattr(provider_context, "requires_auth", False):
-                # Get OAuth token for providers that need it
-                token = await self.auth_service.get_access_token()
-                auth_headers = {"Authorization": f"Bearer {token}"}
-
-            # 3. Transform request
-            # Extract metadata
-            model, is_streaming = self.request_transformer.extract_request_metadata(
-                body
-            )
-            ctx.model = model
-
-            # Transform body
-            transformed_body = await self.request_transformer.transform_body(
-                body, provider_context.request_adapter, provider_context
-            )
-
-            # Build target URL
-            target_url = self.request_transformer.build_target_url(
-                provider_context.target_base_url,
-                str(request.url.path),
-                str(request.url.query) if request.url.query else None,
-                provider_context,
-            )
-
-            # Prepare headers
-            request_headers = dict(request.headers)
-            headers = await self.request_transformer.prepare_headers(
-                request_headers,
-                auth_headers,
-                {},  # No extra headers at this level
-                provider_context,
-            )
-
-            # 4. Determine if streaming needed
-            if not is_streaming and provider_context.supports_streaming:
-                is_streaming = await self.streaming_handler.should_stream(
-                    transformed_body, provider_context
-                )
-
-            # 5. Trace request (if not plugin with custom tracer)
-            plugin_tracer = self.plugin_manager.get_plugin_tracer(
+            # 2. Check for plugin adapter
+            adapter = self.plugin_manager.get_plugin_adapter(
                 provider_context.provider_name
             )
-            tracer = plugin_tracer or self.request_tracer
 
-            await tracer.trace_request(
-                request_id, request.method, target_url, headers, transformed_body
-            )
+            if adapter:
+                # 3. Pure delegation to plugin adapter
+                logger.info(
+                    f"Delegating to plugin adapter: {provider_context.provider_name}"
+                )
 
-            # 6. Route to appropriate handler
-            response = await self._route_request(
-                request.method,
-                target_url,
-                headers,
-                transformed_body,
-                provider_context,
-                is_streaming,
-                ctx,
-            )
+                # Trace request
+                plugin_tracer = self.plugin_manager.get_plugin_tracer(
+                    provider_context.provider_name
+                )
+                tracer = plugin_tracer or self.request_tracer
 
-            # 7. Trace response (if not streaming)
-            if not isinstance(response, StreamingResponse):
-                response_body = b""
-                if hasattr(response, "body"):
-                    if isinstance(response.body, memoryview):
-                        response_body = bytes(response.body)
-                    else:
-                        response_body = response.body
-                await tracer.trace_response(
+                await tracer.trace_request(
                     request_id,
-                    response.status_code,
-                    dict(response.headers),
-                    response_body,
+                    request.method,
+                    str(request.url),
+                    dict(request.headers),
+                    body,
                 )
 
-            # 8. Update metrics
-            if self.metrics:
-                self.metrics.record_request(
-                    method=ctx.method or "unknown",
-                    endpoint=ctx.endpoint or "unknown",
-                    model=ctx.model,
-                    status=response.status_code,
-                    service_type=provider_context.provider_name,
+                # Delegate to adapter
+                response = await adapter.handle_request(
+                    request,
+                    str(request.url.path),
+                    request.method,
                 )
 
-            return response
+                # Trace response (if not streaming)
+                if not isinstance(response, StreamingResponse):
+                    response_body = b""
+                    if hasattr(response, "body"):
+                        if isinstance(response.body, memoryview):
+                            response_body = bytes(response.body)
+                        else:
+                            response_body = response.body
+                    await tracer.trace_response(
+                        request_id,
+                        response.status_code,
+                        dict(response.headers),
+                        response_body,
+                    )
+
+                # Update metrics
+                if self.metrics:
+                    # Extract model from body if possible
+                    model = None
+                    try:
+                        body_json = json.loads(body) if body else {}
+                        model = body_json.get("model")
+                    except Exception:
+                        pass
+
+                    self.metrics.record_request(
+                        method=ctx.method or "unknown",
+                        endpoint=ctx.endpoint or "unknown",
+                        model=model,
+                        status=response.status_code,
+                        service_type=provider_context.provider_name,
+                    )
+
+                return response
+
+            else:
+                # 4. Standard proxy flow (non-plugin providers)
+                return await self._handle_standard_proxy_request(
+                    request, body, provider_context, ctx, request_id
+                )
 
         except HTTPException:
             raise
@@ -203,6 +179,103 @@ class ProxyService:
             )
             raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}") from e
 
+    async def _handle_standard_proxy_request(
+        self,
+        request: Request,
+        body: bytes,
+        provider_context: ProviderContext,
+        ctx: ProxyRequestContext,
+        request_id: str,
+    ) -> Response | StreamingResponse:
+        """Handle standard proxy flow for non-plugin providers.
+
+        This preserves the original proxy logic for providers that don't have adapters.
+        """
+        # Get authentication headers if needed
+        auth_headers = {}
+        if provider_context.auth_manager:
+            auth_headers = await provider_context.auth_manager.get_auth_headers()
+        elif getattr(provider_context, "requires_auth", False):
+            # Get OAuth token for providers that need it
+            token = await self.auth_service.get_access_token()
+            auth_headers = {"Authorization": f"Bearer {token}"}
+
+        # Transform request
+        # Extract metadata
+        model, is_streaming = self.request_transformer.extract_request_metadata(body)
+        ctx.model = model
+
+        # Transform body
+        transformed_body = await self.request_transformer.transform_body(
+            body, provider_context.request_adapter, provider_context
+        )
+
+        # Build target URL
+        target_url = self.request_transformer.build_target_url(
+            provider_context.target_base_url,
+            str(request.url.path),
+            str(request.url.query) if request.url.query else None,
+            provider_context,
+        )
+
+        # Prepare headers
+        request_headers = dict(request.headers)
+        headers = await self.request_transformer.prepare_headers(
+            request_headers,
+            auth_headers,
+            {},  # No extra headers at this level
+            provider_context,
+        )
+
+        # Determine if streaming needed
+        if not is_streaming and provider_context.supports_streaming:
+            is_streaming = await self.streaming_handler.should_stream(
+                transformed_body, provider_context
+            )
+
+        # Trace request
+        await self.request_tracer.trace_request(
+            request_id, request.method, target_url, headers, transformed_body
+        )
+
+        # Route to appropriate handler
+        response = await self._route_request(
+            request.method,
+            target_url,
+            headers,
+            transformed_body,
+            provider_context,
+            is_streaming,
+            ctx,
+        )
+
+        # Trace response (if not streaming)
+        if not isinstance(response, StreamingResponse):
+            response_body = b""
+            if hasattr(response, "body"):
+                if isinstance(response.body, memoryview):
+                    response_body = bytes(response.body)
+                else:
+                    response_body = response.body
+            await self.request_tracer.trace_response(
+                request_id,
+                response.status_code,
+                dict(response.headers),
+                response_body,
+            )
+
+        # Update metrics
+        if self.metrics:
+            self.metrics.record_request(
+                method=ctx.method or "unknown",
+                endpoint=ctx.endpoint or "unknown",
+                model=ctx.model,
+                status=response.status_code,
+                service_type=provider_context.provider_name,
+            )
+
+        return response
+
     async def _route_request(
         self,
         method: str,
@@ -213,13 +286,14 @@ class ProxyService:
         is_streaming: bool,
         request_context: ProxyRequestContext,
     ) -> Response | StreamingResponse:
-        """Route to appropriate handler based on mode and protocol.
+        """Route to appropriate handler based on mode.
 
         Routing priority:
         1. Bypass mode → MockHandler
-        2. Plugin protocol → PluginAdapter
-        3. Streaming → StreamingHandler
-        4. Regular → _handle_regular_request
+        2. Streaming → StreamingHandler
+        3. Regular → _handle_regular_request
+
+        Note: Plugin handling is now done in dispatch_request via pure delegation.
         """
         # 1. Check bypass mode
         if getattr(self.settings.server, "bypass_mode", False):
@@ -250,48 +324,7 @@ class ProxyService:
                     content=mock_body, status_code=status, headers=mock_headers
                 )
 
-        # 2. Check for plugin protocol
-        logger.debug(f"Checking if plugin protocol for URL: {target_url}")
-        if self.plugin_manager.is_plugin_protocol(target_url):
-            parsed = urlparse(target_url)
-            plugin_name = parsed.scheme
-            logger.debug(f"Plugin protocol detected: {plugin_name}")
-
-            adapter = self.plugin_manager.get_plugin_adapter(plugin_name)
-            if adapter:
-                logger.info(f"Routing to plugin adapter: {plugin_name}")
-                # Create a mock request object for the plugin
-                # This is a simplified approach - in production, you'd properly construct a request
-                from types import SimpleNamespace
-
-                from fastapi import Request as FastAPIRequest
-
-                scope = {
-                    "type": "http",
-                    "method": method,
-                    "path": parsed.path,
-                    "query_string": b"",
-                    "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
-                    "app": SimpleNamespace(state=SimpleNamespace(proxy_service=self)),
-                }
-
-                async def receive() -> dict[str, bytes]:
-                    return {"body": body}
-
-                mock_request = FastAPIRequest(scope, receive=receive)
-                mock_request._body = body
-
-                return await adapter.handle_request(
-                    mock_request,
-                    parsed.path,
-                    method,
-                )
-            else:
-                raise HTTPException(
-                    status_code=404, detail=f"Plugin not found: {plugin_name}"
-                )
-
-        # 3. Check for streaming
+        # 2. Check for streaming
         if is_streaming:
             logger.info("Handling streaming request")
             return await self.streaming_handler.handle_streaming_request(
@@ -304,7 +337,7 @@ class ProxyService:
                 self.config.get_httpx_client_config(),
             )
 
-        # 4. Regular HTTP request
+        # 3. Regular HTTP request
         return await self._handle_regular_request(
             method, target_url, headers, body, provider_context, request_context
         )

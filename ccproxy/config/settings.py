@@ -14,6 +14,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from ccproxy.config.discovery import find_toml_config_file
 
 from .auth import AuthSettings
+from .binary import BinarySettings
 from .claude import ClaudeSettings
 from .cors import CORSSettings
 from .docker_settings import DockerSettings
@@ -94,6 +95,12 @@ class Settings(BaseSettings):
     auth: AuthSettings = Field(
         default_factory=AuthSettings,
         description="Authentication and credentials configuration",
+    )
+
+    # Binary resolution settings
+    binary: BinarySettings = Field(
+        default_factory=BinarySettings,
+        description="Binary resolution and package manager fallback configuration",
     )
 
     # Container settings
@@ -286,7 +293,8 @@ class Settings(BaseSettings):
         # If not explicitly set, try to find it
         if not self.claude.cli_path:
             found_path, found_in_path = self.claude.find_claude_cli()
-            if found_path:
+            # Only set cli_path if it's a direct path (string), not a package manager command (list)
+            if found_path and isinstance(found_path, str):
                 self.claude.cli_path = found_path
                 # Only add to PATH if it wasn't found via which()
                 if not found_in_path:

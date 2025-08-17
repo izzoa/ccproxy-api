@@ -20,6 +20,7 @@ from claude_code_sdk import ClaudeCodeOptions
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ccproxy.core.async_utils import get_package_dir
+from ccproxy.utils.binary_resolver import BinaryResolver
 
 
 logger = structlog.get_logger(__name__)
@@ -291,11 +292,18 @@ class ClaudeSettings(BaseModel):
             )
         return self
 
-    def find_claude_cli(self) -> tuple[str | None, bool]:
+    def find_claude_cli(
+        self, enable_fallback: bool = True
+    ) -> tuple[list[str] | str | None, bool]:
         """Find Claude CLI executable in PATH or specified location.
 
+        Args:
+            enable_fallback: Whether to use package manager fallback
+
         Returns:
-            tuple: (path_to_claude, found_in_path)
+            tuple: (command_or_path, found_in_path)
+                - command_or_path: Either a string path (direct binary) or list of strings (package manager command)
+                - found_in_path: True if found directly in PATH
         """
         if self.cli_path:
             return self.cli_path, False
@@ -323,6 +331,14 @@ class ClaudeSettings(BaseModel):
         for path in common_paths:
             if path.exists() and path.is_file() and os.access(path, os.X_OK):
                 return str(path), False
+
+        # Try package manager fallback if enabled
+        if enable_fallback:
+            resolver = BinaryResolver()
+            result = resolver.find_binary("claude", "@anthropic-ai/claude-code")
+            if result:
+                # Return the command list for package manager execution
+                return result.command, False
 
         return None, False
 

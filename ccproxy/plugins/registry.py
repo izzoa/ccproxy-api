@@ -25,6 +25,9 @@ class PluginRegistry:
         self._initialized_plugins: set[str] = set()
         self._services: CoreServices | None = None
         self._plugin_tasks: dict[str, list[str]] = {}  # Track tasks per plugin
+        self._plugin_paths: dict[
+            str, Path
+        ] = {}  # Track plugin file paths for efficient reloading
 
     async def discover_and_initialize(self, services: CoreServices) -> None:
         """Discover and initialize all plugins.
@@ -34,16 +37,19 @@ class PluginRegistry:
         """
         self._services = services
         loader = PluginLoader()
-        plugins = await loader.discover_all_plugins()
+        plugins_with_paths = loader.load_plugins_with_paths()
 
-        for plugin in plugins:
-            await self.register_and_initialize(plugin)
+        for plugin, path in plugins_with_paths:
+            await self.register_and_initialize(plugin, path)
 
-    async def register_and_initialize(self, plugin: ProviderPlugin) -> None:
+    async def register_and_initialize(
+        self, plugin: ProviderPlugin, plugin_path: Path | None = None
+    ) -> None:
         """Register and initialize a plugin.
 
         Args:
             plugin: Plugin to register and initialize
+            plugin_path: Optional path to the plugin file for reloading
         """
         try:
             # Basic validation first
@@ -53,6 +59,10 @@ class PluginRegistry:
 
             # Register plugin
             self._plugins[plugin.name] = plugin
+
+            # Store plugin path if provided
+            if plugin_path:
+                self._plugin_paths[plugin.name] = plugin_path
 
             # Initialize plugin if services available
             if self._services and hasattr(plugin, "initialize"):
@@ -315,26 +325,32 @@ class PluginRegistry:
             return True
         return False
 
-    async def reload_plugin(self, name: str, path: Path) -> bool:
-        """Reload a specific plugin.
+    async def reload_plugin(self, name: str) -> bool:
+        """Reload a specific plugin efficiently.
 
         Args:
             name: Plugin name
-            path: Path to plugin file
 
         Returns:
             True if reloaded successfully
         """
-        # Unregister existing
+        # Get stored path
+        plugin_path = self._plugin_paths.get(name)
+        if not plugin_path:
+            logger.error(f"No path found for plugin {name}")
+            return False
+
+        # Unregister old version
         await self.unregister(name)
 
-        # Use the loader to reload the plugin
+        # Load just this plugin
         loader = PluginLoader()
-        plugins = loader._load_from_directory()
-        for plugin in plugins:
-            if plugin.name == name:
-                await self.register_and_initialize(plugin)
-                break
+        plugin_dir = plugin_path.parent
+        plugin = loader.load_single_plugin(plugin_dir)
+
+        if plugin and plugin.name == name:
+            await self.register_and_initialize(plugin, plugin_path)
+            return True
 
         # Check if registered
         return name in self._plugins

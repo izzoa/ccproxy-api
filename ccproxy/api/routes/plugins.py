@@ -112,15 +112,6 @@ async def plugin_health(
     Raises:
         HTTPException: If plugin not found
     """
-    # Check built-in providers first
-    if plugin_name == "claude":
-        return PluginHealthResponse(
-            plugin=plugin_name,
-            status="healthy",
-            adapter_loaded=True,
-            details={"type": "builtin", "active": True},
-        )
-
     # Check plugin providers
     adapter = proxy.plugin_manager.get_plugin_adapter(plugin_name)
     if adapter:
@@ -193,12 +184,6 @@ async def reload_plugin(
     Raises:
         HTTPException: If plugin not found or reload fails
     """
-    # Built-in providers cannot be reloaded
-    if plugin_name in ["claude", "codex"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Built-in provider '{plugin_name}' cannot be reloaded",
-        )
 
     # Check if plugin exists
     if plugin_name not in proxy.plugin_manager.plugin_registry.list_plugins():
@@ -207,19 +192,20 @@ async def reload_plugin(
             detail=f"Plugin '{plugin_name}' not found",
         )
 
-    # In production, implement actual reload logic
-    # This would involve:
-    # 1. Finding the plugin file
-    # 2. Unregistering the current plugin
-    # 3. Reloading the module
-    # 4. Re-registering the plugin
+    # Reload the plugin using the new efficient method
+    success = await proxy.plugin_manager.plugin_registry.reload_plugin(plugin_name)
 
-    # For now, return a placeholder success response
-    return PluginReloadResponse(
-        status="success",
-        message=f"Plugin '{plugin_name}' reloaded successfully",
-        plugin=plugin_name,
-    )
+    if success:
+        return PluginReloadResponse(
+            status="success",
+            message=f"Plugin '{plugin_name}' reloaded successfully",
+            plugin=plugin_name,
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reload plugin '{plugin_name}'",
+        )
 
 
 @router.post("/discover", response_model=PluginListResponse)
@@ -257,12 +243,6 @@ async def unregister_plugin(
     Raises:
         HTTPException: If plugin not found or is built-in
     """
-    # Built-in providers cannot be unregistered
-    if plugin_name in ["claude", "codex"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Built-in provider '{plugin_name}' cannot be unregistered",
-        )
 
     # Unregister the plugin
     success = await proxy.plugin_manager.plugin_registry.unregister(plugin_name)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import socket
 import subprocess
 from pathlib import Path
@@ -20,6 +21,7 @@ from ccproxy.models.detection import (
     CodexHeaders,
     CodexInstructionsData,
 )
+from ccproxy.utils.binary_resolver import BinaryResolver
 
 
 logger = structlog.get_logger(__name__)
@@ -85,22 +87,18 @@ class CodexDetectionService:
         data = self.get_cached_data()
         return data.codex_version if data else "unknown"
 
-    def get_binary_path(self) -> str | None:
-        """Get the Codex CLI binary path.
+    def get_binary_path(self) -> str | list[str] | None:
+        """Get the Codex CLI binary path or command.
 
         Returns:
-            Path to codex binary or None if not found
+            Path to codex binary, command list, or None if not found
         """
-        import shutil
-
         # Try to find codex in PATH
         codex_path = shutil.which("codex")
         if codex_path:
             return codex_path
 
         # Check common locations
-        from pathlib import Path
-
         common_paths = [
             Path.home() / ".cache" / ".bun" / "bin" / "codex",
             Path.home() / ".local" / "bin" / "codex",
@@ -112,26 +110,48 @@ class CodexDetectionService:
             if path.exists() and path.is_file():
                 return str(path)
 
+        # Try package manager fallback
+        resolver = BinaryResolver()
+        result = resolver.find_binary("codex", "@anthropic-ai/codex")
+        if result:
+            # If it's a package manager command, return the command list
+            if not result.is_direct:
+                return result.command
+            # Otherwise return the direct path
+            return result.command[0] if result.command else None
+
         return None
 
     async def _get_codex_version(self) -> str:
         """Get Codex CLI version."""
         try:
-            result = subprocess.run(
-                ["codex", "--version"],
+            # Try to find codex command
+            resolver = BinaryResolver()
+            result = resolver.find_binary("codex", "@anthropic-ai/codex")
+
+            if not result:
+                raise FileNotFoundError("Codex CLI not found")
+
+            # Prepare command based on result type
+            cmd = result.command + ["--version"]
+
+            proc_result = subprocess.run(
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-            if result.returncode == 0:
+            if proc_result.returncode == 0:
                 # Extract version from output like "codex 0.21.0"
-                version_line = result.stdout.strip()
+                version_line = proc_result.stdout.strip()
                 if " " in version_line:
                     # Handle "codex 0.21.0" format - extract just the version number
                     return version_line.split()[-1]
                 return version_line
             else:
-                raise RuntimeError(f"Codex version command failed: {result.stderr}")
+                raise RuntimeError(
+                    f"Codex version command failed: {proc_result.stderr}"
+                )
 
         except (subprocess.TimeoutExpired, FileNotFoundError, RuntimeError) as e:
             logger.warning("codex_version_detection_failed", error=str(e))
@@ -182,10 +202,18 @@ class CodexDetectionService:
                 "OPENAI_BASE_URL": f"http://127.0.0.1:{port}/backend-api/codex",
             }
 
+            # Find codex command
+            resolver = BinaryResolver()
+            result = resolver.find_binary("codex", "@anthropic-ai/codex")
+
+            if not result:
+                raise FileNotFoundError("Codex CLI not found for header detection")
+
+            # Prepare command
+            cmd = result.command + ["exec", "test"]
+
             process = await asyncio.create_subprocess_exec(
-                "codex",
-                "exec",
-                "test",
+                *cmd,
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
