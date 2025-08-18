@@ -15,6 +15,7 @@ from typing import Any
 import structlog
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlmodel import Session, SQLModel, create_engine, desc, func, select
 from typing_extensions import TypedDict
 
@@ -119,8 +120,14 @@ class SimpleDuckDBStorage:
                 "simple_duckdb_initialized", database_path=str(self.database_path)
             )
 
+        except OSError as e:
+            logger.error("simple_duckdb_init_io_error", error=str(e), exc_info=e)
+            raise
+        except SQLAlchemyError as e:
+            logger.error("simple_duckdb_init_db_error", error=str(e), exc_info=e)
+            raise
         except Exception as e:
-            logger.error("simple_duckdb_init_error", error=str(e), exc_info=True)
+            logger.error("simple_duckdb_init_error", error=str(e), exc_info=e)
             raise
 
     def _create_schema_sync(self) -> None:
@@ -133,8 +140,11 @@ class SimpleDuckDBStorage:
             SQLModel.metadata.create_all(self._engine)
             logger.debug("duckdb_schema_created")
 
+        except SQLAlchemyError as e:
+            logger.error("simple_duckdb_schema_db_error", error=str(e), exc_info=e)
+            raise
         except Exception as e:
-            logger.error("simple_duckdb_schema_error", error=str(e))
+            logger.error("simple_duckdb_schema_error", error=str(e), exc_info=e)
             raise
 
     async def _ensure_query_column(self) -> None:
@@ -160,8 +170,11 @@ class SimpleDuckDBStorage:
                     session.commit()
                     logger.info("Added query column to access_logs table")
 
+        except SQLAlchemyError as e:
+            logger.warning("query_column_check_db_error", error=str(e), exc_info=e)
+            # Continue without failing - the column might already exist or schema might be different
         except Exception as e:
-            logger.warning("Failed to check/add query column", error=str(e))
+            logger.warning("query_column_check_error", error=str(e), exc_info=e)
             # Continue without failing - the column might already exist or schema might be different
 
     async def store_request(self, data: AccessLogPayload) -> bool:
@@ -180,11 +193,20 @@ class SimpleDuckDBStorage:
             # Add to queue for background processing
             await self._write_queue.put(data)
             return True
+        except asyncio.QueueFull as e:
+            logger.error(
+                "queue_store_full_error",
+                error=str(e),
+                request_id=data.get("request_id"),
+                exc_info=e,
+            )
+            return False
         except Exception as e:
             logger.error(
                 "queue_store_error",
                 error=str(e),
                 request_id=data.get("request_id"),
+                exc_info=e,
             )
             return False
 
@@ -208,22 +230,32 @@ class SimpleDuckDBStorage:
                             "queue_processed_successfully",
                             request_id=data.get("request_id"),
                         )
+                except SQLAlchemyError as e:
+                    logger.error(
+                        "background_worker_db_error",
+                        error=str(e),
+                        request_id=data.get("request_id"),
+                        exc_info=e,
+                    )
                 except Exception as e:
                     logger.error(
                         "background_worker_error",
                         error=str(e),
                         request_id=data.get("request_id"),
-                        exc_info=True,
+                        exc_info=e,
                     )
                 finally:
                     # Always mark the task as done, regardless of success/failure
                     self._write_queue.task_done()
 
+            except asyncio.CancelledError as e:
+                logger.info("background_worker_cancelled", exc_info=e)
+                break
             except Exception as e:
                 logger.error(
                     "background_worker_unexpected_error",
                     error=str(e),
-                    exc_info=True,
+                    exc_info=e,
                 )
                 # Continue processing other items
 
@@ -242,12 +274,19 @@ class SimpleDuckDBStorage:
                             "shutdown_queue_processed_successfully",
                             request_id=data.get("request_id"),
                         )
+                except SQLAlchemyError as e:
+                    logger.error(
+                        "shutdown_background_worker_db_error",
+                        error=str(e),
+                        request_id=data.get("request_id"),
+                        exc_info=e,
+                    )
                 except Exception as e:
                     logger.error(
                         "shutdown_background_worker_error",
                         error=str(e),
                         request_id=data.get("request_id"),
-                        exc_info=True,
+                        exc_info=e,
                     )
                 finally:
                     # Always mark the task as done, regardless of success/failure
@@ -260,7 +299,7 @@ class SimpleDuckDBStorage:
                 logger.error(
                     "shutdown_background_worker_unexpected_error",
                     error=str(e),
-                    exc_info=True,
+                    exc_info=e,
                 )
                 # Continue processing other items
 
@@ -319,11 +358,36 @@ class SimpleDuckDBStorage:
             )
             return True
 
+        except IntegrityError as e:
+            logger.error(
+                "simple_duckdb_store_integrity_error",
+                error=str(e),
+                request_id=data.get("request_id"),
+                exc_info=e,
+            )
+            return False
+        except OperationalError as e:
+            logger.error(
+                "simple_duckdb_store_operational_error",
+                error=str(e),
+                request_id=data.get("request_id"),
+                exc_info=e,
+            )
+            return False
+        except SQLAlchemyError as e:
+            logger.error(
+                "simple_duckdb_store_db_error",
+                error=str(e),
+                request_id=data.get("request_id"),
+                exc_info=e,
+            )
+            return False
         except Exception as e:
             logger.error(
                 "simple_duckdb_store_error",
                 error=str(e),
                 request_id=data.get("request_id"),
+                exc_info=e,
             )
             return False
 
@@ -390,11 +454,36 @@ class SimpleDuckDBStorage:
             )
             return True
 
+        except IntegrityError as e:
+            logger.error(
+                "simple_duckdb_store_batch_integrity_error",
+                error=str(e),
+                metric_count=len(metrics),
+                exc_info=e,
+            )
+            return False
+        except OperationalError as e:
+            logger.error(
+                "simple_duckdb_store_batch_operational_error",
+                error=str(e),
+                metric_count=len(metrics),
+                exc_info=e,
+            )
+            return False
+        except SQLAlchemyError as e:
+            logger.error(
+                "simple_duckdb_store_batch_db_error",
+                error=str(e),
+                metric_count=len(metrics),
+                exc_info=e,
+            )
+            return False
         except Exception as e:
             logger.error(
                 "simple_duckdb_store_batch_error",
                 error=str(e),
                 metric_count=len(metrics),
+                exc_info=e,
             )
             return False
 
@@ -448,8 +537,15 @@ class SimpleDuckDBStorage:
                     for result in results
                 ]
 
+        except SQLAlchemyError as e:
+            logger.error(
+                "simple_duckdb_query_top_model_db_error", error=str(e), exc_info=e
+            )
+            return []
         except Exception as e:
-            logger.error("simple_duckdb_query_top_model_error", error=str(e))
+            logger.error(
+                "simple_duckdb_query_top_model_error", error=str(e), exc_info=e
+            )
             return []
 
     async def get_recent_requests(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -471,8 +567,11 @@ class SimpleDuckDBStorage:
                 )
                 results = session.exec(statement).all()
                 return [log.dict() for log in results]
+        except SQLAlchemyError as e:
+            logger.error("sqlmodel_query_db_error", error=str(e), exc_info=e)
+            return []
         except Exception as e:
-            logger.error("sqlmodel_query_error", error=str(e))
+            logger.error("sqlmodel_query_error", error=str(e), exc_info=e)
             return []
 
     async def get_analytics(
@@ -567,8 +666,11 @@ class SimpleDuckDBStorage:
                     "query_time": time.time(),
                 }
 
+        except SQLAlchemyError as e:
+            logger.error("sqlmodel_analytics_db_error", error=str(e), exc_info=e)
+            return {}
         except Exception as e:
-            logger.error("sqlmodel_analytics_error", error=str(e))
+            logger.error("sqlmodel_analytics_error", error=str(e), exc_info=e)
             return {}
 
     async def close(self) -> None:
@@ -583,8 +685,12 @@ class SimpleDuckDBStorage:
             except TimeoutError:
                 logger.warning("background_worker_shutdown_timeout")
                 self._background_worker_task.cancel()
+            except asyncio.CancelledError:
+                logger.info("background_worker_shutdown_cancelled")
             except Exception as e:
-                logger.error("background_worker_shutdown_error", error=str(e))
+                logger.error(
+                    "background_worker_shutdown_error", error=str(e), exc_info=e
+                )
 
         # Process remaining items in queue (with timeout)
         try:
@@ -597,8 +703,14 @@ class SimpleDuckDBStorage:
         if self._engine:
             try:
                 self._engine.dispose()
+            except SQLAlchemyError as e:
+                logger.error(
+                    "simple_duckdb_engine_close_db_error", error=str(e), exc_info=e
+                )
             except Exception as e:
-                logger.error("simple_duckdb_engine_close_error", error=str(e))
+                logger.error(
+                    "simple_duckdb_engine_close_error", error=str(e), exc_info=e
+                )
             finally:
                 self._engine = None
 
@@ -635,11 +747,19 @@ class SimpleDuckDBStorage:
                     "enabled": False,
                 }
 
+        except SQLAlchemyError as e:
+            return {
+                "status": "unhealthy",
+                "enabled": False,
+                "error": str(e),
+                "error_type": "database",
+            }
         except Exception as e:
             return {
                 "status": "unhealthy",
                 "enabled": False,
                 "error": str(e),
+                "error_type": "unknown",
             }
 
     async def reset_data(self) -> bool:
@@ -654,8 +774,11 @@ class SimpleDuckDBStorage:
         try:
             # Run the reset operation in a thread pool
             return await asyncio.to_thread(self._reset_data_sync)
+        except SQLAlchemyError as e:
+            logger.error("simple_duckdb_reset_db_error", error=str(e), exc_info=e)
+            return False
         except Exception as e:
-            logger.error("simple_duckdb_reset_error", error=str(e))
+            logger.error("simple_duckdb_reset_error", error=str(e), exc_info=e)
             return False
 
     def _reset_data_sync(self) -> bool:
@@ -668,6 +791,9 @@ class SimpleDuckDBStorage:
 
             logger.info("simple_duckdb_reset_success")
             return True
+        except SQLAlchemyError as e:
+            logger.error("simple_duckdb_reset_sync_db_error", error=str(e), exc_info=e)
+            return False
         except Exception as e:
-            logger.error("simple_duckdb_reset_sync_error", error=str(e))
+            logger.error("simple_duckdb_reset_sync_error", error=str(e), exc_info=e)
             return False

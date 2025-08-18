@@ -327,7 +327,23 @@ class OpenAIStreamProcessor:
             if self.output_format == "sse":
                 yield self.formatter.format_done()
 
+        except (OSError, PermissionError) as e:
+            logger.error("stream_processing_io_error", error=str(e), exc_info=e)
+            # Send error chunk for IO errors
+            if self.output_format == "sse":
+                yield self.formatter.format_error_chunk(
+                    self.message_id,
+                    self.model,
+                    self.created,
+                    "error",
+                    f"IO error: {str(e)}",
+                )
+                yield self.formatter.format_done()
+            else:
+                # Dict format error
+                yield self._create_chunk_dict(finish_reason="error")
         except Exception as e:
+            logger.error("stream_processing_error", error=str(e), exc_info=e)
             # Send error chunk
             if self.output_format == "sse":
                 yield self.formatter.format_error_chunk(

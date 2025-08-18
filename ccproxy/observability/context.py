@@ -182,6 +182,7 @@ async def request_context(
             duration_seconds=ctx.duration_seconds,
             error_type=error_type,
             error_message=str(e),
+            exc_info=e,
             **ctx.metadata,
         )
 
@@ -274,6 +275,7 @@ async def timed_operation(
             duration_ms=duration_ms,
             error_type=error_type,
             error_message=str(e),
+            exc_info=e,
             **{
                 k: v for k, v in op_context.items() if k not in ("logger", "start_time")
             },
@@ -427,6 +429,7 @@ async def _emit_request_start_event(
             event_type="request_start",
             error=str(e),
             request_id=request_id,
+            exc_info=e,
         )
 
 
@@ -461,4 +464,5 @@ async def _emit_request_error_event(
             event_type="request_error",
             error=str(e),
             request_id=request_id,
+            exc_info=e,
         )

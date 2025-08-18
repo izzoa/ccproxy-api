@@ -93,8 +93,35 @@ class PluginRegistry:
                 f"Registered and initialized plugin: {plugin.name} v{plugin.version}"
             )
 
+        except ValueError as e:
+            logger.error(
+                "plugin_registration_validation_failed",
+                plugin=plugin.name,
+                error=str(e),
+                exc_info=e,
+            )
+            # Remove from registry if registration failed
+            self._plugins.pop(plugin.name, None)
+            self._adapters.pop(plugin.name, None)
+            self._initialized_plugins.discard(plugin.name)
+        except AttributeError as e:
+            logger.error(
+                "plugin_registration_missing_attribute",
+                plugin=plugin.name,
+                error=str(e),
+                exc_info=e,
+            )
+            # Remove from registry if registration failed
+            self._plugins.pop(plugin.name, None)
+            self._adapters.pop(plugin.name, None)
+            self._initialized_plugins.discard(plugin.name)
         except Exception as e:
-            logger.error(f"Failed to register plugin {plugin.name}: {e}")
+            logger.error(
+                "plugin_registration_failed",
+                plugin=plugin.name,
+                error=str(e),
+                exc_info=e,
+            )
             # Remove from registry if registration failed
             self._plugins.pop(plugin.name, None)
             self._adapters.pop(plugin.name, None)
@@ -169,10 +196,37 @@ class PluginRegistry:
                     enabled=enabled,
                 )
 
+            except ValueError as e:
+                logger.error(
+                    "plugin_task_registration_invalid_config",
+                    plugin=plugin.name,
+                    task_def=task_def,
+                    error=str(e),
+                    exc_info=e,
+                )
+            except KeyError as e:
+                logger.error(
+                    "plugin_task_registration_missing_key",
+                    plugin=plugin.name,
+                    task_def=task_def,
+                    error=str(e),
+                    exc_info=e,
+                )
+            except AttributeError as e:
+                logger.error(
+                    "plugin_task_registration_missing_attribute",
+                    plugin=plugin.name,
+                    task_def=task_def,
+                    error=str(e),
+                    exc_info=e,
+                )
             except Exception as e:
                 logger.error(
-                    f"Failed to register task for plugin {plugin.name}: {e}",
+                    "plugin_task_registration_failed",
+                    plugin=plugin.name,
                     task_def=task_def,
+                    error=str(e),
+                    exc_info=e,
                 )
 
         # Track tasks for this plugin for cleanup
@@ -285,8 +339,20 @@ class PluginRegistry:
                 auth_summary = await plugin.get_auth_summary()
                 if isinstance(auth_summary, dict):
                     summary.update(auth_summary)
+            except AttributeError as e:
+                logger.debug(
+                    "plugin_auth_summary_missing_method",
+                    plugin=plugin_name,
+                    error=str(e),
+                    exc_info=e,
+                )
             except Exception as e:
-                logger.debug(f"Failed to get auth summary for {plugin_name}: {e}")
+                logger.debug(
+                    "plugin_auth_summary_failed",
+                    plugin=plugin_name,
+                    error=str(e),
+                    exc_info=e,
+                )
 
         # Add routes information if plugin has router
         if hasattr(plugin, "get_routes"):
@@ -300,10 +366,19 @@ class PluginRegistry:
                         elif hasattr(route, "path_regex"):
                             routes_list.append(str(route.path_regex))
                     summary["routes"] = routes_list  # type: ignore[assignment]
+            except AttributeError as e:
+                logger.debug(
+                    "plugin_routes_missing_method",
+                    plugin=plugin_name,
+                    error=str(e),
+                    exc_info=e,
+                )
             except Exception as e:
                 logger.debug(
-                    f"Failed to get routes for plugin {plugin_name}: {e}",
-                    exc_info=True,
+                    "plugin_routes_failed",
+                    plugin=plugin_name,
+                    error=str(e),
+                    exc_info=e,
                 )
 
         return summary
@@ -344,9 +419,29 @@ class PluginRegistry:
                 try:
                     await scheduler.remove_task(task_name)
                     logger.debug(f"Removed task '{task_name}' for plugin {plugin_name}")
+                except ValueError as e:
+                    logger.error(
+                        "plugin_task_removal_invalid",
+                        plugin=plugin_name,
+                        task_name=task_name,
+                        error=str(e),
+                        exc_info=e,
+                    )
+                except KeyError as e:
+                    logger.error(
+                        "plugin_task_removal_not_found",
+                        plugin=plugin_name,
+                        task_name=task_name,
+                        error=str(e),
+                        exc_info=e,
+                    )
                 except Exception as e:
                     logger.error(
-                        f"Failed to remove task '{task_name}' for plugin {plugin_name}: {e}"
+                        "plugin_task_removal_failed",
+                        plugin=plugin_name,
+                        task_name=task_name,
+                        error=str(e),
+                        exc_info=e,
                     )
 
         self._plugin_tasks.clear()
@@ -360,8 +455,17 @@ class PluginRegistry:
         try:
             await plugin.shutdown()
             logger.info(f"Shutdown plugin: {plugin.name}")
+        except AttributeError as e:
+            logger.error(
+                "plugin_shutdown_missing_method",
+                plugin=plugin.name,
+                error=str(e),
+                exc_info=e,
+            )
         except Exception as e:
-            logger.error(f"Error shutting down plugin {plugin.name}: {e}")
+            logger.error(
+                "plugin_shutdown_failed", plugin=plugin.name, error=str(e), exc_info=e
+            )
 
     async def get_all_health_checks(self) -> dict[str, HealthCheckResult]:
         """Get health checks from all plugins concurrently.

@@ -330,6 +330,7 @@ async def _store_access_log(
             "access_log_duckdb_error",
             error=str(e),
             request_id=log_data.get("request_id"),
+            exc_info=e,
         )
 
 
@@ -342,6 +343,7 @@ async def _write_to_storage(storage: Any, data: dict[str, Any]) -> None:
             "duckdb_store_error",
             error=str(e),
             request_id=data.get("request_id"),
+            exc_info=e,
         )
 
 
@@ -382,6 +384,7 @@ async def _emit_access_event(event_type: str, data: dict[str, Any]) -> None:
             event_type=event_type,
             error=str(e),
             request_id=data.get("request_id"),
+            exc_info=e,
         )
 
 
@@ -458,4 +461,5 @@ def log_request_start(
             event_type="request_start",
             error=str(e),
             request_id=request_id,
+            exc_info=e,
         )

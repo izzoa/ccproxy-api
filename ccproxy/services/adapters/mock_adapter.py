@@ -26,7 +26,14 @@ class MockAdapter(BaseAdapter):
             if body:
                 body_json = json.loads(body)
                 return bool(body_json.get("stream", False))
-        except Exception:
+        except json.JSONDecodeError:
+            pass
+        except UnicodeDecodeError:
+            pass
+        except Exception as e:
+            structlog.get_logger(__name__).debug(
+                "stream_flag_extraction_error", error=str(e)
+            )
             pass
         return False
 
@@ -41,7 +48,14 @@ class MockAdapter(BaseAdapter):
         try:
             body_json = json.loads(body) if body else {}
             model = body_json.get("model", "unknown")
-        except Exception:
+        except json.JSONDecodeError:
+            pass
+        except UnicodeDecodeError:
+            pass
+        except Exception as e:
+            structlog.get_logger(__name__).debug(
+                "stream_flag_extraction_error", error=str(e)
+            )
             pass
 
         # Create request context
@@ -76,7 +90,14 @@ class MockAdapter(BaseAdapter):
         try:
             body_json = json.loads(body) if body else {}
             model = body_json.get("model", "unknown")
-        except Exception:
+        except json.JSONDecodeError:
+            pass
+        except UnicodeDecodeError:
+            pass
+        except Exception as e:
+            structlog.get_logger(__name__).debug(
+                "stream_flag_extraction_error", error=str(e)
+            )
             pass
 
         # Create request context

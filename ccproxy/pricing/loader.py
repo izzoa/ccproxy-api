@@ -169,7 +169,9 @@ class PricingLoader:
             return None
         except Exception as e:
             if verbose:
-                logger.error("pricing_load_failed", source="LiteLLM", error=str(e))
+                logger.error(
+                    "pricing_load_failed", source="LiteLLM", error=str(e), exc_info=e
+                )
             return None
 
     @staticmethod
@@ -226,7 +228,9 @@ class PricingLoader:
             return None
         except Exception as e:
             if verbose:
-                logger.error("pricing_validation_unexpected_error", error=str(e))
+                logger.error(
+                    "pricing_validation_unexpected_error", error=str(e), exc_info=e
+                )
             return None
 
     @staticmethod

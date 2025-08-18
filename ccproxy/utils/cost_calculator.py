@@ -114,7 +114,7 @@ def calculate_token_cost(
         return total_cost
 
     except Exception as e:
-        logger.debug("cost_calculation_error", error=str(e), model=model)
+        logger.debug("cost_calculation_error", error=str(e), model=model, exc_info=e)
         return None
 
 
@@ -206,5 +206,5 @@ def calculate_cost_breakdown(
         }
 
     except Exception as e:
-        logger.debug("cost_breakdown_error", error=str(e), model=model)
+        logger.debug("cost_breakdown_error", error=str(e), model=model, exc_info=e)
         return None

@@ -7,7 +7,11 @@ import jwt
 import structlog
 from pydantic import BaseModel, Field, field_validator
 
-from ccproxy.auth.exceptions import AuthenticationError
+from ccproxy.auth.exceptions import (
+    AuthenticationError,
+    CredentialsInvalidError,
+    CredentialsStorageError,
+)
 from ccproxy.auth.models import ClaudeCredentials, OAuthToken, UserProfile
 
 from .storage import OpenAITokenStorage
@@ -73,8 +77,8 @@ class OpenAICredentials(BaseModel):
                     return decoded["sub"]
                 elif "account_id" in decoded and isinstance(decoded["account_id"], str):
                     return decoded["account_id"]
-            except Exception as e:
-                logger.warning("Failed to extract account_id from token", error=str(e))
+            except (jwt.DecodeError, jwt.InvalidTokenError, KeyError, ValueError) as e:
+                logger.warning("jwt_decode_failed", error=str(e), exc_info=e)
 
         raise ValueError(
             "account_id is required and could not be extracted from access_token"
@@ -123,30 +127,55 @@ class OpenAITokenManager:
         """Load credentials from storage."""
         try:
             return await self.storage.load()
+        except (OSError, PermissionError) as e:
+            logger.error("storage_access_failed", error=str(e), exc_info=e)
+            return None
+        except (CredentialsStorageError, CredentialsInvalidError) as e:
+            logger.error("credentials_load_failed", error=str(e), exc_info=e)
+            return None
         except Exception as e:
-            logger.error("Failed to load OpenAI credentials", error=str(e))
+            logger.error("unexpected_load_error", error=str(e), exc_info=e)
             return None
 
     async def save_credentials(self, credentials: OpenAICredentials) -> bool:
         """Save credentials to storage."""
         try:
             return await self.storage.save(credentials)
+        except (OSError, PermissionError) as e:
+            logger.error("storage_access_failed", error=str(e), exc_info=e)
+            return False
+        except CredentialsStorageError as e:
+            logger.error("credentials_save_failed", error=str(e), exc_info=e)
+            return False
         except Exception as e:
-            logger.error("Failed to save OpenAI credentials", error=str(e))
+            logger.error("unexpected_save_error", error=str(e), exc_info=e)
             return False
 
     async def delete_credentials(self) -> bool:
         """Delete credentials from storage."""
         try:
             return await self.storage.delete()
+        except (OSError, PermissionError) as e:
+            logger.error("storage_access_failed", error=str(e), exc_info=e)
+            return False
+        except CredentialsStorageError as e:
+            logger.error("credentials_delete_failed", error=str(e), exc_info=e)
+            return False
         except Exception as e:
-            logger.error("Failed to delete OpenAI credentials", error=str(e))
+            logger.error("unexpected_delete_error", error=str(e), exc_info=e)
             return False
 
     async def has_credentials(self) -> bool:
         """Check if credentials exist."""
         try:
             return await self.storage.exists()
+        except (
+            OSError,
+            PermissionError,
+            CredentialsStorageError,
+            CredentialsInvalidError,
+        ):
+            return False
         except Exception:
             return False
 
@@ -220,6 +249,8 @@ class OpenAITokenManager:
         try:
             token = await self.get_valid_token()
             return bool(token)
+        except (AuthenticationError, CredentialsStorageError, CredentialsInvalidError):
+            return False
         except Exception:
             return False
 
@@ -257,6 +288,8 @@ class OpenAITokenManager:
         try:
             token = await self.get_valid_token()
             return bool(token)
+        except (AuthenticationError, CredentialsStorageError, CredentialsInvalidError):
+            return False
         except Exception:
             return False
 
@@ -352,15 +385,26 @@ class OpenAITokenManager:
                     # Add account active status
                     status["account_active"] = credentials.active
 
-                except Exception as e:
-                    logger.debug("Failed to decode token for status", error=str(e))
+                except (
+                    jwt.DecodeError,
+                    jwt.InvalidTokenError,
+                    KeyError,
+                    ValueError,
+                ) as e:
+                    logger.debug("token_decode_failed", error=str(e), exc_info=e)
                     # Just add basic info if decoding fails
                     status["expires_at"] = credentials.expires_at.isoformat()
                     status["token_expired"] = credentials.is_expired()
                     status["account_active"] = credentials.active
 
+        except (OSError, PermissionError) as e:
+            logger.debug("storage_access_failed", error=str(e), exc_info=e)
+            status["auth_error"] = "Storage access failed"
+        except (CredentialsStorageError, CredentialsInvalidError) as e:
+            logger.debug("credentials_error", error=str(e), exc_info=e)
+            status["auth_error"] = "Credentials error"
         except Exception as e:
-            logger.debug("Failed to get auth status", error=str(e))
+            logger.debug("unexpected_auth_status_error", error=str(e), exc_info=e)
             status["auth_error"] = str(e)
 
         return status

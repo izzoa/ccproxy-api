@@ -68,8 +68,8 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                 context = request.state.context
                 if hasattr(context, "request_id") and hasattr(context, "metadata"):
                     request_id = context.request_id
-        except Exception:
-            # Ignore any errors getting request_id
+        except (AttributeError, TypeError):
+            # Ignore missing attributes or type errors
             pass
 
         # Process the request
@@ -78,6 +78,11 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
         try:
             response = await call_next(request)
+        except (OSError, PermissionError) as e:
+            # Capture IO/permission error for logging
+            error_message = f"IO/Permission error: {str(e)}"
+            # Re-raise to let error handlers process it
+            raise
         except Exception as e:
             # Capture error for logging
             error_message = str(e)
@@ -140,7 +145,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                                     "error_message",
                                 ]:
                                     context_metadata.pop(key, None)
-                    except Exception:
+                    except (AttributeError, TypeError, KeyError):
                         # Ignore any errors extracting context metadata
                         pass
 
@@ -172,6 +177,9 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                         error_message=error_message or "No response generated",
                         exc_info=True,
                     )
+            except (OSError, PermissionError) as log_error:
+                # If logging fails due to IO/permission issues, don't crash the app
+                print(f"Failed to write access log (IO/Permission error): {log_error}")
             except Exception as log_error:
                 # If logging fails, don't crash the app
                 # Use print as a last resort to indicate the issue

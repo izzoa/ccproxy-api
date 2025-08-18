@@ -41,8 +41,11 @@ def setup_error_handlers(app: FastAPI) -> None:
     try:
         metrics = get_metrics()
         logger.debug("error_handlers_metrics_loaded")
+    except ImportError as e:
+        logger.warning("error_handlers_metrics_import_failed", error=str(e), exc_info=e)
+        metrics = None
     except Exception as e:
-        logger.warning("error_handlers_metrics_unavailable", error=str(e))
+        logger.warning("error_handlers_metrics_unavailable", error=str(e), exc_info=e)
         metrics = None
 
     @app.exception_handler(ClaudeProxyError)

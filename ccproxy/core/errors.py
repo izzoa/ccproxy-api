@@ -300,6 +300,30 @@ class PluginResourceError(ProxyError):
         self.resource_type = resource_type
 
 
+class PluginLoadError(ProxyError):
+    """Error raised when plugin loading fails.
+
+    This exception is used when plugins cannot be loaded due to import errors,
+    missing dependencies, missing classes, or other loading-related issues.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        plugin_name: str | None = None,
+        cause: Exception | None = None,
+    ):
+        """Initialize with a message and optional details.
+
+        Args:
+            message: The error message
+            plugin_name: Name of the plugin that failed to load
+            cause: The underlying exception
+        """
+        super().__init__(message, cause)
+        self.plugin_name = plugin_name
+
+
 __all__ = [
     # Core proxy errors
     "ProxyError",
@@ -309,6 +333,7 @@ __all__ = [
     "ProxyTimeoutError",
     "ProxyAuthenticationError",
     "PluginResourceError",
+    "PluginLoadError",
     # API-level errors
     "ClaudeProxyError",
     "ValidationError",

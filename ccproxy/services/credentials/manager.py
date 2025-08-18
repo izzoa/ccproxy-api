@@ -12,6 +12,8 @@ from structlog import get_logger
 from ccproxy.auth.exceptions import (
     CredentialsExpiredError,
     CredentialsNotFoundError,
+    CredentialsStorageError,
+    OAuthTokenRefreshError,
 )
 from ccproxy.auth.manager import AuthManager
 from ccproxy.auth.models import (
@@ -119,8 +121,17 @@ class CredentialsManager(AuthManager):
         """
         try:
             return await self.storage.load()
+        except FileNotFoundError as e:
+            logger.debug("credentials_file_not_found", error=str(e))
+            return None
+        except json.JSONDecodeError as e:
+            logger.error("credentials_json_decode_error", error=str(e), exc_info=e)
+            return None
+        except PermissionError as e:
+            logger.error("credentials_permission_error", error=str(e), exc_info=e)
+            return None
         except Exception as e:
-            logger.error("credentials_load_failed", error=str(e))
+            logger.error("credentials_load_unexpected_error", error=str(e), exc_info=e)
             return None
 
     async def save(self, credentials: ClaudeCredentials) -> bool:
@@ -134,8 +145,14 @@ class CredentialsManager(AuthManager):
         """
         try:
             return await self.storage.save(credentials)
+        except PermissionError as e:
+            logger.error("credentials_save_permission_error", error=str(e), exc_info=e)
+            return False
+        except OSError as e:
+            logger.error("credentials_save_os_error", error=str(e), exc_info=e)
+            return False
         except Exception as e:
-            logger.error("credentials_save_failed", error=str(e))
+            logger.error("credentials_save_unexpected_error", error=str(e), exc_info=e)
             return False
 
     # ==================== OAuth Operations ====================
@@ -173,8 +190,23 @@ class CredentialsManager(AuthManager):
                 logger.debug(
                     "profile_fetch_skipped", context="login", reason="no_profile_data"
                 )
+        except httpx.HTTPError as e:
+            logger.warning(
+                "profile_fetch_http_error", context="login", error=str(e), exc_info=e
+            )
+            # Continue with login even if profile fetch fails
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "profile_fetch_json_error", context="login", error=str(e), exc_info=e
+            )
+            # Continue with login even if profile fetch fails
         except Exception as e:
-            logger.warning("profile_fetch_failed", context="login", error=str(e))
+            logger.warning(
+                "profile_fetch_unexpected_error",
+                context="login",
+                error=str(e),
+                exc_info=e,
+            )
             # Continue with login even if profile fetch fails
 
         await self.save(credentials)
@@ -219,9 +251,17 @@ class CredentialsManager(AuthManager):
                         credentials = await self._refresh_token_with_profile(
                             credentials
                         )
+                    except OAuthTokenRefreshError as e:
+                        logger.error(
+                            "oauth_token_refresh_failed", error=str(e), exc_info=e
+                        )
+                    except httpx.HTTPError as e:
+                        logger.error(
+                            "token_refresh_http_error", error=str(e), exc_info=e
+                        )
                     except Exception as e:
                         logger.error(
-                            "token_refresh_failed", error=str(e), exc_info=True
+                            "token_refresh_unexpected_error", error=str(e), exc_info=e
                         )
                         if oauth_token.is_expired:
                             raise CredentialsExpiredError(
@@ -269,7 +309,12 @@ class CredentialsManager(AuthManager):
         try:
             await self.get_valid_credentials()
             return True
-        except Exception:
+        except CredentialsNotFoundError:
+            return False
+        except CredentialsExpiredError:
+            return False
+        except Exception as e:
+            logger.debug("auth_check_unexpected_error", error=str(e))
             return False
 
     async def get_user_profile(self) -> UserProfile | None:
@@ -316,11 +361,25 @@ class CredentialsManager(AuthManager):
                 credentials.claude_ai_oauth.access_token,
             )
             return profile
+        except httpx.HTTPError as e:
+            logger.error(
+                "user_profile_fetch_http_error",
+                error=str(e),
+                exc_info=e,
+            )
+            return None
+        except json.JSONDecodeError as e:
+            logger.error(
+                "user_profile_fetch_json_error",
+                error=str(e),
+                exc_info=e,
+            )
+            return None
         except Exception as e:
             logger.error(
-                "user_profile_fetch_failed",
+                "user_profile_fetch_unexpected_error",
                 error=str(e),
-                exc_info=True,
+                exc_info=e,
             )
             return None
 
@@ -362,8 +421,18 @@ class CredentialsManager(AuthManager):
             success = await self.storage.delete()
             await self._delete_account_profile()
             return success
+        except PermissionError as e:
+            logger.error(
+                "credentials_delete_permission_error", error=str(e), exc_info=e
+            )
+            return False
+        except OSError as e:
+            logger.error("credentials_delete_os_error", error=str(e), exc_info=e)
+            return False
         except Exception as e:
-            logger.error("credentials_delete_failed", error=str(e), exc_info=True)
+            logger.error(
+                "credentials_delete_unexpected_error", error=str(e), exc_info=e
+            )
             return False
 
     # ==================== Private Helper Methods ====================
@@ -405,8 +474,21 @@ class CredentialsManager(AuthManager):
             logger.debug("account_profile_saved", path=str(account_path))
             return True
 
+        except PermissionError as e:
+            logger.error(
+                "account_profile_save_permission_error", error=str(e), exc_info=e
+            )
+            return False
+        except OSError as e:
+            logger.error("account_profile_save_os_error", error=str(e), exc_info=e)
+            return False
+        except TypeError as e:
+            logger.error("account_profile_save_json_error", error=str(e), exc_info=e)
+            return False
         except Exception as e:
-            logger.error("account_profile_save_failed", error=str(e), exc_info=True)
+            logger.error(
+                "account_profile_save_unexpected_error", error=str(e), exc_info=e
+            )
             return False
 
     async def _load_account_profile(self) -> UserProfile | None:
@@ -427,8 +509,17 @@ class CredentialsManager(AuthManager):
 
             return UserProfile.model_validate(profile_data)
 
+        except FileNotFoundError:
+            logger.debug("account_profile_file_not_found")
+            return None
+        except json.JSONDecodeError as e:
+            logger.debug("account_profile_json_decode_error", error=str(e))
+            return None
+        except PermissionError as e:
+            logger.debug("account_profile_permission_error", error=str(e))
+            return None
         except Exception as e:
-            logger.debug("account_profile_load_failed", error=str(e))
+            logger.debug("account_profile_load_unexpected_error", error=str(e))
             return None
 
     async def _delete_account_profile(self) -> bool:
@@ -443,8 +534,14 @@ class CredentialsManager(AuthManager):
                 account_path.unlink()
                 logger.debug("account_profile_deleted", path=str(account_path))
             return True
+        except PermissionError as e:
+            logger.debug("account_profile_delete_permission_error", error=str(e))
+            return False
+        except OSError as e:
+            logger.debug("account_profile_delete_os_error", error=str(e))
+            return False
         except Exception as e:
-            logger.debug("account_profile_delete_failed", error=str(e))
+            logger.debug("account_profile_delete_unexpected_error", error=str(e))
             return False
 
     def _determine_subscription_type(self, profile: UserProfile) -> str:
@@ -581,9 +678,28 @@ class CredentialsManager(AuthManager):
                 logger.debug(
                     "profile_fetch_skipped", reason="no_profile_data_available"
                 )
+        except httpx.HTTPError as e:
+            logger.warning(
+                "profile_fetch_http_error",
+                context="token_refresh",
+                error=str(e),
+                exc_info=e,
+            )
+            # Continue with token refresh even if profile fetch fails
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "profile_fetch_json_error",
+                context="token_refresh",
+                error=str(e),
+                exc_info=e,
+            )
+            # Continue with token refresh even if profile fetch fails
         except Exception as e:
             logger.warning(
-                "profile_fetch_failed", context="token_refresh", error=str(e)
+                "profile_fetch_unexpected_error",
+                context="token_refresh",
+                error=str(e),
+                exc_info=e,
             )
             # Continue with token refresh even if profile fetch fails
 
@@ -618,7 +734,12 @@ class CredentialsManager(AuthManager):
         try:
             credentials = await self.get_valid_credentials()
             return bool(credentials and credentials.claude_ai_oauth.access_token)
-        except Exception:
+        except CredentialsNotFoundError:
+            return False
+        except CredentialsExpiredError:
+            return False
+        except Exception as e:
+            logger.debug("credential_validation_unexpected_error", error=str(e))
             return False
 
     def get_provider_name(self) -> str:
@@ -736,8 +857,14 @@ class CredentialsManager(AuthManager):
                 status["has_claude_pro"] = getattr(profile, "has_claude_pro", False)
                 status["has_claude_max"] = getattr(profile, "has_claude_max", False)
 
+        except CredentialsNotFoundError as e:
+            logger.debug("auth_status_credentials_not_found", error=str(e))
+            status["auth_error"] = "Credentials not found"
+        except CredentialsExpiredError as e:
+            logger.debug("auth_status_credentials_expired", error=str(e))
+            status["auth_error"] = "Credentials expired"
         except Exception as e:
-            logger.debug("Failed to get auth status", error=str(e))
+            logger.debug("auth_status_unexpected_error", error=str(e))
             status["auth_error"] = str(e)
 
         return status

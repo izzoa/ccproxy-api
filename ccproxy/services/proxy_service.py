@@ -164,4 +164,4 @@ class ProxyService:
             logger.info("ProxyService cleanup complete")
 
         except Exception as e:
-            logger.error("Error during cleanup", error=str(e))
+            logger.error("error_during_cleanup", error=str(e), exc_info=e)

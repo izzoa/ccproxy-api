@@ -43,11 +43,20 @@ def get_request_log_dir() -> Path | None:
     try:
         path.mkdir(parents=True, exist_ok=True)
         return path
+    except OSError as e:
+        logger.error(
+            "failed_to_create_request_log_dir_io_error",
+            log_dir=log_dir,
+            error=str(e),
+            exc_info=e,
+        )
+        return None
     except Exception as e:
         logger.error(
             "failed_to_create_request_log_dir",
             log_dir=log_dir,
             error=str(e),
+            exc_info=e,
         )
         return None
 
@@ -102,6 +111,15 @@ async def write_request_log(
             file_path=str(file_path),
         )
 
+    except OSError as e:
+        logger.error(
+            "failed_to_write_request_log_io_error",
+            request_id=request_id,
+            log_type=log_type,
+            file_path=str(file_path),
+            error=str(e),
+            exc_info=e,
+        )
     except Exception as e:
         logger.error(
             "failed_to_write_request_log",
@@ -109,6 +127,7 @@ async def write_request_log(
             log_type=log_type,
             file_path=str(file_path),
             error=str(e),
+            exc_info=e,
         )
 
 
@@ -154,6 +173,15 @@ async def write_streaming_log(
             data_size=len(data),
         )
 
+    except OSError as e:
+        logger.error(
+            "failed_to_write_streaming_log_io_error",
+            request_id=request_id,
+            log_type=log_type,
+            file_path=str(file_path),
+            error=str(e),
+            exc_info=e,
+        )
     except Exception as e:
         logger.error(
             "failed_to_write_streaming_log",
@@ -161,6 +189,7 @@ async def write_streaming_log(
             log_type=log_type,
             file_path=str(file_path),
             error=str(e),
+            exc_info=e,
         )
 
 
@@ -271,6 +300,15 @@ async def _flush_streaming_batch(batch_key: str) -> None:
             chunk_count=batch["chunk_count"],
         )
 
+    except OSError as e:
+        logger.error(
+            "failed_to_flush_streaming_batch_io_error",
+            request_id=batch["request_id"],
+            log_type=batch["log_type"],
+            file_path=str(file_path),
+            error=str(e),
+            exc_info=e,
+        )
     except Exception as e:
         logger.error(
             "failed_to_flush_streaming_batch",
@@ -278,6 +316,7 @@ async def _flush_streaming_batch(batch_key: str) -> None:
             log_type=batch["log_type"],
             file_path=str(file_path),
             error=str(e),
+            exc_info=e,
         )
 
 

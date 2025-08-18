@@ -153,7 +153,10 @@ class CoreRequestTracer(RequestTracer, StreamingTracer):
                 if len(text) > max_length:
                     return text[:max_length] + "..."
                 return text
-        except Exception:
+        except UnicodeDecodeError:
+            return "<binary data>"
+        except Exception as e:
+            logger.debug("text_formatting_unexpected_error", error=str(e))
             return "<binary data>"
 
     # Streaming tracer methods

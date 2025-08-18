@@ -148,12 +148,25 @@ async def plugin_health(
                         },
                     },
                 )
+            except (OSError, PermissionError) as e:
+                import structlog
+
+                logger = structlog.get_logger(__name__)
+                logger.error(
+                    "plugin_health_check_io_failed",
+                    plugin=plugin_name,
+                    error=str(e),
+                    exc_info=e,
+                )
             except Exception as e:
                 import structlog
 
                 logger = structlog.get_logger(__name__)
                 logger.error(
-                    "Plugin health check failed", plugin=plugin_name, error=str(e)
+                    "plugin_health_check_failed",
+                    plugin=plugin_name,
+                    error=str(e),
+                    exc_info=e,
                 )
                 return PluginHealthResponse(
                     plugin=plugin_name,

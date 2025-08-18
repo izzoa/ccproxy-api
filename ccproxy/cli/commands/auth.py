@@ -85,8 +85,29 @@ async def discover_oauth_providers() -> dict[str, tuple[str, str]]:
                         config.auth_type,
                         f"{plugin.name} OAuth provider",
                     )
+        except AttributeError as e:
+            logger.debug(
+                "plugin_oauth_missing_attribute",
+                plugin=plugin.name,
+                error=str(e),
+                exc_info=e,
+            )
+            continue
+        except ValueError as e:
+            logger.debug(
+                "plugin_oauth_invalid_config",
+                plugin=plugin.name,
+                error=str(e),
+                exc_info=e,
+            )
+            continue
         except Exception as e:
-            logger.debug(f"Failed to check OAuth support for plugin {plugin.name}: {e}")
+            logger.debug(
+                "plugin_oauth_check_failed",
+                plugin=plugin.name,
+                error=str(e),
+                exc_info=e,
+            )
             continue
 
     return oauth_providers
@@ -131,6 +152,10 @@ async def get_plugin_for_provider(provider: str) -> "ProviderPlugin":
                         raise ValueError(
                             f"Provider '{provider}' does not support OAuth authentication"
                         )
+            except AttributeError as e:
+                raise ValueError(
+                    f"Provider '{provider}' missing OAuth configuration: {e}"
+                ) from e
             except Exception as e:
                 raise ValueError(
                     f"Failed to check OAuth support for provider '{provider}': {e}"
@@ -215,7 +240,35 @@ async def check_provider_credentials(provider: str) -> dict[str, Any]:
             "credentials": None,  # Plugin-specific, would need to be added to protocol if needed
         }
 
-    except Exception:
+    except AttributeError as e:
+        logger.debug(
+            "credentials_check_missing_attribute",
+            provider=provider,
+            error=str(e),
+            exc_info=e,
+        )
+        # If we can't check credentials, assume none exist
+        return {
+            "has_credentials": False,
+            "expired": True,
+            "path": None,
+            "credentials": None,
+        }
+    except FileNotFoundError as e:
+        logger.debug(
+            "credentials_file_not_found", provider=provider, error=str(e), exc_info=e
+        )
+        # If we can't check credentials, assume none exist
+        return {
+            "has_credentials": False,
+            "expired": True,
+            "path": None,
+            "credentials": None,
+        }
+    except Exception as e:
+        logger.debug(
+            "credentials_check_failed", provider=provider, error=str(e), exc_info=e
+        )
         # If we can't check credentials, assume none exist
         return {
             "has_credentials": False,
@@ -255,6 +308,12 @@ def list_providers() -> None:
 
         console.print(table)
 
+    except ImportError as e:
+        toolkit.print(f"Plugin import error: {e}", tag="error")
+        raise typer.Exit(1) from e
+    except AttributeError as e:
+        toolkit.print(f"Plugin configuration error: {e}", tag="error")
+        raise typer.Exit(1) from e
     except Exception as e:
         toolkit.print(f"Error listing providers: {e}", tag="error")
         raise typer.Exit(1) from e
@@ -365,14 +424,33 @@ def login_command(
                     console.print(
                         f"  Expires: {exp_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}"
                     )
+            except OSError as e:
+                logger.error("oauth_server_error", error=str(e), exc_info=e)
+                toolkit.print(
+                    "Failed to start OAuth server. Please check port 54545 is available.",
+                    tag="error",
+                )
+                raise typer.Exit(1) from e
+            except ValueError as e:
+                logger.error("oauth_config_error", error=str(e), exc_info=e)
+                toolkit.print(
+                    "OAuth configuration error. Please check your setup.", tag="error"
+                )
+                raise typer.Exit(1) from e
             except Exception as e:
-                logger.error(f"Login failed: {e}")
+                logger.error("oauth_login_failed", error=str(e), exc_info=e)
                 toolkit.print("Login failed. Please try again.", tag="error")
                 raise typer.Exit(1) from e
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Login cancelled by user.[/yellow]")
             raise typer.Exit(1) from None
+        except ImportError as e:
+            toolkit.print(f"Failed to import required modules: {e}", tag="error")
+            raise typer.Exit(1) from e
+        except AttributeError as e:
+            toolkit.print(f"Configuration or plugin error: {e}", tag="error")
+            raise typer.Exit(1) from e
         except Exception as e:
             toolkit.print(f"Error during login: {e}", tag="error")
             raise typer.Exit(1) from e
@@ -439,11 +517,19 @@ def login_command(
             console.print(f"\n[dim]Authenticated with {provider}[/dim]")
 
     except ValueError as e:
-        toolkit.print(str(e), tag="error")
+        toolkit.print(f"Configuration error during {provider} login: {e}", tag="error")
         raise typer.Exit(1) from e
     except KeyboardInterrupt:
         console.print("\n[yellow]Login cancelled by user.[/yellow]")
         raise typer.Exit(1) from None
+    except OSError as e:
+        toolkit.print(f"OAuth server error during {provider} login: {e}", tag="error")
+        raise typer.Exit(1) from e
+    except ImportError as e:
+        toolkit.print(
+            f"Failed to import required modules for {provider}: {e}", tag="error"
+        )
+        raise typer.Exit(1) from e
     except Exception as e:
         toolkit.print(f"Error during {provider} login: {e}", tag="error")
         raise typer.Exit(1) from e
@@ -514,11 +600,27 @@ def status_command(
 
                 # Get profile info
                 return await plugin.get_profile_info()
-        except ValueError:
+        except ValueError as e:
             # Provider doesn't support OAuth or doesn't exist
+            logger.debug(
+                "profile_info_value_error",
+                provider=provider_name,
+                error=str(e),
+                exc_info=e,
+            )
+            return None
+        except AttributeError as e:
+            logger.debug(
+                "profile_info_missing_attribute",
+                provider=provider_name,
+                error=str(e),
+                exc_info=e,
+            )
             return None
         except Exception as e:
-            logger.debug(f"Failed to get profile info for {provider_name}: {e}")
+            logger.debug(
+                "profile_info_failed", provider=provider_name, error=str(e), exc_info=e
+            )
             return None
 
     try:
@@ -551,8 +653,26 @@ def status_command(
                             return await plugin.get_profile_info()
 
                 return None
+            except AttributeError as e:
+                logger.debug(
+                    "plugin_profile_missing_method",
+                    provider=provider,
+                    error=str(e),
+                    exc_info=e,
+                )
+                return None
+            except ValueError as e:
+                logger.debug(
+                    "plugin_profile_invalid_value",
+                    provider=provider,
+                    error=str(e),
+                    exc_info=e,
+                )
+                return None
             except Exception as e:
-                logger.debug(f"Failed to get profile info for {provider}: {e}")
+                logger.debug(
+                    "plugin_profile_failed", provider=provider, error=str(e), exc_info=e
+                )
                 return None
 
         # Get profile info from the plugin
@@ -661,6 +781,12 @@ def status_command(
             console.print("[red]✗[/red] Not authenticated or provider not found")
             console.print(f"  Run 'ccproxy auth login {provider}' to authenticate")
 
+    except ImportError as e:
+        console.print(f"[red]✗[/red] Failed to import required modules: {e}")
+        raise typer.Exit(1) from e
+    except AttributeError as e:
+        console.print(f"[red]✗[/red] Configuration or plugin error: {e}")
+        raise typer.Exit(1) from e
     except Exception as e:
         console.print(f"[red]✗[/red] Error checking status: {e}")
         raise typer.Exit(1) from e
@@ -726,6 +852,15 @@ def logout_command(
             )
             raise typer.Exit(1)
 
+    except FileNotFoundError as e:
+        toolkit.print("No credentials found to remove.", tag="warning")
+        # Don't exit with error for this case
+    except OSError as e:
+        toolkit.print(f"Failed to remove credential files: {e}", tag="error")
+        raise typer.Exit(1) from e
+    except ImportError as e:
+        toolkit.print(f"Failed to import required modules: {e}", tag="error")
+        raise typer.Exit(1) from e
     except Exception as e:
         toolkit.print(f"Error during logout: {e}", tag="error")
         raise typer.Exit(1) from e
@@ -811,6 +946,15 @@ def renew(
     except KeyboardInterrupt:
         console.print("\n[yellow]Renewal cancelled by user.[/yellow]")
         raise typer.Exit(1) from None
+    except OSError as e:
+        toolkit.print(f"Network or server error during renewal: {e}", tag="error")
+        raise typer.Exit(1) from e
+    except ValueError as e:
+        toolkit.print(f"Invalid credentials or configuration: {e}", tag="error")
+        raise typer.Exit(1) from e
+    except ImportError as e:
+        toolkit.print(f"Failed to import required modules: {e}", tag="error")
+        raise typer.Exit(1) from e
     except Exception as e:
         toolkit.print(f"Error during renewal: {e}", tag="error")
         raise typer.Exit(1) from e

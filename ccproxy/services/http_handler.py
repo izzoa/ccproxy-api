@@ -12,6 +12,7 @@ import structlog
 from fastapi import HTTPException
 from starlette.responses import Response, StreamingResponse
 
+from ccproxy.core.errors import ProxyConnectionError, ProxyTimeoutError
 from ccproxy.services.handler_config import HandlerConfig
 
 
@@ -128,10 +129,23 @@ class PluginHTTPHandler:
                             )
                         )
                         response_body = json.dumps(adapted_data).encode()
+                    except json.JSONDecodeError as e:
+                        self.logger.warning(
+                            "response_adaptation_json_decode_error",
+                            error=str(e),
+                            exc_info=e,
+                        )
+                    except UnicodeDecodeError as e:
+                        self.logger.warning(
+                            "response_adaptation_unicode_decode_error",
+                            error=str(e),
+                            exc_info=e,
+                        )
                     except Exception as e:
                         self.logger.warning(
-                            "Failed to adapt response",
+                            "response_adaptation_unexpected_error",
                             error=str(e),
+                            exc_info=e,
                         )
 
                 # Apply response transformer if provided
@@ -155,10 +169,17 @@ class PluginHTTPHandler:
                             )
                             if transformed_headers:
                                 response_headers = transformed_headers
+                        except TypeError as e:
+                            self.logger.warning(
+                                "response_header_transform_type_error",
+                                error=str(e),
+                                exc_info=e,
+                            )
                         except Exception as e:
                             self.logger.warning(
-                                "Failed to transform response headers",
+                                "response_header_transform_unexpected_error",
                                 error=str(e),
+                                exc_info=e,
                             )
 
                 return Response(
@@ -168,18 +189,19 @@ class PluginHTTPHandler:
                 )
 
         except httpx.TimeoutException as e:
-            self.logger.error("Request timeout", url=url)
-            raise HTTPException(status_code=504, detail="Request timeout") from e
+            self.logger.error("http_request_timeout", url=url, error=str(e), exc_info=e)
+            raise ProxyTimeoutError(f"Request timed out: {url}") from e
+        except httpx.ConnectError as e:
+            self.logger.error("http_connect_error", url=url, error=str(e), exc_info=e)
+            raise ProxyConnectionError(f"Connection failed: {url}") from e
         except httpx.HTTPError as e:
-            self.logger.error("HTTP error", url=url, error=str(e))
-            raise HTTPException(
-                status_code=502, detail=f"Upstream error: {str(e)}"
-            ) from e
+            self.logger.error("http_error", url=url, error=str(e), exc_info=e)
+            raise ProxyConnectionError(f"HTTP error: {e}") from e
         except Exception as e:
-            self.logger.error("Request failed", url=url, error=str(e))
-            raise HTTPException(
-                status_code=502, detail=f"Upstream error: {str(e)}"
-            ) from e
+            self.logger.error(
+                "http_request_unexpected_error", url=url, error=str(e), exc_info=e
+            )
+            raise ProxyConnectionError(f"Unexpected error: {e}") from e
 
     async def prepare_request(
         self,
@@ -226,10 +248,23 @@ class PluginHTTPHandler:
                     request_data
                 )
                 transformed_body = json.dumps(adapted_data).encode()
+            except json.JSONDecodeError as e:
+                self.logger.warning(
+                    "request_adaptation_json_decode_error",
+                    error=str(e),
+                    exc_info=e,
+                )
+            except UnicodeDecodeError as e:
+                self.logger.warning(
+                    "request_adaptation_unicode_decode_error",
+                    error=str(e),
+                    exc_info=e,
+                )
             except Exception as e:
                 self.logger.warning(
-                    "Failed to adapt request",
+                    "request_adaptation_unexpected_error",
                     error=str(e),
+                    exc_info=e,
                 )
 
         # Prepare headers

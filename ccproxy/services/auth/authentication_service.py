@@ -78,8 +78,18 @@ class AuthenticationService:
 
         except HTTPException:
             raise
+        except (CredentialsNotFoundError, CredentialsExpiredError) as e:
+            logger.debug("credential_auth_error", error=str(e))
+            raise self._create_auth_error_response(
+                CredentialValidation(
+                    status=CredentialStatus.EXPIRED
+                    if isinstance(e, CredentialsExpiredError)
+                    else CredentialStatus.MISSING,
+                    message=f"Authentication error: {str(e)}",
+                )
+            ) from e
         except Exception as e:
-            logger.error("Failed to get access token", error=str(e))
+            logger.error("access_token_unexpected_error", error=str(e), exc_info=e)
             raise self._create_auth_error_response(
                 CredentialValidation(
                     status=CredentialStatus.INVALID,
@@ -115,7 +125,12 @@ class AuthenticationService:
                 message="Credentials are valid",
                 expires_at=oauth_token.expires_at_datetime,
             )
-        except Exception:
+        except (CredentialsNotFoundError, CredentialsExpiredError):
+            return CredentialValidation(
+                status=CredentialStatus.INVALID, message="Invalid credentials"
+            )
+        except Exception as e:
+            logger.debug("credential_validation_unexpected_error", error=str(e))
             return CredentialValidation(
                 status=CredentialStatus.INVALID, message="Invalid credentials"
             )
@@ -146,8 +161,11 @@ class AuthenticationService:
             # Token not expired, no refresh needed
             return True
 
+        except (CredentialsNotFoundError, CredentialsExpiredError) as e:
+            logger.debug("token_refresh_credential_error", error=str(e))
+            return False
         except Exception as e:
-            logger.error("Error during token refresh", error=str(e))
+            logger.error("token_refresh_unexpected_error", error=str(e), exc_info=e)
             return False
 
     async def _get_credentials(self) -> ClaudeCredentials | None:
@@ -156,7 +174,8 @@ class AuthenticationService:
             return await self.credentials_manager.get_valid_credentials()
         except (CredentialsNotFoundError, CredentialsExpiredError):
             return None
-        except Exception:
+        except Exception as e:
+            logger.debug("get_credentials_unexpected_error", error=str(e))
             return None
 
     def _create_auth_error_response(

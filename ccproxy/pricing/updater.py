@@ -132,7 +132,7 @@ class PricingUpdater:
             return True
 
         except Exception as e:
-            logger.error("pricing_refresh_failed", error=str(e))
+            logger.error("pricing_refresh_failed", error=str(e), exc_info=e)
             return False
 
     async def _load_pricing_data(self) -> PricingData | None:
@@ -304,5 +304,5 @@ class PricingUpdater:
             return True
 
         except Exception as e:
-            logger.error("external_pricing_validation_failed", error=str(e))
+            logger.error("external_pricing_validation_failed", error=str(e), exc_info=e)
             return False

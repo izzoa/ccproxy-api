@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 import jwt
 import structlog
 
+from ccproxy.auth.exceptions import CredentialsInvalidError, CredentialsStorageError
+
 
 if TYPE_CHECKING:
     from .credentials import OpenAICredentials
@@ -72,11 +74,37 @@ class OpenAITokenStorage:
 
             return OpenAICredentials.from_dict(credentials_data)
 
-        except Exception as e:
+        except json.JSONDecodeError as e:
             logger.error(
-                "Failed to load OpenAI credentials from Codex auth file",
+                "json_parse_failed",
                 file_path=str(self.file_path),
                 error=str(e),
+                line=e.lineno,
+                exc_info=e,
+            )
+            raise CredentialsInvalidError("Invalid JSON format in auth file") from e
+        except UnicodeDecodeError as e:
+            logger.error(
+                "unicode_decode_failed",
+                file_path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            raise CredentialsInvalidError("Invalid file encoding") from e
+        except (OSError, PermissionError) as e:
+            logger.error(
+                "file_access_failed",
+                file_path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            raise CredentialsStorageError("Failed to access auth file") from e
+        except Exception as e:
+            logger.error(
+                "credentials_load_unexpected_error",
+                file_path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
             )
             return None
 
@@ -87,8 +115,12 @@ class OpenAITokenStorage:
             exp_timestamp = decoded.get("exp")
             if exp_timestamp:
                 return datetime.fromtimestamp(exp_timestamp, tz=UTC)
+        except (jwt.DecodeError, jwt.InvalidTokenError) as e:
+            logger.warning("jwt_decode_failed", error=str(e), exc_info=e)
+        except KeyError as e:
+            logger.warning("jwt_missing_exp_claim", error=str(e), exc_info=e)
         except Exception as e:
-            logger.warning("Failed to decode JWT token for expiration", error=str(e))
+            logger.warning("jwt_decode_unexpected_error", error=str(e), exc_info=e)
         return None
 
     async def save(self, credentials: "OpenAICredentials") -> bool:
@@ -103,9 +135,13 @@ class OpenAITokenStorage:
                 try:
                     with self.file_path.open("r") as f:
                         existing_data = json.load(f)
-                except Exception:
+                except json.JSONDecodeError as e:
                     logger.warning(
-                        "Could not load existing auth file, creating new one"
+                        "existing_file_parse_failed", error=str(e), exc_info=e
+                    )
+                except (OSError, PermissionError) as e:
+                    logger.warning(
+                        "existing_file_access_failed", error=str(e), exc_info=e
                     )
 
             # Prepare Codex JSON data structure
@@ -138,11 +174,38 @@ class OpenAITokenStorage:
             )
             return True
 
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             logger.error(
-                "Failed to save OpenAI credentials to Codex auth file",
+                "file_write_failed",
                 file_path=str(self.file_path),
                 error=str(e),
+                exc_info=e,
+            )
+            # Clean up temp file if it exists
+            temp_file = self.file_path.with_suffix(f"{self.file_path.suffix}.tmp")
+            if temp_file.exists():
+                with contextlib.suppress(Exception):
+                    temp_file.unlink()
+            raise CredentialsStorageError("Failed to write auth file") from e
+        except UnicodeEncodeError as e:
+            logger.error(
+                "unicode_encode_failed",
+                file_path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            # Clean up temp file if it exists
+            temp_file = self.file_path.with_suffix(f"{self.file_path.suffix}.tmp")
+            if temp_file.exists():
+                with contextlib.suppress(Exception):
+                    temp_file.unlink()
+            raise CredentialsStorageError("Failed to encode credentials") from e
+        except Exception as e:
+            logger.error(
+                "credentials_save_unexpected_error",
+                file_path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
             )
             # Clean up temp file if it exists
             temp_file = self.file_path.with_suffix(f"{self.file_path.suffix}.tmp")
@@ -161,6 +224,10 @@ class OpenAITokenStorage:
                 data = json.load(f)
             tokens = data.get("tokens", {})
             return bool(tokens.get("access_token"))
+        except json.JSONDecodeError:
+            return False
+        except (OSError, PermissionError):
+            return False
         except Exception:
             return False
 
@@ -171,11 +238,20 @@ class OpenAITokenStorage:
                 self.file_path.unlink()
                 logger.info("Deleted Codex auth file", file_path=str(self.file_path))
             return True
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             logger.error(
-                "Failed to delete Codex auth file",
+                "file_delete_failed",
                 file_path=str(self.file_path),
                 error=str(e),
+                exc_info=e,
+            )
+            raise CredentialsStorageError("Failed to delete auth file") from e
+        except Exception as e:
+            logger.error(
+                "delete_unexpected_error",
+                file_path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
             )
             return False
 

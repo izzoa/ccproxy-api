@@ -115,12 +115,41 @@ class PluginDependencyResolver:
                     missing_dependencies=missing,
                 )
 
+        except FileNotFoundError as e:
+            error_msg = f"pyproject.toml file not found: {e}"
+            result.error = error_msg
+            logger.error(
+                "dependency_analysis_file_not_found",
+                plugin=plugin_dir.name,
+                error=error_msg,
+                exc_info=e,
+            )
+        except OSError as e:
+            error_msg = f"Failed to read pyproject.toml: {e}"
+            result.error = error_msg
+            logger.error(
+                "dependency_analysis_file_read_failed",
+                plugin=plugin_dir.name,
+                error=error_msg,
+                exc_info=e,
+            )
+        except ValueError as e:
+            error_msg = f"Invalid TOML format: {e}"
+            result.error = error_msg
+            logger.error(
+                "dependency_analysis_invalid_toml",
+                plugin=plugin_dir.name,
+                error=error_msg,
+                exc_info=e,
+            )
         except Exception as e:
             error_msg = f"Failed to analyze dependencies: {e}"
             result.error = error_msg
             logger.error(
-                f"Error analyzing dependencies for {plugin_dir.name}: {error_msg}",
-                exc_info=True,
+                "dependency_analysis_failed",
+                plugin=plugin_dir.name,
+                error=error_msg,
+                exc_info=e,
             )
 
         return result
@@ -163,6 +192,16 @@ class PluginDependencyResolver:
                 dep_info.meets_requirement = False
                 dep_info.error = "Package not installed"
 
+        except ValueError as e:
+            dep_info.error = f"Invalid requirement specification: {e}"
+            # Try to extract package name as fallback
+            dep_info.name = (
+                dep_spec.split(">=")[0]
+                .split("==")[0]
+                .split("<")[0]
+                .split(">")[0]
+                .strip()
+            )
         except Exception as e:
             dep_info.error = f"Failed to parse requirement: {e}"
             # Try to extract package name as fallback

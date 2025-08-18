@@ -138,6 +138,14 @@ async def get_metrics_dashboard() -> HTMLResponse:
                 "Content-Type": "text/html; charset=utf-8",
             },
         )
+    except (OSError, PermissionError) as e:
+        raise HTTPException(
+            status_code=500, detail=f"Dashboard file access error: {str(e)}"
+        ) from e
+    except UnicodeDecodeError as e:
+        raise HTTPException(
+            status_code=500, detail=f"Dashboard file encoding error: {str(e)}"
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to serve dashboard: {str(e)}"
@@ -217,6 +225,10 @@ async def get_prometheus_metrics(metrics: ObservabilityMetricsDep) -> Response:
 
     except HTTPException:
         raise
+    except ImportError as e:
+        raise HTTPException(
+            status_code=503, detail=f"Prometheus dependencies missing: {str(e)}"
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to generate Prometheus metrics: {str(e)}"
@@ -296,11 +308,19 @@ async def query_logs(
                         "timestamp": time.time(),
                     }
 
+            except (OSError, PermissionError) as e:
+                import structlog
+
+                logger = structlog.get_logger(__name__)
+                logger.error("sqlmodel_query_io_error", error=str(e), exc_info=e)
+                raise HTTPException(
+                    status_code=500, detail=f"Database access error: {str(e)}"
+                ) from e
             except Exception as e:
                 import structlog
 
                 logger = structlog.get_logger(__name__)
-                logger.error("sqlmodel_query_error", error=str(e))
+                logger.error("sqlmodel_query_error", error=str(e), exc_info=e)
                 raise HTTPException(
                     status_code=500, detail=f"Query execution failed: {str(e)}"
                 ) from e
@@ -312,6 +332,10 @@ async def query_logs(
 
     except HTTPException:
         raise
+    except (OSError, PermissionError) as e:
+        raise HTTPException(
+            status_code=500, detail=f"Database access error: {str(e)}"
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Query execution failed: {str(e)}"
@@ -639,11 +663,19 @@ async def get_logs_analytics(
 
                     return cast(AnalyticsResult, analytics)
 
+            except (OSError, PermissionError) as e:
+                import structlog
+
+                logger = structlog.get_logger(__name__)
+                logger.error("sqlmodel_analytics_io_error", error=str(e), exc_info=e)
+                raise HTTPException(
+                    status_code=500, detail=f"Database access error: {str(e)}"
+                ) from e
             except Exception as e:
                 import structlog
 
                 logger = structlog.get_logger(__name__)
-                logger.error("sqlmodel_analytics_error", error=str(e))
+                logger.error("sqlmodel_analytics_error", error=str(e), exc_info=e)
                 raise HTTPException(
                     status_code=500, detail=f"Analytics query failed: {str(e)}"
                 ) from e
@@ -655,6 +687,10 @@ async def get_logs_analytics(
 
     except HTTPException:
         raise
+    except (OSError, PermissionError) as e:
+        raise HTTPException(
+            status_code=500, detail=f"Database access error: {str(e)}"
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Analytics generation failed: {str(e)}"
@@ -814,8 +850,18 @@ async def stream_logs(
         except asyncio.CancelledError:
             # Connection was cancelled, cleanup handled by SSE manager
             pass
+        except (OSError, PermissionError) as e:
+            # Send error event for IO issues
+            import json
+
+            error_event = {
+                "type": "error",
+                "message": f"Stream access error: {str(e)}",
+                "timestamp": time.time(),
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
         except Exception as e:
-            # Send error event
+            # Send error event for other issues
             import json
 
             error_event = {
@@ -951,11 +997,19 @@ async def get_logs_entries(
                         "backend": "sqlmodel",
                     }
 
+            except (OSError, PermissionError) as e:
+                import structlog
+
+                logger = structlog.get_logger(__name__)
+                logger.error("sqlmodel_entries_io_error", error=str(e), exc_info=e)
+                raise HTTPException(
+                    status_code=500, detail=f"Database access error: {str(e)}"
+                ) from e
             except Exception as e:
                 import structlog
 
                 logger = structlog.get_logger(__name__)
-                logger.error("sqlmodel_entries_error", error=str(e))
+                logger.error("sqlmodel_entries_error", error=str(e), exc_info=e)
                 raise HTTPException(
                     status_code=500, detail=f"Failed to retrieve entries: {str(e)}"
                 ) from e
@@ -967,6 +1021,10 @@ async def get_logs_entries(
 
     except HTTPException:
         raise
+    except (OSError, PermissionError) as e:
+        raise HTTPException(
+            status_code=500, detail=f"Database access error: {str(e)}"
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to retrieve database entries: {str(e)}"
@@ -1023,6 +1081,10 @@ async def reset_logs_data(
 
     except HTTPException:
         raise
+    except (OSError, PermissionError) as e:
+        raise HTTPException(
+            status_code=500, detail=f"Database access error: {str(e)}"
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Reset operation failed: {str(e)}"

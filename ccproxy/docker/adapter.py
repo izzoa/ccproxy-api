@@ -50,6 +50,8 @@ class DockerAdapter:
                 or "dial unix" in stderr_text.lower()
                 or "connect: permission denied" in stderr_text.lower()
             )
+        except (OSError, PermissionError):
+            return False
         except Exception:
             return False
 
@@ -81,8 +83,13 @@ class DockerAdapter:
             logger.warning("docker_executable_not_found")
             return False
 
+        except (OSError, PermissionError) as e:
+            logger.warning(
+                "docker_availability_check_permission_error", error=str(e), exc_info=e
+            )
+            return False
         except Exception as e:
-            logger.warning("docker_availability_check_error", error=str(e))
+            logger.warning("docker_availability_check_error", error=str(e), exc_info=e)
             return False
 
     async def _run_with_sudo_fallback(
@@ -92,6 +99,10 @@ class DockerAdapter:
         try:
             result = await run_command(docker_cmd, middleware)
             return result
+        except (OSError, PermissionError) as e:
+            logger.info("docker_permission_denied_using_sudo", error=str(e))
+            sudo_cmd = ["sudo"] + docker_cmd
+            return await run_command(sudo_cmd, middleware)
         except Exception as e:
             # Check if this might be a permission error
             error_text = str(e).lower()
@@ -175,6 +186,21 @@ class DockerAdapter:
             logger.error("docker_executable_not_found", error=str(e))
             raise error from e
 
+        except (OSError, PermissionError) as e:
+            error = create_docker_error(
+                f"Docker execution permission error: {e}",
+                cmd_str,
+                e,
+                {
+                    "image": image,
+                    "volumes_count": len(volumes),
+                    "env_vars_count": len(environment),
+                },
+            )
+            logger.error(
+                "docker_container_run_permission_error", error=str(e), exc_info=e
+            )
+            raise error from e
         except Exception as e:
             error = create_docker_error(
                 f"Failed to run Docker container: {e}",
@@ -186,7 +212,7 @@ class DockerAdapter:
                     "env_vars_count": len(environment),
                 },
             )
-            logger.error("docker_container_run_error", error=str(e))
+            logger.error("docker_container_run_error", error=str(e), exc_info=e)
             raise error from e
 
     async def run(
@@ -298,6 +324,8 @@ class DockerAdapter:
                     or "dial unix" in e.stderr.lower()
                     or "connect: permission denied" in e.stderr.lower()
                 )
+            except (OSError, PermissionError):
+                needs_sudo = True
             except Exception:
                 needs_sudo = False
 
@@ -331,7 +359,7 @@ class DockerAdapter:
                     "env_vars_count": len(environment),
                 },
             )
-            logger.error("docker_execvp_unexpected_error", error=str(e))
+            logger.error("docker_execvp_unexpected_error", error=str(e), exc_info=e)
             raise error from e
 
     async def build_image(
@@ -415,6 +443,20 @@ class DockerAdapter:
             logger.error("docker_build_executable_not_found", error=str(e))
             raise error from e
 
+        except (OSError, PermissionError) as e:
+            error = create_docker_error(
+                f"Docker build permission error: {e}",
+                cmd_str,
+                e,
+                {"image": image_full_name, "dockerfile_dir": str(dockerfile_dir)},
+            )
+            logger.error(
+                "docker_build_permission_error",
+                image=image_full_name,
+                error=str(e),
+                exc_info=e,
+            )
+            raise error from e
         except Exception as e:
             error = create_docker_error(
                 f"Unexpected error building Docker image: {e}",
@@ -424,7 +466,10 @@ class DockerAdapter:
             )
 
             logger.error(
-                "docker_build_unexpected_error", image=image_full_name, error=str(e)
+                "docker_build_unexpected_error",
+                image=image_full_name,
+                error=str(e),
+                exc_info=e,
             )
             raise error from e
 
@@ -486,9 +531,17 @@ class DockerAdapter:
                             "docker_image_does_not_exist", image=image_full_name
                         )
                         return False
+                except (OSError, PermissionError):
+                    # Permission issues even with sudo
+                    logger.debug(
+                        "docker_image_check_permission_failed", image=image_full_name
+                    )
+                    return False
                 except Exception:
                     # Image doesn't exist even with sudo
-                    logger.debug("Docker image does not exist: %s", image_full_name)
+                    logger.debug(
+                        "docker_image_does_not_exist_with_sudo", image=image_full_name
+                    )
                     return False
             else:
                 # Image doesn't exist (inspect returns non-zero exit code)
@@ -499,8 +552,15 @@ class DockerAdapter:
             logger.warning("docker_image_check_executable_not_found")
             return False
 
+        except (OSError, PermissionError) as e:
+            logger.warning(
+                "docker_image_check_permission_error", error=str(e), exc_info=e
+            )
+            return False
         except Exception as e:
-            logger.warning("docker_image_check_unexpected_error", error=str(e))
+            logger.warning(
+                "docker_image_check_unexpected_error", error=str(e), exc_info=e
+            )
             return False
 
     async def pull_image(
@@ -546,6 +606,20 @@ class DockerAdapter:
             logger.error("docker_pull_executable_not_found", error=str(e))
             raise error from e
 
+        except (OSError, PermissionError) as e:
+            error = create_docker_error(
+                f"Docker pull permission error: {e}",
+                cmd_str,
+                e,
+                {"image": image_full_name},
+            )
+            logger.error(
+                "docker_pull_permission_error",
+                image=image_full_name,
+                error=str(e),
+                exc_info=e,
+            )
+            raise error from e
         except Exception as e:
             error = create_docker_error(
                 f"Unexpected error pulling Docker image: {e}",
@@ -555,7 +629,10 @@ class DockerAdapter:
             )
 
             logger.error(
-                "docker_pull_unexpected_error", image=image_full_name, error=str(e)
+                "docker_pull_unexpected_error",
+                image=image_full_name,
+                error=str(e),
+                exc_info=e,
             )
             raise error from e
 

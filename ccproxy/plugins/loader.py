@@ -1,11 +1,13 @@
 """Plugin discovery and loading mechanism."""
 
+import importlib.metadata
 import importlib.util
 from pathlib import Path
 from typing import Any
 
 import structlog
 
+from ccproxy.core.errors import PluginLoadError
 from ccproxy.plugins.dependency_resolver import PluginDependencyResolver
 from ccproxy.plugins.protocol import ProviderPlugin
 
@@ -136,10 +138,38 @@ class PluginLoader:
                     plugin_class = entry_point.load()
                     plugins.append(plugin_class())
                     logger.debug("plugin_loaded", plugin=entry_point.name)
+                except ModuleNotFoundError as e:
+                    logger.error(
+                        "plugin_entry_point_module_not_found",
+                        plugin=entry_point.name,
+                        error=str(e),
+                        exc_info=e,
+                    )
+                except ImportError as e:
+                    logger.error(
+                        "plugin_entry_point_import_failed",
+                        plugin=entry_point.name,
+                        error=str(e),
+                        exc_info=e,
+                    )
+                except AttributeError as e:
+                    logger.error(
+                        "plugin_entry_point_missing_class",
+                        plugin=entry_point.name,
+                        error=str(e),
+                        exc_info=e,
+                    )
                 except Exception as e:
-                    logger.error(f"Failed to load plugin {entry_point.name}: {e}")
+                    logger.error(
+                        "unexpected_plugin_entry_point_error",
+                        plugin=entry_point.name,
+                        error=str(e),
+                        exc_info=e,
+                    )
+        except (ModuleNotFoundError, ImportError) as e:
+            logger.debug("no_entry_points_found", error=str(e), exc_info=e)
         except Exception as e:
-            logger.debug(f"No entry points found or error accessing them: {e}")
+            logger.debug("unexpected_entry_points_error", error=str(e), exc_info=e)
         return plugins
 
     def _load_from_directory(self) -> list[ProviderPlugin]:
@@ -198,8 +228,35 @@ class PluginLoader:
                         logger.debug(f"Loaded plugin from directory: {subdir.name}")
                     else:
                         logger.warning(f"No Plugin class found in {subdir}/plugin.py")
+            except FileNotFoundError as e:
+                logger.error(
+                    "plugin_file_not_found",
+                    plugin=subdir.name,
+                    error=str(e),
+                    exc_info=e,
+                )
+            except ModuleNotFoundError as e:
+                logger.error(
+                    "plugin_module_not_found",
+                    plugin=subdir.name,
+                    error=str(e),
+                    exc_info=e,
+                )
+            except ImportError as e:
+                logger.error(
+                    "plugin_import_failed", plugin=subdir.name, error=str(e), exc_info=e
+                )
+            except AttributeError as e:
+                logger.error(
+                    "plugin_missing_class", plugin=subdir.name, error=str(e), exc_info=e
+                )
             except Exception as e:
-                logger.error(f"Failed to load plugin from {subdir}: {e}", exc_info=e)
+                logger.error(
+                    "unexpected_plugin_error",
+                    plugin=subdir.name,
+                    error=str(e),
+                    exc_info=e,
+                )
 
         return plugins
 
@@ -253,8 +310,46 @@ class PluginLoader:
                             plugin_instance = module.Plugin()
                             plugins_with_paths.append((plugin_instance, plugin_file))
                             logger.info(f"Loaded plugin from {plugin_file}")
+                except FileNotFoundError as e:
+                    logger.error(
+                        "plugin_file_not_found",
+                        plugin=subdir.name,
+                        plugin_file=str(plugin_file),
+                        error=str(e),
+                        exc_info=e,
+                    )
+                except ModuleNotFoundError as e:
+                    logger.error(
+                        "plugin_module_not_found",
+                        plugin=subdir.name,
+                        plugin_file=str(plugin_file),
+                        error=str(e),
+                        exc_info=e,
+                    )
+                except ImportError as e:
+                    logger.error(
+                        "plugin_import_failed",
+                        plugin=subdir.name,
+                        plugin_file=str(plugin_file),
+                        error=str(e),
+                        exc_info=e,
+                    )
+                except AttributeError as e:
+                    logger.error(
+                        "plugin_missing_class",
+                        plugin=subdir.name,
+                        plugin_file=str(plugin_file),
+                        error=str(e),
+                        exc_info=e,
+                    )
                 except Exception as e:
-                    logger.error(f"Failed to load plugin from {plugin_file}: {e}")
+                    logger.error(
+                        "unexpected_plugin_error",
+                        plugin=subdir.name,
+                        plugin_file=str(plugin_file),
+                        error=str(e),
+                        exc_info=e,
+                    )
 
         # Remove duplicates based on plugin name, keeping the one with a path
         seen_names = {}
@@ -287,7 +382,11 @@ class PluginLoader:
         try:
             plugin_file = plugin_dir / "plugin.py"
             if not plugin_file.exists():
-                logger.error(f"Plugin file not found: {plugin_file}")
+                logger.error(
+                    "plugin_file_not_found",
+                    plugin=plugin_dir.name,
+                    plugin_file=str(plugin_file),
+                )
                 return None
 
             spec = importlib.util.spec_from_file_location(
@@ -304,13 +403,47 @@ class PluginLoader:
                         return plugin_instance
                     else:
                         logger.error(
-                            f"Plugin from {plugin_file} is not a ProviderPlugin"
+                            "plugin_not_provider_plugin",
+                            plugin=plugin_dir.name,
+                            plugin_file=str(plugin_file),
+                            plugin_type=type(plugin_instance).__name__,
                         )
                         return None
                 else:
-                    logger.error(f"No Plugin class found in {plugin_file}")
+                    logger.error(
+                        "plugin_missing_class",
+                        plugin=plugin_dir.name,
+                        plugin_file=str(plugin_file),
+                    )
+        except FileNotFoundError as e:
+            logger.error(
+                "plugin_file_not_found",
+                plugin=plugin_dir.name,
+                error=str(e),
+                exc_info=e,
+            )
+        except ModuleNotFoundError as e:
+            logger.error(
+                "plugin_module_not_found",
+                plugin=plugin_dir.name,
+                error=str(e),
+                exc_info=e,
+            )
+        except ImportError as e:
+            logger.error(
+                "plugin_import_failed", plugin=plugin_dir.name, error=str(e), exc_info=e
+            )
+        except AttributeError as e:
+            logger.error(
+                "plugin_missing_class", plugin=plugin_dir.name, error=str(e), exc_info=e
+            )
         except Exception as e:
-            logger.error(f"Failed to load plugin from {plugin_dir}: {e}")
+            logger.error(
+                "unexpected_plugin_error",
+                plugin=plugin_dir.name,
+                error=str(e),
+                exc_info=e,
+            )
 
         return None
 

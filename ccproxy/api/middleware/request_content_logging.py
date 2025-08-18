@@ -79,7 +79,7 @@ class RequestContentLoggingMiddleware(BaseHTTPMiddleware):
             if "x-request-id" in request.headers:
                 return request.headers["x-request-id"]
 
-        except Exception:
+        except (AttributeError, TypeError, KeyError):
             pass  # Ignore errors and use fallback
 
         return "unknown"
@@ -100,7 +100,7 @@ class RequestContentLoggingMiddleware(BaseHTTPMiddleware):
                 if hasattr(context, "get_log_timestamp_prefix"):
                     result = context.get_log_timestamp_prefix()
                     return str(result) if result is not None else None
-        except Exception:
+        except (AttributeError, TypeError):
             pass  # Ignore errors and use fallback
 
         return None
@@ -139,7 +139,7 @@ class RequestContentLoggingMiddleware(BaseHTTPMiddleware):
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     try:
                         request_data["body"] = body.decode("utf-8", errors="replace")
-                    except Exception:
+                    except (UnicodeDecodeError, UnicodeError):
                         request_data["body"] = f"<binary data of length {len(body)}>"
 
             await write_request_log(
@@ -149,11 +149,19 @@ class RequestContentLoggingMiddleware(BaseHTTPMiddleware):
                 timestamp=timestamp,
             )
 
+        except (OSError, PermissionError) as e:
+            logger.error(
+                "request_content_log_io_failed",
+                request_id=request_id,
+                error=str(e),
+                exc_info=e,
+            )
         except Exception as e:
             logger.error(
                 "failed_to_log_request_content",
                 request_id=request_id,
                 error=str(e),
+                exc_info=e,
             )
 
     async def _log_response(
@@ -174,11 +182,19 @@ class RequestContentLoggingMiddleware(BaseHTTPMiddleware):
                 # Handle regular response
                 await self._log_regular_response(response, request_id, timestamp)
 
+        except (OSError, PermissionError) as e:
+            logger.error(
+                "response_content_log_io_failed",
+                request_id=request_id,
+                error=str(e),
+                exc_info=e,
+            )
         except Exception as e:
             logger.error(
                 "failed_to_log_response_content",
                 request_id=request_id,
                 error=str(e),
+                exc_info=e,
             )
 
     async def _log_regular_response(
@@ -213,7 +229,7 @@ class RequestContentLoggingMiddleware(BaseHTTPMiddleware):
                     # Fallback to string
                     body_bytes = bytes(body) if isinstance(body, memoryview) else body
                     response_data["body"] = body_bytes.decode("utf-8", errors="replace")
-                except Exception:
+                except (UnicodeDecodeError, UnicodeError):
                     response_data["body"] = f"<binary data of length {len(body)}>"
         else:
             response_data["body_size"] = 0
@@ -281,11 +297,22 @@ class RequestContentLoggingMiddleware(BaseHTTPMiddleware):
 
                         yield chunk
 
+                except (OSError, PermissionError) as e:
+                    logger.error(
+                        "streaming_response_log_io_failed",
+                        request_id=request_id,
+                        error=str(e),
+                        exc_info=e,
+                    )
+                    # Continue with original iterator if logging fails
+                    async for chunk in original_body_iterator:
+                        yield chunk
                 except Exception as e:
                     logger.error(
                         "error_in_streaming_response_logging",
                         request_id=request_id,
                         error=str(e),
+                        exc_info=e,
                     )
                     # Continue with original iterator if logging fails
                     async for chunk in original_body_iterator:

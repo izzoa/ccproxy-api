@@ -9,6 +9,7 @@ import structlog
 from fastapi.responses import StreamingResponse
 
 from ccproxy.adapters.base import APIAdapter
+from ccproxy.core.errors import ProxyConnectionError, ProxyTimeoutError
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.services.handler_config import HandlerConfig
@@ -123,12 +124,29 @@ class StreamingHandler:
                     request_context.metrics["stream_chunks"] = total_chunks
                     request_context.metrics["stream_bytes"] = total_bytes
 
-            except httpx.TimeoutException:
-                logger.error("Streaming request timeout", url=url)
+            except httpx.TimeoutException as e:
+                logger.error(
+                    "streaming_request_timeout", url=url, error=str(e), exc_info=e
+                )
                 error_msg = json.dumps({"error": "Request timeout"}).encode()
                 yield error_msg
+            except httpx.ConnectError as e:
+                logger.error(
+                    "streaming_connect_error", url=url, error=str(e), exc_info=e
+                )
+                error_msg = json.dumps({"error": "Connection failed"}).encode()
+                yield error_msg
+            except httpx.HTTPError as e:
+                logger.error("streaming_http_error", url=url, error=str(e), exc_info=e)
+                error_msg = json.dumps({"error": f"HTTP error: {str(e)}"}).encode()
+                yield error_msg
             except Exception as e:
-                logger.error("Streaming request failed", url=url, error=str(e))
+                logger.error(
+                    "streaming_request_unexpected_error",
+                    url=url,
+                    error=str(e),
+                    exc_info=e,
+                )
                 error_msg = json.dumps({"error": str(e)}).encode()
                 yield error_msg
 
@@ -191,8 +209,16 @@ class StreamingHandler:
                                             data=data_str[:100],
                                         )
                                         continue
+                except json.JSONDecodeError as e:
+                    logger.warning("sse_json_decode_error", error=str(e), exc_info=e)
+                    continue
+                except UnicodeDecodeError as e:
+                    logger.warning("sse_unicode_decode_error", error=str(e), exc_info=e)
+                    continue
                 except Exception as e:
-                    logger.warning("Failed to process SSE event", error=str(e))
+                    logger.warning(
+                        "sse_processing_unexpected_error", error=str(e), exc_info=e
+                    )
                     continue
 
     async def _serialize_json_to_sse_stream(
@@ -208,11 +234,28 @@ class StreamingHandler:
                 json_str = json.dumps(chunk, separators=(",", ":"))
                 sse_event = f"data: {json_str}\n\n"
                 yield sse_event.encode()
-            except Exception as e:
+            except json.JSONDecodeError as e:
                 logger.warning(
-                    "Failed to serialize JSON to SSE",
+                    "sse_serialization_json_error",
                     error=str(e),
                     chunk_type=type(chunk).__name__,
+                    exc_info=e,
+                )
+                continue
+            except TypeError as e:
+                logger.warning(
+                    "sse_serialization_type_error",
+                    error=str(e),
+                    chunk_type=type(chunk).__name__,
+                    exc_info=e,
+                )
+                continue
+            except Exception as e:
+                logger.warning(
+                    "sse_serialization_unexpected_error",
+                    error=str(e),
+                    chunk_type=type(chunk).__name__,
+                    exc_info=e,
                 )
                 continue
 

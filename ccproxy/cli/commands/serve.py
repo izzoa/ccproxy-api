@@ -605,6 +605,16 @@ def api(
         toolkit = get_rich_toolkit()
         toolkit.print(f"Configuration error: {e}", tag="error")
         raise typer.Exit(1) from e
+    except OSError as e:
+        toolkit = get_rich_toolkit()
+        toolkit.print(
+            f"Server startup failed (port/permission issue): {e}", tag="error"
+        )
+        raise typer.Exit(1) from e
+    except ImportError as e:
+        toolkit = get_rich_toolkit()
+        toolkit.print(f"Import error during server startup: {e}", tag="error")
+        raise typer.Exit(1) from e
     except Exception as e:
         toolkit = get_rich_toolkit()
         toolkit.print(f"Error starting server: {e}", tag="error")
@@ -863,6 +873,14 @@ def claude(
     except ConfigurationError as e:
         logger.error("cli_configuration_error", error=str(e), command="claude")
         toolkit.print(f"Configuration error: {e}", tag="error")
+        raise typer.Exit(1) from e
+    except FileNotFoundError as e:
+        logger.error("cli_command_not_found", error=str(e), command="claude")
+        toolkit.print(f"Claude command not found: {e}", tag="error")
+        raise typer.Exit(1) from e
+    except OSError as e:
+        logger.error("cli_os_error", error=str(e), command="claude")
+        toolkit.print(f"System error executing claude command: {e}", tag="error")
         raise typer.Exit(1) from e
     except Exception as e:
         logger.error("cli_unexpected_error", error=str(e), command="claude")

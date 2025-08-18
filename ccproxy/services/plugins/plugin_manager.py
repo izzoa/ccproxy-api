@@ -113,11 +113,26 @@ class PluginManager:
                     if adapter:
                         self.adapters[plugin_instance.name] = adapter
 
-                except Exception as e:
+                except ValueError as e:
                     logger.error(
-                        "Failed to initialize plugin",
+                        "plugin_initialization_validation_failed",
                         plugin=plugin_instance.name,
                         error=str(e),
+                        exc_info=e,
+                    )
+                except AttributeError as e:
+                    logger.error(
+                        "plugin_initialization_missing_attribute",
+                        plugin=plugin_instance.name,
+                        error=str(e),
+                        exc_info=e,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "plugin_initialization_failed",
+                        plugin=plugin_instance.name,
+                        error=str(e),
+                        exc_info=e,
                     )
 
             # Log consolidated CLI detection summary
@@ -173,8 +188,16 @@ class PluginManager:
                 total_routes=len(self.adapters),
             )
 
+        except ImportError as e:
+            logger.error("plugin_system_import_failed", error=str(e), exc_info=e)
+            raise
+        except AttributeError as e:
+            logger.error("plugin_system_missing_attribute", error=str(e), exc_info=e)
+            raise
         except Exception as e:
-            logger.error("Plugin initialization failed", error=str(e))
+            logger.error(
+                "plugin_system_initialization_failed", error=str(e), exc_info=e
+            )
             raise
 
     def get_plugin_adapter(self, name: str) -> BaseAdapter | None:
@@ -213,7 +236,13 @@ class PluginManager:
         try:
             parsed = urlparse(url)
             return parsed.scheme not in ("http", "https", "")
-        except Exception:
+        except (ValueError, TypeError) as e:
+            logger.debug("url_parsing_failed", url=url, error=str(e), exc_info=e)
+            return False
+        except Exception as e:
+            logger.debug(
+                "unexpected_url_parsing_error", url=url, error=str(e), exc_info=e
+            )
             return False
 
     async def register_plugin_tracer(
@@ -247,11 +276,19 @@ class PluginManager:
             if hasattr(adapter, "close"):
                 try:
                     await adapter.close()
-                except Exception as e:
+                except AttributeError as e:
                     logger.error(
-                        "Error closing adapter",
+                        "adapter_close_missing_method",
                         adapter=type(adapter).__name__,
                         error=str(e),
+                        exc_info=e,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "adapter_close_failed",
+                        adapter=type(adapter).__name__,
+                        error=str(e),
+                        exc_info=e,
                     )
 
         self.adapters.clear()

@@ -521,13 +521,22 @@ class OpenAIAdapter(APIAdapter):
             # Process the stream - now yields dict objects directly
             async for chunk in processor.process_stream(stream):
                 yield chunk  # type: ignore[misc]  # chunk is guaranteed to be dict when output_format="dict"
+        except (OSError, PermissionError) as e:
+            logger.error(
+                "streaming_conversion_io_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                operation="adapt_stream",
+                exc_info=e,
+            )
+            raise ValueError(f"IO error processing streaming response: {e}") from e
         except Exception as e:
             logger.error(
                 "streaming_conversion_failed",
                 error=str(e),
                 error_type=type(e).__name__,
                 operation="adapt_stream",
-                exc_info=True,
+                exc_info=e,
             )
             raise ValueError(f"Error processing streaming response: {e}") from e
 

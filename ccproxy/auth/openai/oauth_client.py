@@ -4,6 +4,7 @@ import asyncio
 import base64
 import contextlib
 import hashlib
+import json
 import secrets
 import urllib.parse
 import webbrowser
@@ -15,6 +16,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 
+from ccproxy.auth.exceptions import OAuthError, OAuthTokenRefreshError
 from ccproxy.core.async_task_manager import create_managed_task
 from plugins.codex.config import CodexSettings
 
@@ -126,12 +128,23 @@ class OpenAIOAuthClient:
                     error_detail = error_data.get(
                         "error_description", error_data.get("error", str(e))
                     )
-                except Exception:
+                except json.JSONDecodeError:
                     error_detail = str(e)
 
                 raise ValueError(f"Token exchange failed: {error_detail}") from e
+            except httpx.TimeoutException as e:
+                logger.error("token_exchange_timeout", error=str(e), exc_info=e)
+                raise OAuthTokenRefreshError(f"Token exchange timed out: {e}") from e
+            except httpx.HTTPError as e:
+                logger.error("token_exchange_http_error", error=str(e), exc_info=e)
+                raise OAuthTokenRefreshError(f"Token exchange HTTP error: {e}") from e
             except Exception as e:
-                raise ValueError(f"Token exchange request failed: {e}") from e
+                logger.error(
+                    "token_exchange_unexpected_error", error=str(e), exc_info=e
+                )
+                raise OAuthTokenRefreshError(
+                    f"Token exchange request failed: {e}"
+                ) from e
 
     def _create_callback_app(self, code_verifier: str, expected_state: str) -> FastAPI:
         """Create FastAPI app to handle OAuth callback."""
@@ -232,8 +245,26 @@ class OpenAIOAuthClient:
                     """
                 )
 
+            except (OAuthTokenRefreshError, OAuthError) as e:
+                logger.error("oauth_exchange_failed", error=str(e), exc_info=e)
+                self._auth_error = f"OAuth exchange failed: {e}"
+                self._auth_complete.set()
+                return HTMLResponse(
+                    f"""
+                    <html>
+                    <head><title>Authentication Failed</title></head>
+                    <body>
+                        <h1>Authentication Failed</h1>
+                        <p>OAuth exchange failed: {e}</p>
+                        <p>You can close this window and try again.</p>
+                    </body>
+                    </html>
+                    """
+                )
             except Exception as e:
-                logger.error("Token exchange failed", error=str(e))
+                logger.error(
+                    "token_exchange_unexpected_error", error=str(e), exc_info=e
+                )
                 self._auth_error = f"Token exchange failed: {e}"
                 self._auth_complete.set()
                 return HTMLResponse(
@@ -310,8 +341,10 @@ class OpenAIOAuthClient:
             try:
                 webbrowser.open(auth_url)
                 print("Opening browser...")
+            except (OSError, PermissionError) as e:
+                logger.warning("browser_access_failed", error=str(e), exc_info=e)
             except Exception as e:
-                logger.warning("Failed to open browser automatically", error=str(e))
+                logger.warning("browser_open_failed", error=str(e), exc_info=e)
                 print("Please copy and paste the URL above into your browser.")
 
         print("Waiting for authentication to complete...")

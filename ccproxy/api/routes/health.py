@@ -163,7 +163,14 @@ async def _check_oauth2_credentials() -> tuple[str, dict[str, Any]]:
             "auth_status": "expired",
             "error": "Claude credentials have expired",
         }
+    except (OSError, PermissionError) as e:
+        logger.error("oauth_credentials_check_io_failed", error=str(e), exc_info=e)
+        return "fail", {
+            "auth_status": "error",
+            "error": f"File access error: {str(e)}",
+        }
     except Exception as e:
+        logger.error("oauth_credentials_check_failed", error=str(e), exc_info=e)
         return "fail", {
             "auth_status": "error",
             "error": f"Unexpected error: {str(e)}",
@@ -295,7 +302,23 @@ async def check_claude_code() -> tuple[str, dict[str, Any]]:
         # Cache the result
         _claude_cli_cache = (current_time, result)
         return result
+    except (OSError, PermissionError) as e:
+        logger.error("claude_cli_check_io_failed", error=str(e), exc_info=e)
+        result = (
+            "fail",
+            {
+                "installation_status": "error",
+                "cli_status": "error",
+                "error": f"Process execution error: {str(e)}",
+                "version": None,
+                "binary_path": claude_path,
+            },
+        )
+        # Cache the result
+        _claude_cli_cache = (current_time, result)
+        return result
     except Exception as e:
+        logger.error("claude_cli_check_failed", error=str(e), exc_info=e)
         result = (
             "fail",
             {
@@ -452,7 +475,23 @@ async def check_codex_cli() -> tuple[str, dict[str, Any]]:
         _codex_cli_cache = (current_time, result)
         return result
 
+    except (OSError, PermissionError) as e:
+        logger.error("codex_cli_check_io_failed", error=str(e), exc_info=e)
+        result = (
+            "fail",
+            {
+                "installation_status": "error",
+                "cli_status": "error",
+                "error": f"Process execution error: {str(e)}",
+                "version": None,
+                "binary_path": codex_path,
+            },
+        )
+        # Cache the result
+        _codex_cli_cache = (current_time, result)
+        return result
     except Exception as e:
+        logger.error("codex_cli_check_failed", error=str(e), exc_info=e)
         result = (
             "fail",
             {
@@ -524,7 +563,17 @@ async def _check_claude_sdk() -> tuple[str, dict[str, Any]]:
             "version": None,
             "import_successful": False,
         }
+    except ModuleNotFoundError as e:
+        logger.debug("claude_sdk_not_found", error=str(e))
+        return "warn", {
+            "installation_status": "not_found",
+            "sdk_status": "not_installed",
+            "error": f"Claude SDK not found: {str(e)}",
+            "version": None,
+            "import_successful": False,
+        }
     except Exception as e:
+        logger.error("claude_sdk_check_failed", error=str(e), exc_info=e)
         return "fail", {
             "installation_status": "error",
             "sdk_status": "error",

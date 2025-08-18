@@ -252,11 +252,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             try:
                 logger.debug(f"starting_{component_name.lower().replace(' ', '_')}")
                 await component["startup"](app, settings)
+            except (OSError, PermissionError) as e:
+                logger.error(
+                    f"{component_name.lower().replace(' ', '_')}_startup_io_failed",
+                    error=str(e),
+                    component=component_name,
+                    exc_info=e,
+                )
+                # Continue with graceful degradation
             except Exception as e:
                 logger.error(
                     f"{component_name.lower().replace(' ', '_')}_startup_failed",
                     error=str(e),
                     component=component_name,
+                    exc_info=e,
                 )
                 # Continue with graceful degradation
 
@@ -272,11 +281,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             try:
                 logger.debug(f"stopping_{component_name.lower().replace(' ', '_')}")
                 await shutdown_component["shutdown"](app)
+            except (OSError, PermissionError) as e:
+                logger.error(
+                    f"{component_name.lower().replace(' ', '_')}_shutdown_io_failed",
+                    error=str(e),
+                    component=component_name,
+                    exc_info=e,
+                )
             except Exception as e:
                 logger.error(
                     f"{component_name.lower().replace(' ', '_')}_shutdown_failed",
                     error=str(e),
                     component=component_name,
+                    exc_info=e,
                 )
 
     # Execute shutdown components in reverse order
@@ -290,11 +307,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await component["shutdown"](app, settings)  # type: ignore
                 else:
                     await component["shutdown"](app)  # type: ignore
+            except (OSError, PermissionError) as e:
+                logger.error(
+                    f"{component_name.lower().replace(' ', '_')}_shutdown_io_failed",
+                    error=str(e),
+                    component=component_name,
+                    exc_info=e,
+                )
             except Exception as e:
                 logger.error(
                     f"{component_name.lower().replace(' ', '_')}_shutdown_failed",
                     error=str(e),
                     component=component_name,
+                    exc_info=e,
                 )
 
 

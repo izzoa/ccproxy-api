@@ -105,4 +105,5 @@ class StreamingResponseWithLogging(StreamingResponse):
                     "streaming_access_log_failed",
                     error=str(e),
                     request_id=context.request_id,
+                    exc_info=e,
                 )
