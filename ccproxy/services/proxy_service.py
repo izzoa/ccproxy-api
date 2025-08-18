@@ -20,7 +20,6 @@ from ccproxy.services.plugins import PluginManager
 from ccproxy.services.provider_context import ProviderContext
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
-from ccproxy.services.transformation import RequestTransformer
 
 
 logger = structlog.get_logger(__name__)
@@ -39,7 +38,6 @@ class ProxyService:
         request_tracer: CoreRequestTracer,
         mock_handler: MockResponseHandler,
         streaming_handler: StreamingHandler,
-        request_transformer: RequestTransformer,
         auth_service: AuthenticationService,
         config: ProxyConfiguration,
         http_client: httpx.AsyncClient,  # Shared HTTP client for centralized management
@@ -62,7 +60,6 @@ class ProxyService:
         self.request_tracer = request_tracer
         self.mock_handler = mock_handler
         self.streaming_handler = streaming_handler
-        self.request_transformer = request_transformer
         self.auth_service = auth_service
         self.config = config
         self.plugin_manager = plugin_manager
@@ -85,9 +82,21 @@ class ProxyService:
         logger.debug("PluginManager set on ProxyService (circular dependency resolved)")
 
     async def dispatch_request(
-        self, request: Request, provider_context: ProviderContext
+        self,
+        request: Request,
+        provider_context: ProviderContext,
+        provider_name: str | None = None,
     ) -> Response | StreamingResponse:
-        """Pure delegation to adapters."""
+        """Pure delegation to adapters.
+
+        DEPRECATED: This method is not used in production. The routing happens
+        at the FastAPI level with plugin routers. Kept for test compatibility.
+
+        Args:
+            request: The incoming request
+            provider_context: The processing context
+            provider_name: The provider to route to (required since context no longer has it)
+        """
         # 1. Check plugin manager is available
         if not self.plugin_manager:
             raise HTTPException(503, "Plugin manager not initialized")
@@ -103,10 +112,13 @@ class ProxyService:
                 request, str(request.url.path), request.method, request_id=request_id
             )
 
-        # 4. Get provider adapter
-        adapter = self.plugin_manager.get_plugin_adapter(provider_context.provider_name)
+        # 4. Get provider adapter - provider_name must be passed explicitly now
+        if not provider_name:
+            raise HTTPException(400, "Provider name required for dispatch")
+
+        adapter = self.plugin_manager.get_plugin_adapter(provider_name)
         if not adapter:
-            raise HTTPException(404, f"No adapter for {provider_context.provider_name}")
+            raise HTTPException(404, f"No adapter for {provider_name}")
 
         # 5. Adapters should already have ProxyService reference (no set_proxy_service needed)
         # 6. Delegate everything

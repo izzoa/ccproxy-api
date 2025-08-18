@@ -18,7 +18,6 @@ from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.plugins import PluginManager
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
-from ccproxy.services.transformation import RequestTransformer
 from ccproxy.testing import RealisticMockResponseGenerator
 
 
@@ -45,7 +44,6 @@ class ServiceContainer:
         self._request_tracer: CoreRequestTracer | None = None
         self._mock_handler: MockResponseHandler | None = None
         self._streaming_handler: StreamingHandler | None = None
-        self._request_transformer: RequestTransformer | None = None
         self._auth_service: AuthenticationService | None = None
         self._proxy_config: ProxyConfiguration | None = None
         self._plugin_manager: PluginManager | None = None
@@ -84,7 +82,6 @@ class ServiceContainer:
             request_tracer=self.get_request_tracer(),
             mock_handler=self.get_mock_handler(),
             streaming_handler=self.get_streaming_handler(),
-            request_transformer=self.get_request_transformer(),
             auth_service=self.get_auth_service(credentials_manager),
             config=self.get_proxy_config(),
             http_client=self.get_http_client(),
@@ -138,13 +135,6 @@ class ServiceContainer:
             )
             logger.debug("Created StreamingHandler")
         return self._streaming_handler
-
-    def get_request_transformer(self) -> RequestTransformer:
-        """Get singleton request transformer instance."""
-        if not self._request_transformer:
-            self._request_transformer = RequestTransformer()
-            logger.debug("Created RequestTransformer")
-        return self._request_transformer
 
     def get_plugin_manager(self) -> PluginManager:
         """Get singleton plugin manager instance.

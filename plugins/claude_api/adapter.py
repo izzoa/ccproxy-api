@@ -122,6 +122,9 @@ class ClaudeAPIAdapter(BaseAdapter):
             )
         auth_headers = await self._auth_manager.get_auth_headers()
 
+        # Extract access_token (x-api-key for Anthropic)
+        access_token = auth_headers.get("x-api-key") if auth_headers else None
+
         # Determine target URL and format conversion needs
         if endpoint.endswith("/v1/messages"):
             # Native Anthropic format - no conversion needed
@@ -137,17 +140,13 @@ class ClaudeAPIAdapter(BaseAdapter):
                 detail=f"Endpoint {endpoint} not supported by Claude API plugin",
             )
 
-        # Create provider context with transformers
+        # Create simplified provider context
         provider_context = ProviderContext(
-            provider_name="claude-api",
-            auth_manager=self._auth_manager,
-            target_base_url="https://api.anthropic.com",
             request_adapter=self.openai_adapter if needs_conversion else None,
             response_adapter=self.openai_adapter if needs_conversion else None,
             request_transformer=self._request_transformer,
             response_transformer=self._response_transformer,
             supports_streaming=True,
-            requires_session=False,
         )
 
         # Prepare request using HTTP handler
@@ -163,6 +162,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             provider_context=provider_context,
             auth_headers=auth_headers,
             request_headers=dict(request.headers),
+            access_token=access_token,
         )
 
         self.logger.info(

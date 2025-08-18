@@ -54,6 +54,9 @@ def create_anthropic_context(
 ) -> ProviderContext:
     """Create provider context for Anthropic API requests.
 
+    DEPRECATED: This function is no longer used as the routes now use the adapter pattern.
+    Kept for backward compatibility only.
+
     Args:
         provider_name: Name of the provider for logging
         proxy_service: Proxy service instance
@@ -76,16 +79,11 @@ def create_anthropic_context(
     response_transformer_obj = ClaudeAPIResponseTransformer()
 
     return ProviderContext(
-        provider_name=provider_name,
-        auth_manager=proxy_service.credentials_manager,
-        target_base_url="https://api.anthropic.com",
         request_adapter=request_adapter,
         response_adapter=response_adapter,
-        supports_streaming=True,
-        requires_session=False,
-        path_transformer=claude_api_path_transformer,
         request_transformer=request_transformer,
-        route_prefix="/claude-api",
+        response_transformer=response_transformer_obj,
+        supports_streaming=True,
     )
 
 

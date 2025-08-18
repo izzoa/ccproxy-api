@@ -1,11 +1,9 @@
 """Provider context configuration for unified request handling."""
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from ccproxy.adapters.base import APIAdapter
-from ccproxy.auth.base import AuthManager
 
 
 @runtime_checkable
@@ -23,43 +21,25 @@ class PluginTransformerProtocol(Protocol):
         ...
 
 
-@dataclass
+@dataclass(frozen=True)
 class ProviderContext:
-    """Configuration context for a provider.
+    """Processing pipeline configuration for HTTP/streaming handlers.
 
-    This class encapsulates all provider-specific configuration needed
-    to handle requests in a unified manner across different AI providers.
+    This simplified context only contains universal processing concerns,
+    not plugin-specific parameters like session_id or access_token.
+
+    Following the Parameter Object pattern, this groups related processing
+    components while maintaining clean separation of concerns. Plugin-specific
+    parameters should be passed directly as method parameters.
     """
 
-    # Required fields
-    provider_name: str
-    auth_manager: AuthManager
-    target_base_url: str
-
-    # Optional adapters for format conversion
+    # Format conversion (e.g., OpenAI ↔ Anthropic)
     request_adapter: APIAdapter | None = None
     response_adapter: APIAdapter | None = None
 
-    # Optional request transformer (for headers, etc.)
+    # Header/body transformation
     request_transformer: PluginTransformerProtocol | None = None
-
-    # Optional response transformer (for headers, etc.)
     response_transformer: PluginTransformerProtocol | None = None
 
-    # Optional path transformer (for path mapping after prefix stripping)
-    path_transformer: Callable[[str], str] | None = None
-
-    # Optional route prefix to strip from request paths (e.g., "/api/codex")
-    route_prefix: str | None = None
-
-    # Provider-specific settings
-    session_id: str | None = None
-    account_id: str | None = None
-    timeout: float = 240.0
-
-    # Feature flags
+    # Feature flag
     supports_streaming: bool = True
-    requires_session: bool = False
-
-    # Additional headers to inject
-    extra_headers: dict[str, str] = field(default_factory=dict)

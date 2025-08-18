@@ -60,34 +60,23 @@ class MockTransformer:
 
 @pytest.mark.asyncio
 async def test_provider_context_creation():
-    """Test ProviderContext can be created with required fields."""
-    auth = MockAuthManager()
+    """Test ProviderContext can be created with simplified fields."""
+    context = ProviderContext()
 
-    context = ProviderContext(
-        provider_name="test-provider",
-        auth_manager=auth,
-        target_base_url="https://api.test.com",
-    )
-
-    assert context.provider_name == "test-provider"
-    assert context.auth_manager == auth
-    assert context.target_base_url == "https://api.test.com"
+    # Check defaults
+    assert context.request_adapter is None
+    assert context.response_adapter is None
+    assert context.request_transformer is None
+    assert context.response_transformer is None
     assert context.supports_streaming is True  # default
-    assert context.requires_session is False  # default
-    assert context.extra_headers == {}  # default
-    assert context.timeout == 240.0  # default
 
 
 @pytest.mark.asyncio
 async def test_provider_context_with_adapters():
     """Test ProviderContext with request/response adapters."""
-    auth = MockAuthManager()
     adapter = MockAdapter()
 
     context = ProviderContext(
-        provider_name="test-provider",
-        auth_manager=auth,
-        target_base_url="https://api.test.com",
         request_adapter=adapter,
         response_adapter=adapter,
     )
@@ -99,26 +88,22 @@ async def test_provider_context_with_adapters():
 @pytest.mark.asyncio
 async def test_provider_context_with_custom_settings():
     """Test ProviderContext with custom settings."""
-    auth = MockAuthManager()
+    adapter = MockAdapter()
+    transformer = MockTransformer()
 
     context = ProviderContext(
-        provider_name="test-provider",
-        auth_manager=auth,
-        target_base_url="https://api.test.com",
-        session_id="test-session-123",
-        account_id="test-account-456",
-        timeout=300.0,
+        request_adapter=adapter,
+        response_adapter=adapter,
+        request_transformer=transformer,
+        response_transformer=transformer,
         supports_streaming=False,
-        requires_session=True,
-        extra_headers={"x-custom": "header-value"},
     )
 
-    assert context.session_id == "test-session-123"
-    assert context.account_id == "test-account-456"
-    assert context.timeout == 300.0
+    assert context.request_adapter == adapter
+    assert context.response_adapter == adapter
+    assert context.request_transformer == transformer
+    assert context.response_transformer == transformer
     assert context.supports_streaming is False
-    assert context.requires_session is True
-    assert context.extra_headers == {"x-custom": "header-value"}
 
 
 @pytest.mark.asyncio
@@ -141,13 +126,9 @@ async def test_auth_manager_interface():
 
 def test_provider_context_with_transformer():
     """Test ProviderContext with request transformer."""
-    auth = MockAuthManager()
     transformer = MockTransformer()
 
     context = ProviderContext(
-        provider_name="test-provider",
-        auth_manager=auth,
-        target_base_url="https://api.test.com",
         request_transformer=transformer,
     )
 
@@ -161,53 +142,56 @@ def test_provider_context_with_transformer():
 
 def test_provider_context_defaults():
     """Test ProviderContext uses correct defaults."""
-    auth = MockAuthManager()
-
-    context = ProviderContext(
-        provider_name="test",
-        auth_manager=auth,
-        target_base_url="https://api.test.com",
-    )
+    context = ProviderContext()
 
     # Check all defaults
     assert context.request_adapter is None
     assert context.response_adapter is None
     assert context.request_transformer is None
-    assert context.session_id is None
-    assert context.account_id is None
-    assert context.timeout == 240.0
+    assert context.response_transformer is None
     assert context.supports_streaming is True
-    assert context.requires_session is False
-    assert context.extra_headers == {}
 
 
 @pytest.mark.asyncio
 async def test_multiple_provider_contexts():
-    """Test creating multiple ProviderContext instances for different providers."""
-    auth1 = MockAuthManager()
-    auth2 = MockAuthManager()
+    """Test creating multiple ProviderContext instances."""
+    adapter1 = MockAdapter()
+    adapter2 = MockAdapter()
+    transformer1 = MockTransformer()
+    transformer2 = MockTransformer()
 
-    # Create context for Codex provider
-    codex_context = ProviderContext(
-        provider_name="codex",
-        auth_manager=auth1,
-        target_base_url="https://chatgpt.com/backend-api/codex",
-        requires_session=True,
-        extra_headers={"session_id": "codex-123"},
+    # Create context with streaming enabled
+    streaming_context = ProviderContext(
+        request_adapter=adapter1,
+        response_adapter=adapter1,
+        request_transformer=transformer1,
+        supports_streaming=True,
     )
 
-    # Create context for Claude provider
-    claude_context = ProviderContext(
-        provider_name="claude",
-        auth_manager=auth2,
-        target_base_url="https://api.anthropic.com",
-        requires_session=False,
+    # Create context with streaming disabled
+    non_streaming_context = ProviderContext(
+        request_adapter=adapter2,
+        response_adapter=adapter2,
+        request_transformer=transformer2,
+        supports_streaming=False,
     )
 
     # Verify they are independent
-    assert codex_context.provider_name == "codex"
-    assert claude_context.provider_name == "claude"
-    assert codex_context.requires_session is True
-    assert claude_context.requires_session is False
-    assert codex_context.extra_headers == {"session_id": "codex-123"}
-    assert claude_context.extra_headers == {}
+    assert streaming_context.request_adapter == adapter1
+    assert non_streaming_context.request_adapter == adapter2
+    assert streaming_context.supports_streaming is True
+    assert non_streaming_context.supports_streaming is False
+
+
+def test_provider_context_is_immutable():
+    """Test that ProviderContext is immutable (frozen dataclass)."""
+    from dataclasses import FrozenInstanceError
+
+    context = ProviderContext(supports_streaming=True)
+
+    # Attempting to modify should raise FrozenInstanceError
+    with pytest.raises(FrozenInstanceError):
+        context.supports_streaming = False  # type: ignore[misc]
+
+    with pytest.raises(FrozenInstanceError):
+        context.request_adapter = MockAdapter()  # type: ignore[misc]

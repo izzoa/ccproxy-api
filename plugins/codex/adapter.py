@@ -131,22 +131,21 @@ class CodexAdapter(BaseAdapter):
             )
         auth_headers = await self._auth_manager.get_auth_headers()
 
+        # Extract access_token if present
+        access_token = None
+        if "Authorization" in auth_headers:
+            access_token = auth_headers["Authorization"].replace("Bearer ", "")
+
         # Build target URL
         target_url = "https://chatgpt.com/backend-api/codex/responses"
 
-        # Create provider context
+        # Create simplified provider context
         context = ProviderContext(
-            provider_name="codex",
-            auth_manager=self._auth_manager,
-            target_base_url="https://chatgpt.com",
-            route_prefix="/codex",
             request_adapter=self.format_adapter if needs_conversion else None,
             response_adapter=self.format_adapter if needs_conversion else None,
             request_transformer=self.request_transformer,
             response_transformer=self.response_transformer,
             supports_streaming=True,
-            requires_session=True,
-            session_id=session_id,
         )
 
         # Prepare request using HTTP handler
@@ -163,6 +162,7 @@ class CodexAdapter(BaseAdapter):
             auth_headers=auth_headers,
             request_headers=dict(request.headers),
             session_id=session_id,
+            access_token=access_token,
         )
 
         self.logger.info(

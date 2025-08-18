@@ -132,7 +132,6 @@ class PluginHTTPHandler:
                         self.logger.warning(
                             "Failed to adapt response",
                             error=str(e),
-                            provider=provider_context.provider_name,
                         )
 
                 # Apply response transformer if provided
@@ -160,7 +159,6 @@ class PluginHTTPHandler:
                             self.logger.warning(
                                 "Failed to transform response headers",
                                 error=str(e),
-                                provider=provider_context.provider_name,
                             )
 
                 return Response(
@@ -190,6 +188,8 @@ class PluginHTTPHandler:
         auth_headers: dict[str, str] | None = None,
         request_headers: dict[str, str] | None = None,
         session_id: str | None = None,
+        access_token: str | None = None,
+        **extra_kwargs: Any,
     ) -> tuple[bytes, dict[str, str], bool]:
         """Prepare request for sending.
 
@@ -201,6 +201,8 @@ class PluginHTTPHandler:
             auth_headers: Authentication headers to include
             request_headers: Original request headers
             session_id: Optional session ID for stateful requests
+            access_token: Optional access token for authentication
+            **extra_kwargs: Additional plugin-specific parameters
 
         Returns:
             Tuple of (transformed_body, headers, is_streaming)
@@ -228,7 +230,6 @@ class PluginHTTPHandler:
                 self.logger.warning(
                     "Failed to adapt request",
                     error=str(e),
-                    provider=provider_context.provider_name,
                 )
 
         # Prepare headers
@@ -244,6 +245,9 @@ class PluginHTTPHandler:
             kwargs = {}
             if session_id:
                 kwargs["session_id"] = session_id
+            if access_token:
+                kwargs["access_token"] = access_token
+            kwargs.update(extra_kwargs)
 
             try:
                 transformed_headers = (
@@ -256,7 +260,7 @@ class PluginHTTPHandler:
             except TypeError as e:
                 # If the transformer doesn't accept the kwargs, try without them
                 self.logger.debug(
-                    "Transformer doesn't accept session_id, trying without kwargs",
+                    "Transformer doesn't accept kwargs, trying without them",
                     error=str(e),
                 )
                 transformed_headers = (
