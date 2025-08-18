@@ -9,7 +9,6 @@ import structlog
 from fastapi.responses import StreamingResponse
 
 from ccproxy.adapters.base import APIAdapter
-from ccproxy.core.errors import ProxyConnectionError, ProxyTimeoutError
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.services.handler_config import HandlerConfig

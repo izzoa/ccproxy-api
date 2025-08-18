@@ -85,7 +85,7 @@ class ClaudeSDKDetectionRefreshTask(BaseScheduledTask):
                 "claude_sdk_detection_refresh_failed",
                 task_name=self.name,
                 error=str(e),
-                exc_info=True,
+                exc_info=e,
             )
             return False
 

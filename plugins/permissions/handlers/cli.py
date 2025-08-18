@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 import structlog
 import typer
+from pydantic import ValidationError
 from structlog import get_logger
 
 from ccproxy.config.settings import get_settings
@@ -136,9 +137,17 @@ class SSEConfirmationHandler:
             if "request_id" in request_data:
                 request_data["id"] = request_data.pop("request_id")
             request = PermissionRequest.model_validate(request_data)
+        except ValidationError as e:
+            logger.error(
+                "permission_request_validation_failed",
+                data=data,
+                error=str(e),
+                exc_info=e,
+            )
+            return
         except Exception as e:
             logger.error(
-                "permission_request_validation_failed", data=data, error=str(e)
+                "permission_request_parsing_error", data=data, error=str(e), exc_info=e
             )
             return
 
@@ -241,7 +250,7 @@ class SSEConfirmationHandler:
                 "permission_handling_error",
                 request_id=request.id,
                 error=str(e),
-                exc_info=True,
+                exc_info=e,
             )
             # Only send response if not already resolved
             if request.id not in self._resolved_requests:
@@ -288,12 +297,19 @@ class SSEConfirmationHandler:
                     response=response.text,
                 )
 
+        except httpx.RequestError as e:
+            logger.error(
+                "permission_response_network_error",
+                request_id=request_id,
+                error=str(e),
+                exc_info=e,
+            )
         except Exception as e:
             logger.error(
                 "permission_response_error",
                 request_id=request_id,
                 error=str(e),
-                exc_info=True,
+                exc_info=e,
             )
 
     async def parse_sse_stream(
@@ -407,7 +423,7 @@ class SSEConfirmationHandler:
                 continue
 
             except Exception as e:
-                logger.error("sse_client_error", error=str(e), exc_info=True)
+                logger.error("sse_client_error", error=str(e), exc_info=e)
                 raise typer.Exit(1) from e
 
     async def _connect_and_handle_stream(self, stream_url: str) -> None:
@@ -460,7 +476,7 @@ class SSEConfirmationHandler:
                         "sse_event_error",
                         event_type=event_type,
                         error=str(e),
-                        exc_info=True,
+                        exc_info=e,
                     )
 
 
@@ -551,7 +567,7 @@ def connect(
     except KeyboardInterrupt:
         logger.info("permission_handler_stopped")
     except Exception as e:
-        logger.error("permission_handler_error", error=str(e), exc_info=True)
+        logger.error("permission_handler_error", error=str(e), exc_info=e)
         raise typer.Exit(1) from e
 
 

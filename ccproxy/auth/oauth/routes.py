@@ -3,7 +3,6 @@
 from pathlib import Path
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 from structlog import get_logger
@@ -250,7 +249,7 @@ async def oauth_callback(
             operation="oauth_callback",
             exc_info=e,
         )
-        
+
         if state and state in _pending_flows:
             _pending_flows[state].update(
                 {
@@ -259,7 +258,7 @@ async def oauth_callback(
                     "error": str(e),
                 }
             )
-        
+
         return HTMLResponse(
             content=f"""
             <html>

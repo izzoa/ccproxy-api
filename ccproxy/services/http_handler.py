@@ -9,7 +9,6 @@ from typing import Any
 
 import httpx
 import structlog
-from fastapi import HTTPException
 from starlette.responses import Response, StreamingResponse
 
 from ccproxy.core.errors import ProxyConnectionError, ProxyTimeoutError

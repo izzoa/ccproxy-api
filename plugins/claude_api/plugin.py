@@ -345,7 +345,11 @@ class Plugin(ProviderPlugin):
                 return profile_info
 
         except Exception as e:
-            logger.debug(f"Failed to get Claude profile info: {e}")
+            logger.debug(
+                "claude_api_profile_error",
+                error=str(e),
+                exc_info=e,
+            )
 
         return None
 

@@ -1,9 +1,11 @@
 """Claude SDK adapter implementation using delegation pattern."""
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
+import httpx
 import structlog
 from fastapi import HTTPException, Request
 from starlette.responses import Response, StreamingResponse
@@ -291,10 +293,37 @@ class ClaudeSDKAdapter(BaseAdapter):
 
                                 data = json.dumps(chunk)
                                 yield f"data: {data}\n\n".encode()
+                    except asyncio.CancelledError as e:
+                        self.logger.warning(
+                            "claude_sdk_streaming_cancelled",
+                            error=str(e),
+                            exc_info=e,
+                        )
+                        raise
+                    except httpx.TimeoutException as e:
+                        self.logger.error(
+                            "claude_sdk_streaming_timeout",
+                            error=str(e),
+                            exc_info=e,
+                        )
+                        error_chunk = {"error": "Request timed out"}
+                        yield f"data: {json.dumps(error_chunk)}\n\n".encode()
+                    except httpx.HTTPError as e:
+                        self.logger.error(
+                            "claude_sdk_streaming_http_error",
+                            error=str(e),
+                            status_code=getattr(e.response, "status_code", None)
+                            if hasattr(e, "response")
+                            else None,
+                            exc_info=e,
+                        )
+                        error_chunk = {"error": f"HTTP error: {e}"}
+                        yield f"data: {json.dumps(error_chunk)}\n\n".encode()
                     except Exception as e:
                         self.logger.error(
-                            "claude_sdk_streaming_error",
+                            "claude_sdk_streaming_unexpected_error",
                             error=str(e),
+                            exc_info=e,
                         )
                         error_chunk = {"error": str(e)}
                         yield f"data: {json.dumps(error_chunk)}\n\n".encode()
@@ -333,10 +362,35 @@ class ClaudeSDKAdapter(BaseAdapter):
                     },
                 )
 
+        except httpx.TimeoutException as e:
+            self.logger.error(
+                "claude_sdk_request_timeout",
+                error=str(e),
+                exc_info=e,
+            )
+            raise HTTPException(status_code=408, detail="Request timed out") from e
+        except httpx.HTTPError as e:
+            self.logger.error(
+                "claude_sdk_http_error",
+                error=str(e),
+                status_code=getattr(e.response, "status_code", None)
+                if hasattr(e, "response")
+                else None,
+                exc_info=e,
+            )
+            raise HTTPException(status_code=502, detail=f"HTTP error: {e}") from e
+        except asyncio.CancelledError as e:
+            self.logger.warning(
+                "claude_sdk_request_cancelled",
+                error=str(e),
+                exc_info=e,
+            )
+            raise
         except Exception as e:
             self.logger.error(
                 "claude_sdk_request_handling_failed",
                 error=str(e),
+                exc_info=e,
             )
             raise HTTPException(
                 status_code=500, detail=f"SDK request failed: {str(e)}"

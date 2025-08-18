@@ -130,17 +130,29 @@ class SessionClient:
 
                 return True
 
-            except Exception as e:
+            except ConnectionError as e:
                 self.status = SessionStatus.ERROR
                 self.last_error = e
                 self.metrics.error_count += 1
 
                 logger.error(
-                    "session_connection_failed",
+                    "session_connection_network_error",
                     session_id=self.session_id,
                     attempt=self.connection_attempts,
                     error=str(e),
-                    exc_info=True,
+                    exc_info=e,
+                )
+            except TimeoutError as e:
+                self.status = SessionStatus.ERROR
+                self.last_error = e
+                self.metrics.error_count += 1
+
+                logger.error(
+                    "session_connection_timeout",
+                    session_id=self.session_id,
+                    attempt=self.connection_attempts,
+                    error=str(e),
+                    exc_info=e,
                 )
 
                 if self.connection_attempts >= self.max_connection_attempts:
@@ -151,6 +163,30 @@ class SessionClient:
                     )
 
                 return False
+            except Exception as e:
+                self.status = SessionStatus.ERROR
+                self.last_error = e
+                self.metrics.error_count += 1
+
+                logger.error(
+                    "session_connection_failed",
+                    session_id=self.session_id,
+                    attempt=self.connection_attempts,
+                    error=str(e),
+                    exc_info=e,
+                )
+
+                if self.connection_attempts >= self.max_connection_attempts:
+                    logger.error(
+                        "session_connection_exhausted",
+                        session_id=self.session_id,
+                        max_attempts=self.max_connection_attempts,
+                    )
+
+                return False
+
+            # This should never be reached, but mypy needs it
+            return False
 
     async def connect_background(self) -> asyncio.Task[bool]:
         """Start connection in background without blocking.
@@ -179,6 +215,7 @@ class SessionClient:
                 "session_background_connection_failed",
                 session_id=self.session_id,
                 error=str(e),
+                exc_info=e,
             )
             return False
 
@@ -196,11 +233,19 @@ class SessionClient:
                 try:
                     await self.claude_client.disconnect()
                     logger.debug("session_disconnected", session_id=self.session_id)
+                except TimeoutError as e:
+                    logger.warning(
+                        "session_disconnect_timeout",
+                        session_id=self.session_id,
+                        error=str(e),
+                        exc_info=e,
+                    )
                 except Exception as e:
                     logger.warning(
                         "session_disconnect_error",
                         session_id=self.session_id,
                         error=str(e),
+                        exc_info=e,
                     )
                 finally:
                     self.claude_client = None
@@ -261,11 +306,28 @@ class SessionClient:
                         )
                         # Clear the handle reference
                         self.active_stream_handle = None
+                except asyncio.CancelledError as e:
+                    logger.warning(
+                        "session_stream_handle_interrupt_cancelled",
+                        session_id=self.session_id,
+                        error=str(e),
+                        exc_info=e,
+                        message="Stream handle interrupt was cancelled, continuing with SDK interrupt",
+                    )
+                except TimeoutError as e:
+                    logger.warning(
+                        "session_stream_handle_interrupt_timeout",
+                        session_id=self.session_id,
+                        error=str(e),
+                        exc_info=e,
+                        message="Stream handle interrupt timed out, continuing with SDK interrupt",
+                    )
                 except Exception as e:
                     logger.warning(
                         "session_stream_handle_interrupt_error",
                         session_id=self.session_id,
                         error=str(e),
+                        exc_info=e,
                         message="Failed to interrupt stream handle, continuing with SDK interrupt",
                     )
 
@@ -304,12 +366,33 @@ class SessionClient:
             # Force disconnect if interrupt hangs
             await self._force_disconnect()
 
+        except asyncio.CancelledError as e:
+            logger.warning(
+                "session_interrupt_cancelled",
+                session_id=self.session_id,
+                error=str(e),
+                exc_info=e,
+            )
+            # If interrupt fails, try force disconnect as fallback
+            try:
+                logger.debug(
+                    "session_interrupt_fallback_disconnect",
+                    session_id=self.session_id,
+                )
+                await self._force_disconnect()
+            except Exception as disconnect_error:
+                logger.error(
+                    "session_force_disconnect_failed",
+                    session_id=self.session_id,
+                    error=str(disconnect_error),
+                    exc_info=disconnect_error,
+                )
         except Exception as e:
             logger.warning(
                 "session_interrupt_error",
                 session_id=self.session_id,
                 error=str(e),
-                error_type=type(e).__name__,
+                exc_info=e,
             )
 
             # If interrupt fails, try force disconnect as fallback
@@ -324,7 +407,7 @@ class SessionClient:
                     "session_force_disconnect_failed",
                     session_id=self.session_id,
                     error=str(disconnect_error),
-                    error_type=type(disconnect_error).__name__,
+                    exc_info=disconnect_error,
                 )
         finally:
             # Final safety check - ensure we don't hang forever
@@ -378,11 +461,19 @@ class SessionClient:
                     self.claude_client.disconnect(),
                     timeout=3.0,  # 3 second timeout for disconnect
                 )
+        except TimeoutError as e:
+            logger.warning(
+                "session_force_disconnect_timeout",
+                session_id=self.session_id,
+                error=str(e),
+                exc_info=e,
+            )
         except Exception as e:
             logger.warning(
                 "session_force_disconnect_error",
                 session_id=self.session_id,
                 error=str(e),
+                exc_info=e,
             )
         finally:
             # Always clean up the client reference and mark as disconnected
@@ -440,13 +531,29 @@ class SessionClient:
                         handle_id=self.active_stream_handle.handle_id,
                         message="Stream drain timed out after 30 seconds",
                     )
+            except TimeoutError as e:
+                logger.error(
+                    "session_stream_drain_timeout_via_handle",
+                    session_id=self.session_id,
+                    handle_id=self.active_stream_handle.handle_id,
+                    error=str(e),
+                    exc_info=e,
+                )
+            except asyncio.CancelledError as e:
+                logger.warning(
+                    "session_stream_drain_cancelled_via_handle",
+                    session_id=self.session_id,
+                    handle_id=self.active_stream_handle.handle_id,
+                    error=str(e),
+                    exc_info=e,
+                )
             except Exception as e:
                 logger.error(
                     "session_stream_drain_error_via_handle",
                     session_id=self.session_id,
                     handle_id=self.active_stream_handle.handle_id,
                     error=str(e),
-                    error_type=type(e).__name__,
+                    exc_info=e,
                 )
             finally:
                 self.active_stream_handle = None

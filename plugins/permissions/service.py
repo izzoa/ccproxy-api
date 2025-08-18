@@ -226,7 +226,7 @@ class PermissionService:
                 logger.error(
                     "expiry_checker_error",
                     error=str(e),
-                    exc_info=True,
+                    exc_info=e,
                 )
 
     def _should_cleanup_request(

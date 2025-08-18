@@ -229,13 +229,31 @@ class SessionPool:
                                         old_handle_id=old_handle_id,
                                         message="Ongoing timeout stream was already completed",
                                     )
+                            except asyncio.CancelledError as e:
+                                logger.warning(
+                                    "session_pool_interrupt_ongoing_cancelled",
+                                    session_id=session_id,
+                                    old_handle_id=old_handle_id,
+                                    error=str(e),
+                                    exc_info=e,
+                                    message="Interrupt cancelled during ongoing timeout stream cleanup",
+                                )
+                            except TimeoutError as e:
+                                logger.warning(
+                                    "session_pool_interrupt_ongoing_timeout",
+                                    session_id=session_id,
+                                    old_handle_id=old_handle_id,
+                                    error=str(e),
+                                    exc_info=e,
+                                    message="Interrupt timed out during ongoing timeout stream cleanup",
+                                )
                             except Exception as e:
                                 logger.warning(
                                     "session_pool_interrupt_ongoing_failed",
                                     session_id=session_id,
                                     old_handle_id=old_handle_id,
                                     error=str(e),
-                                    error_type=type(e).__name__,
+                                    exc_info=e,
                                     message="Failed to interrupt ongoing timeout stream, clearing anyway",
                                 )
                             finally:
@@ -389,7 +407,7 @@ class SessionPool:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("session_cleanup_error", error=str(e), exc_info=True)
+                logger.error("session_cleanup_error", error=str(e), exc_info=e)
 
     async def _cleanup_sessions(self) -> None:
         """Remove expired, idle, and stuck sessions."""
@@ -423,11 +441,26 @@ class SessionPool:
                 # Try to interrupt stuck session before cleanup
                 try:
                     await session_client.interrupt()
+                except asyncio.CancelledError as e:
+                    logger.warning(
+                        "session_stuck_interrupt_cancelled",
+                        session_id=session_id,
+                        error=str(e),
+                        exc_info=e,
+                    )
+                except TimeoutError as e:
+                    logger.warning(
+                        "session_stuck_interrupt_timeout",
+                        session_id=session_id,
+                        error=str(e),
+                        exc_info=e,
+                    )
                 except Exception as e:
                     logger.warning(
                         "session_stuck_interrupt_failed",
                         session_id=session_id,
                         error=str(e),
+                        exc_info=e,
                     )
 
             # Check normal cleanup criteria (including stuck sessions)
@@ -506,11 +539,26 @@ class SessionPool:
             try:
                 await session_client.interrupt()
                 interrupted_count += 1
+            except asyncio.CancelledError as e:
+                logger.warning(
+                    "session_interrupt_cancelled_during_all",
+                    session_id=session_id,
+                    error=str(e),
+                    exc_info=e,
+                )
+            except TimeoutError as e:
+                logger.error(
+                    "session_interrupt_timeout_during_all",
+                    session_id=session_id,
+                    error=str(e),
+                    exc_info=e,
+                )
             except Exception as e:
                 logger.error(
                     "session_interrupt_failed_during_all",
                     session_id=session_id,
                     error=str(e),
+                    exc_info=e,
                 )
 
         logger.debug(

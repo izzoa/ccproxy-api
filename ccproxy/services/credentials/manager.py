@@ -12,7 +12,6 @@ from structlog import get_logger
 from ccproxy.auth.exceptions import (
     CredentialsExpiredError,
     CredentialsNotFoundError,
-    CredentialsStorageError,
     OAuthTokenRefreshError,
 )
 from ccproxy.auth.manager import AuthManager

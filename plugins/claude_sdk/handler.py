@@ -156,6 +156,7 @@ class ClaudeSDKHandler:
                     "failed_to_capture_session_metadata",
                     session_id=session_id,
                     error=str(e),
+                    exc_info=e,
                 )
         else:
             # Add basic session metadata for direct connections
@@ -403,6 +404,7 @@ class ClaudeSDKHandler:
                     "failed_to_store_stream_handle",
                     session_id=session_id,
                     error=str(e),
+                    exc_info=e,
                 )
 
         # Capture session metadata
@@ -561,7 +563,7 @@ class ClaudeSDKHandler:
                 "health_check_failed",
                 error=str(e),
                 error_type=type(e).__name__,
-                exc_info=True,
+                exc_info=e,
             )
             return False
 

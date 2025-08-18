@@ -98,7 +98,7 @@ class ClaudeSDKDetectionService:
                 # Always return as command list for consistency
                 return result.command
         except Exception as e:
-            logger.debug("binary_resolver_failed", error=str(e))
+            logger.debug("binary_resolver_failed", error=str(e), exc_info=e)
 
         return None
 

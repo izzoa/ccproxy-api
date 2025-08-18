@@ -430,7 +430,7 @@ class TerminalPermissionHandler:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("queue_processing_error", error=str(e), exc_info=True)
+                logger.error("queue_processing_error", error=str(e), exc_info=e)
 
     def _is_request_processable(
         self, request: PermissionRequest, future: asyncio.Future[bool]
@@ -478,7 +478,7 @@ class TerminalPermissionHandler:
                 "confirmation_app_error",
                 request_id=request.id,
                 error=str(e),
-                exc_info=True,
+                exc_info=e,
             )
             self._safe_set_future_result(future, False)
         finally:
@@ -549,7 +549,7 @@ class TerminalPermissionHandler:
                 "confirmation_handling_error",
                 request_id=request.id,
                 error=str(e),
-                exc_info=True,
+                exc_info=e,
             )
             return False
 
@@ -599,7 +599,7 @@ class TerminalPermissionHandler:
             logger.error(
                 "cancel_dialog_error",
                 error=str(e),
-                exc_info=True,
+                exc_info=e,
             )
             # Fallback: just exit the app without feedback
             with contextlib.suppress(Exception):

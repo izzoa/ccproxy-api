@@ -122,6 +122,7 @@ class ClaudeSDKClient:
                 error_type=type(e).__name__,
                 operation=operation,
                 request_id=request_id,
+                exc_info=e,
             )
             raise ClaudeProxyError(
                 message=f"Unexpected error: {str(e)}",
@@ -396,6 +397,7 @@ class ClaudeSDKClient:
                         "claude_sdk_disconnect_failed",
                         error=str(e),
                         request_id=request_id,
+                        exc_info=e,
                     )
 
     async def _query_with_session_pool(
@@ -503,7 +505,7 @@ class ClaudeSDKClient:
                     error=str(e),
                     error_type=type(e).__name__,
                     session_id=session_id,
-                    exc_info=True,
+                    exc_info=e,
                 )
                 # Fall back to direct query
                 logger.info(
@@ -572,6 +574,7 @@ class ClaudeSDKClient:
                             "failed_to_interrupt_stuck_session",
                             session_id=session_id,
                             error=str(e),
+                            exc_info=e,
                         )
 
             # Raise a custom exception with error details
@@ -643,6 +646,7 @@ class ClaudeSDKClient:
                             error=str(e),
                             request_id=request_id,
                             session_id=session_id,
+                            exc_info=e,
                         )
                     break
             else:
@@ -704,6 +708,7 @@ class ClaudeSDKClient:
                     request_id=request_id,
                     error=str(e),
                     error_type=type(e).__name__,
+                    exc_info=e,
                 )
             finally:
                 if session_client:
@@ -765,6 +770,7 @@ class ClaudeSDKClient:
                 component="claude_sdk",
                 error=str(e),
                 error_type=type(e).__name__,
+                exc_info=e,
             )
             return False
 

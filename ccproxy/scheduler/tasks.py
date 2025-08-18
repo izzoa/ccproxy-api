@@ -11,7 +11,7 @@ from typing import Any
 import structlog
 
 from ccproxy.core.async_task_manager import create_managed_task
-from ccproxy.scheduler.errors import SchedulerError, TaskExecutionError
+from ccproxy.scheduler.errors import SchedulerError
 
 
 logger = structlog.get_logger(__name__)

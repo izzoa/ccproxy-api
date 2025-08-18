@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import httpx
 import structlog
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -354,8 +355,24 @@ class Plugin(ProviderPlugin):
 
                 return result_info
 
+        except httpx.HTTPError as e:
+            logger.debug(
+                "claude_sdk_profile_http_error",
+                error=str(e),
+                exc_info=e,
+            )
+        except ValueError as e:
+            logger.debug(
+                "claude_sdk_profile_validation_error",
+                error=str(e),
+                exc_info=e,
+            )
         except Exception as e:
-            logger.debug(f"Failed to get Claude SDK profile info: {e}")
+            logger.debug(
+                "claude_sdk_profile_unexpected_error",
+                error=str(e),
+                exc_info=e,
+            )
 
         return None
 

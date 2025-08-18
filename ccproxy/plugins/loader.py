@@ -7,7 +7,6 @@ from typing import Any
 
 import structlog
 
-from ccproxy.core.errors import PluginLoadError
 from ccproxy.plugins.dependency_resolver import PluginDependencyResolver
 from ccproxy.plugins.protocol import ProviderPlugin
 
