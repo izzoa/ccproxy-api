@@ -76,13 +76,7 @@ class Plugin(ProviderPlugin):
 
         self._config = CodexSettings.model_validate(plugin_config)
 
-        # Initialize adapter with shared HTTP client
-        self._adapter = CodexAdapter(
-            http_client=services.http_client,
-            logger=logger.bind(plugin=self.name),
-        )
-
-        # Set up authentication manager for the adapter
+        # Set up authentication manager first
         from ccproxy.auth.openai import OpenAITokenManager
 
         auth_manager = OpenAITokenManager()
@@ -108,9 +102,7 @@ class Plugin(ProviderPlugin):
                 msg="No OpenAI credentials found. Run 'ccproxy auth login --provider openai' to authenticate.",
             )
 
-        self._adapter.set_auth_manager(auth_manager)
         self._auth_manager = auth_manager  # Store for health checks
-        logger.debug("codex_plugin_auth_manager_set", adapter_has_auth=True)
 
         # Set up detection service for the adapter
         from .detection_service import CodexDetectionService
@@ -152,9 +144,17 @@ class Plugin(ProviderPlugin):
                 msg="Using fallback Codex instructions",
             )
 
-        self._adapter.set_detection_service(detection_service)
         self._detection_service = detection_service  # Store for health checks
-        logger.debug("codex_plugin_detection_service_set", adapter_has_detection=True)
+
+        # Now create the adapter with all required dependencies
+        self._adapter = CodexAdapter(
+            proxy_service=None,  # Will be set by plugin manager
+            auth_manager=auth_manager,
+            detection_service=detection_service,
+            http_client=services.http_client,
+            logger=logger.bind(plugin=self.name),
+        )
+        logger.debug("codex_plugin_adapter_created", adapter_has_all_deps=True)
 
     def get_summary(self) -> dict[str, Any]:
         """Get plugin summary for consolidated logging."""

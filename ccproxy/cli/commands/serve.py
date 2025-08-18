@@ -68,9 +68,9 @@ def _show_api_usage_info(toolkit: Any, settings: Settings) -> None:
     # Use rich console for code blocks
     console = Console()
 
-    exports = f"""export ANTHROPIC_API_KEY={settings.security.auth_token}
+    exports = f"""export ANTHROPIC_API_KEY={settings.security.auth_token.get_secret_value()}
 export ANTHROPIC_BASE_URL={anthropic_base_url}
-export OPENAI_API_KEY={settings.security.auth_token}
+export OPENAI_API_KEY={settings.security.auth_token.get_secret_value()}
 export OPENAI_BASE_URL={openai_base_url}"""
 
     console.print(Syntax(exports, "bash", theme="monokai", background_color="default"))

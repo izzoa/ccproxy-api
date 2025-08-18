@@ -31,89 +31,68 @@ class CodexAdapter(BaseAdapter):
 
     def __init__(
         self,
+        proxy_service: ProxyService | None,
+        auth_manager: AuthManager,
+        detection_service: Any,
         http_client: Any | None = None,
         logger: structlog.BoundLogger | None = None,
     ):
         """Initialize the Codex adapter.
 
         Args:
+            proxy_service: ProxyService instance for handling requests (can be None, will be set later)
+            auth_manager: Authentication manager for credentials
+            detection_service: Detection service for Codex CLI detection
             http_client: Not used directly (for interface compatibility)
             logger: Structured logger instance
         """
         self.logger = logger or structlog.get_logger(__name__)
-        self.proxy_service: ProxyService | None = None
-        self.format_adapter: CodexFormatAdapter | None = None
+        self.proxy_service = proxy_service
+        self._auth_manager = auth_manager
+        self._detection_service = detection_service
+
+        # Initialize components
+        self.format_adapter = CodexFormatAdapter()
+
+        # Initialize HTTP handler and transformers (will be completed in set_proxy_service if needed)
+        self._http_handler: PluginHTTPHandler | None = None
         self.request_transformer: CodexRequestTransformer | None = None
         self.response_transformer: CodexResponseTransformer | None = None
-        self._initialized = False
-        self._auth_manager: AuthManager | None = None
-        self._detection_service = None
-        self._http_handler: PluginHTTPHandler | None = None
 
-    def set_proxy_service(self, proxy_service: ProxyService) -> None:
-        """Set the proxy service for request handling."""
-        self.proxy_service = proxy_service
+        # Complete initialization if proxy_service is available
+        if proxy_service:
+            self._complete_initialization()
 
-    def set_auth_manager(self, auth_manager: AuthManager) -> None:
-        """Set the authentication manager."""
-        self._auth_manager = auth_manager
-
-    def set_detection_service(self, detection_service: Any) -> None:
-        """Set the detection service."""
-        self._detection_service = detection_service
-        if self.request_transformer:
-            self.request_transformer.detection_service = detection_service
-
-    def _ensure_initialized(self, request: Request) -> None:
-        """Ensure adapter is properly initialized.
-
-        Args:
-            request: FastAPI request object
-
-        Raises:
-            HTTPException: If initialization fails
-        """
-        if self._initialized:
+    def _complete_initialization(self) -> None:
+        """Complete initialization with proxy_service dependencies."""
+        if not self.proxy_service:
             return
 
-        try:
-            # Get proxy service from app state if not set
-            if not self.proxy_service:
-                proxy_service = getattr(request.app.state, "proxy_service", None)
-                if not proxy_service:
-                    raise HTTPException(
-                        status_code=503, detail="Proxy service not available"
-                    )
-                self.proxy_service = proxy_service
+        # Initialize HTTP handler with client config from proxy service
+        client_config = self.proxy_service.config.get_httpx_client_config()
+        self._http_handler = PluginHTTPHandler(client_config)
 
-            # Initialize components
-            if not self.format_adapter:
-                self.format_adapter = CodexFormatAdapter()
+        # Initialize transformers
+        self.request_transformer = CodexRequestTransformer(self._detection_service)
 
-            if not self.request_transformer:
-                self.request_transformer = CodexRequestTransformer(
-                    self._detection_service
-                )
+        # Initialize response transformer with CORS settings
+        cors_settings = (
+            getattr(self.proxy_service.config, "cors", None)
+            if self.proxy_service
+            else None
+        )
+        self.response_transformer = CodexResponseTransformer(cors_settings)
 
-            if not self.response_transformer:
-                self.response_transformer = CodexResponseTransformer()
+    def set_proxy_service(self, proxy_service: ProxyService) -> None:
+        """Set the proxy service and complete initialization.
 
-            # Initialize HTTP handler with client config from proxy service
-            if not self._http_handler and self.proxy_service:
-                client_config = self.proxy_service.config.get_httpx_client_config()
-                self._http_handler = PluginHTTPHandler(client_config)
+        This is called by the plugin manager after the adapter is created.
 
-            self._initialized = True
-            self.logger.debug("codex_adapter_initialized")
-
-        except Exception as e:
-            self.logger.error(
-                "codex_adapter_initialization_failed",
-                error=str(e),
-            )
-            raise HTTPException(
-                status_code=503, detail=f"Codex initialization failed: {str(e)}"
-            ) from e
+        Args:
+            proxy_service: ProxyService instance for handling requests
+        """
+        self.proxy_service = proxy_service
+        self._complete_initialization()
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
@@ -129,7 +108,6 @@ class CodexAdapter(BaseAdapter):
         Returns:
             Response from Codex API
         """
-        self._ensure_initialized(request)
 
         # Extract session_id
         session_id = kwargs.get("session_id") or str(uuid.uuid4())
@@ -223,7 +201,6 @@ class CodexAdapter(BaseAdapter):
         Returns:
             Streaming response from Codex API
         """
-        self._ensure_initialized(request)
 
         # Ensure stream=true in request body
         body = await request.body()
@@ -264,5 +241,4 @@ class CodexAdapter(BaseAdapter):
 
     async def cleanup(self) -> None:
         """Cleanup resources when shutting down."""
-        self._initialized = False
         self.logger.debug("codex_adapter_cleaned_up")

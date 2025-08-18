@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, Request
 from structlog import get_logger
@@ -11,6 +11,7 @@ from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.http import BaseProxyClient
 from ccproxy.observability import PrometheusMetrics, get_metrics
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
+from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.proxy_service import ProxyService
 
@@ -146,6 +147,68 @@ async def get_duckdb_storage(request: Request) -> SimpleDuckDBStorage | None:
     if storage is None:
         storage = getattr(request.app.state, "duckdb_storage", None)
     return storage
+
+
+# Plugin adapter dependencies
+def get_plugin_adapter(plugin_name: str) -> Any:
+    """Create a dependency function for getting a specific plugin adapter.
+
+    Args:
+        plugin_name: Name of the plugin
+
+    Returns:
+        Dependency function that returns the plugin adapter
+    """
+
+    def _get_adapter(proxy_service: ProxyServiceDep) -> BaseAdapter:
+        """Get plugin adapter instance.
+
+        Args:
+            proxy_service: Proxy service dependency
+
+        Returns:
+            Plugin adapter instance
+
+        Raises:
+            HTTPException: If plugin is not initialized
+        """
+        from fastapi import HTTPException
+
+        adapter = proxy_service.plugin_manager.get_plugin_adapter(plugin_name)
+        if not adapter:
+            raise HTTPException(
+                status_code=503, detail=f"{plugin_name} plugin not initialized"
+            )
+        return adapter
+
+    return _get_adapter
+
+
+def get_plugin_detection_service(plugin_name: str) -> Any:
+    """Create a dependency function for getting a plugin's detection service.
+
+    Args:
+        plugin_name: Name of the plugin
+
+    Returns:
+        Dependency function that returns the detection service
+    """
+
+    def _get_detection_service(proxy_service: ProxyServiceDep) -> Any | None:
+        """Get plugin detection service.
+
+        Args:
+            proxy_service: Proxy service dependency
+
+        Returns:
+            Plugin detection service if available, None otherwise
+        """
+        plugin = proxy_service.plugin_manager.plugin_registry.get_plugin(plugin_name)
+        if plugin and hasattr(plugin, "_detection_service"):
+            return plugin._detection_service
+        return None
+
+    return _get_detection_service
 
 
 # Type aliases for service dependencies

@@ -165,7 +165,7 @@ class TestStatsCollector:
             overall_analytics,
             last_minute_analytics,
         ]
-        self.mock_storage.query.return_value = top_model_results
+        self.mock_storage.query_top_model.return_value = top_model_results
 
         collector = StatsCollector(
             settings=self.settings,

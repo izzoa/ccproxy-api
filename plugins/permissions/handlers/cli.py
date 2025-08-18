@@ -522,7 +522,11 @@ def connect(
         api_url = f"http://{settings.server.host}:{settings.server.port}"
 
     # Determine auth token: CLI arg > config setting > None
-    token = auth_token or settings.security.auth_token
+    token = auth_token or (
+        settings.security.auth_token.get_secret_value()
+        if settings.security.auth_token
+        else None
+    )
 
     # Create handlers based on UI mode selection
     terminal_handler: ConfirmationHandlerProtocol = TextualPermissionHandler()

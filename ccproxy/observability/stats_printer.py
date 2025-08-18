@@ -378,21 +378,12 @@ class StatsCollector:
             return
 
         try:
-            # Query for model usage
-            sql = """
-                SELECT model, COUNT(*) as request_count
-                FROM access_logs
-                WHERE timestamp >= ? AND timestamp <= ?
-                GROUP BY model
-                ORDER BY request_count DESC
-                LIMIT 1
-            """
-
             start_dt = datetime.fromtimestamp(start_time)
             end_dt = datetime.fromtimestamp(end_time)
 
-            results = await self._storage_instance.query(
-                sql, [start_dt, end_dt], limit=1
+            # Use the safe parameterized query method
+            results = await self._storage_instance.query_top_model(
+                start_dt, end_dt, limit=1
             )
 
             if results:

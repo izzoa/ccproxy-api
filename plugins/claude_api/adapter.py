@@ -12,6 +12,8 @@ from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.http_handler import PluginHTTPHandler
 from ccproxy.services.provider_context import ProviderContext
 
+from .transformers import ClaudeAPIRequestTransformer, ClaudeAPIResponseTransformer
+
 
 logger = structlog.get_logger(__name__)
 
@@ -25,111 +27,72 @@ class ClaudeAPIAdapter(BaseAdapter):
 
     def __init__(
         self,
+        proxy_service: Any | None,
+        auth_manager: Any,
+        detection_service: Any,
         http_client: AsyncClient | None = None,
         logger: structlog.BoundLogger | None = None,
     ) -> None:
         """Initialize the Claude API adapter.
 
         Args:
+            proxy_service: ProxyService instance for handling requests (can be None, will be set later)
+            auth_manager: Authentication manager for credentials
+            detection_service: Detection service for Claude CLI detection
             http_client: Optional HTTP client for making requests
             logger: Optional structured logger instance
         """
         self.http_client = http_client
         self.logger = logger or structlog.get_logger(__name__)
-        self.proxy_service: Any | None = None
-        self.openai_adapter: Any | None = None
-        self._initialized = False
+        self.proxy_service = proxy_service
+        self._auth_manager = auth_manager
+        self._detection_service = detection_service
+
+        # Initialize OpenAI adapter for format conversion
+        from ccproxy.adapters.openai.adapter import OpenAIAdapter
+
+        self.openai_adapter = OpenAIAdapter()
+
+        # Initialize HTTP handler and transformers (will be completed in set_proxy_service if needed)
         self._http_handler: PluginHTTPHandler | None = None
-        self._auth_manager: Any | None = None
-        self._request_transformer: Any | None = None
-        self._response_transformer: Any | None = None
-        self._detection_service: Any | None = None
+        self._request_transformer: ClaudeAPIRequestTransformer | None = None
+        self._response_transformer: ClaudeAPIResponseTransformer | None = None
+
+        # Complete initialization if proxy_service is available
+        if proxy_service:
+            self._complete_initialization()
+
+    def _complete_initialization(self) -> None:
+        """Complete initialization with proxy_service dependencies."""
+        if not self.proxy_service:
+            return
+
+        # Initialize HTTP handler with client config from proxy service
+        client_config = self.proxy_service.config.get_httpx_client_config()
+        self._http_handler = PluginHTTPHandler(client_config)
+
+        # Initialize transformers with detection service
+        from .transformers import (
+            ClaudeAPIRequestTransformer,
+            ClaudeAPIResponseTransformer,
+        )
+
+        self._request_transformer = ClaudeAPIRequestTransformer(self._detection_service)
+
+        # Initialize response transformer with CORS settings
+        cors_settings = getattr(self.proxy_service.config, "cors", None)
+        self._response_transformer = ClaudeAPIResponseTransformer(cors_settings)
 
     def set_proxy_service(self, proxy_service: Any) -> None:
-        """Set the proxy service for request handling.
+        """Set the proxy service and complete initialization.
+
+        This is called by the plugin manager after the adapter is created.
 
         Args:
             proxy_service: ProxyService instance for handling requests
         """
         self.proxy_service = proxy_service
-
-    def set_openai_adapter(self, adapter: Any) -> None:
-        """Set the OpenAI adapter for format conversion.
-
-        Args:
-            adapter: OpenAI adapter for format conversion
-        """
-        self.openai_adapter = adapter
-
-    def _ensure_initialized(self, request: Request) -> None:
-        """Ensure adapter is properly initialized.
-
-        Args:
-            request: FastAPI request object
-
-        Raises:
-            HTTPException: If initialization fails
-        """
-        if self._initialized:
-            return
-
-        try:
-            # Get proxy service from app state if not set
-            if not self.proxy_service:
-                proxy_service = getattr(request.app.state, "proxy_service", None)
-                if not proxy_service:
-                    raise HTTPException(
-                        status_code=503, detail="Proxy service not available"
-                    )
-                self.proxy_service = proxy_service
-
-            # Create OpenAI adapter for format conversion if not set
-            if not self.openai_adapter:
-                from ccproxy.adapters.openai.adapter import OpenAIAdapter
-
-                self.openai_adapter = OpenAIAdapter()
-
-            # Initialize HTTP handler with client config from proxy service
-            if not self._http_handler and self.proxy_service:
-                client_config = self.proxy_service.config.get_httpx_client_config()
-                self._http_handler = PluginHTTPHandler(client_config)
-
-            # Get auth manager from proxy service (credentials manager)
-            if not self._auth_manager and self.proxy_service:
-                self._auth_manager = self.proxy_service.credentials_manager
-
-            # Initialize transformers with detection service
-            if not self._request_transformer and hasattr(
-                self.proxy_service, "plugin_manager"
-            ):
-                plugin = self.proxy_service.plugin_manager.plugin_registry.get_plugin(
-                    "claude_api"
-                )
-                if plugin and hasattr(plugin, "_detection_service"):
-                    self._detection_service = plugin._detection_service
-
-                    # Create transformers with detection service
-                    from .transformers import (
-                        ClaudeAPIRequestTransformer,
-                        ClaudeAPIResponseTransformer,
-                    )
-
-                    self._request_transformer = ClaudeAPIRequestTransformer(
-                        self._detection_service
-                    )
-                    self._response_transformer = ClaudeAPIResponseTransformer()
-
-            self._initialized = True
-            self.logger.debug("claude_api_adapter_initialized")
-
-        except Exception as e:
-            self.logger.error(
-                "claude_api_adapter_initialization_failed",
-                error=str(e),
-            )
-            raise HTTPException(
-                status_code=503, detail=f"Claude API initialization failed: {str(e)}"
-            ) from e
+        self._complete_initialization()
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
@@ -145,7 +108,6 @@ class ClaudeAPIAdapter(BaseAdapter):
         Returns:
             Response from Claude API
         """
-        self._ensure_initialized(request)
 
         # Read request body
         body = await request.body()
@@ -238,7 +200,6 @@ class ClaudeAPIAdapter(BaseAdapter):
         Returns:
             Streaming response from Claude API
         """
-        self._ensure_initialized(request)
 
         # Ensure the request has stream=true
         body = await request.body()
@@ -279,5 +240,4 @@ class ClaudeAPIAdapter(BaseAdapter):
 
     async def cleanup(self) -> None:
         """Cleanup resources when shutting down."""
-        self._initialized = False
         self.logger.debug("claude_api_adapter_cleanup_completed")

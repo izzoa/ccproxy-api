@@ -405,55 +405,47 @@ class SimpleDuckDBStorage:
         """
         return await self.store_batch([metric])
 
-    async def query(
+    async def query_top_model(
         self,
-        sql: str,
-        params: dict[str, Any] | list[Any] | None = None,
-        limit: int = 1000,
+        start_time: datetime,
+        end_time: datetime,
+        limit: int = 1,
     ) -> list[dict[str, Any]]:
-        """Execute SQL query and return results.
+        """Query for the most used model in a time period (safe parameterized query).
 
         Args:
-            sql: SQL query string
-            params: Query parameters
+            start_time: Start datetime for filtering
+            end_time: End datetime for filtering
             limit: Maximum number of results
 
         Returns:
-            List of result rows as dictionaries
+            List of model usage results
         """
         if not self._initialized or not self._engine:
             return []
 
         try:
-            # Use SQLModel for querying
             with Session(self._engine) as session:
-                # For now, we'll use raw SQL through the engine
-                # In a full implementation, this would be converted to SQLModel queries
+                # Use SQLModel with parameterized query - safe from SQL injection
+                statement = (
+                    select(AccessLog.model, func.count().label("request_count"))
+                    .where(AccessLog.timestamp >= start_time)
+                    .where(AccessLog.timestamp <= end_time)
+                    .group_by(AccessLog.model)
+                    .order_by(desc(func.count()))
+                    .limit(limit)
+                )
 
-                # Use parameterized query to prevent SQL injection
-                limited_sql = "SELECT * FROM (" + sql + ") LIMIT :limit"
+                results = session.exec(statement).all()
 
-                query_params = {"limit": limit}
-                if params:
-                    # Merge user params with limit param
-                    if isinstance(params, dict):
-                        query_params.update(params)
-                        result = session.execute(text(limited_sql), query_params)
-                    else:
-                        # If params is a list, we need to handle it differently
-                        # For now, we'll use the safer approach of not supporting list params with limits
-                        result = session.execute(text(sql), params)
-                else:
-                    result = session.execute(text(limited_sql), query_params)
-
-                # Convert to list of dictionaries
-                columns = list(result.keys())
-                rows = result.fetchall()
-
-                return [dict(zip(columns, row, strict=False)) for row in rows]
+                # Convert to dict format
+                return [
+                    {"model": result[0], "request_count": result[1]}
+                    for result in results
+                ]
 
         except Exception as e:
-            logger.error("simple_duckdb_query_error", sql=sql, error=str(e))
+            logger.error("simple_duckdb_query_top_model_error", error=str(e))
             return []
 
     async def get_recent_requests(self, limit: int = 100) -> list[dict[str, Any]]:

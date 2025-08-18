@@ -275,7 +275,7 @@ class Settings(BaseSettings):
         Returns:
             dict: Configuration with sensitive data masked
         """
-        return self.model_dump()
+        return self.model_dump(mode="json")
 
     @classmethod
     def load_toml_config(cls, toml_path: Path) -> dict[str, Any]:

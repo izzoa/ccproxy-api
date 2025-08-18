@@ -1,11 +1,15 @@
 """Claude API plugin routes."""
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response
 
-from ccproxy.api.dependencies import ProxyServiceDep
+from ccproxy.api.dependencies import (
+    ProxyServiceDep,
+    get_plugin_adapter,
+    get_plugin_detection_service,
+)
 from ccproxy.auth.conditional import ConditionalAuthDep
 from ccproxy.services.provider_context import ProviderContext
 
@@ -13,6 +17,13 @@ from .transformers import ClaudeAPIRequestTransformer, ClaudeAPIResponseTransfor
 
 
 router = APIRouter(tags=["plugin-claude-api"])
+
+
+# Type aliases for dependency injection using centralized plugin dependencies
+ClaudeAPIAdapterDep = Annotated[Any, Depends(get_plugin_adapter("claude_api"))]
+ClaudeAPIDetectionDep = Annotated[
+    Any, Depends(get_plugin_detection_service("claude_api"))
+]
 
 
 def claude_api_path_transformer(path: str) -> str:
@@ -76,7 +87,8 @@ def create_anthropic_context(
 @router.post("/v1/messages", response_model=None)
 async def create_anthropic_message(
     request: Request,
-    proxy_service: ProxyServiceDep,
+    adapter: ClaudeAPIAdapterDep,
+    detection_service: ClaudeAPIDetectionDep,
     auth: ConditionalAuthDep,
 ) -> Response:
     """Create a message using Claude AI with native Anthropic format.
@@ -84,18 +96,6 @@ async def create_anthropic_message(
     This endpoint handles Anthropic API format requests and forwards them
     directly to the Claude API without format conversion.
     """
-    # Get detection service from plugin registry
-    detection_service = None
-    if hasattr(proxy_service, "plugin_manager"):
-        plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("claude_api")
-        if plugin and hasattr(plugin, "_detection_service"):
-            detection_service = plugin._detection_service
-
-    # Get the adapter from plugin manager and delegate to it
-    adapter = proxy_service.plugin_manager.get_plugin_adapter("claude_api")
-    if not adapter:
-        raise HTTPException(status_code=503, detail="Claude API plugin not initialized")
-
     # Delegate to adapter which will handle the request properly
     return await adapter.handle_request(request, "/v1/messages", request.method)
 
@@ -103,7 +103,8 @@ async def create_anthropic_message(
 @router.post("/v1/chat/completions", response_model=None)
 async def create_openai_chat_completion(
     request: Request,
-    proxy_service: ProxyServiceDep,
+    adapter: ClaudeAPIAdapterDep,
+    detection_service: ClaudeAPIDetectionDep,
     auth: ConditionalAuthDep,
 ) -> Response:
     """Create a chat completion using Claude AI with OpenAI-compatible format.
@@ -111,13 +112,6 @@ async def create_openai_chat_completion(
     This endpoint handles OpenAI format requests and converts them
     to/from Anthropic format transparently.
     """
-    # Get detection service from plugin registry
-    detection_service = None
-    if hasattr(proxy_service, "plugin_manager"):
-        plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("claude_api")
-        if plugin and hasattr(plugin, "_detection_service"):
-            detection_service = plugin._detection_service
-
     # Get OpenAI adapter for format conversion
     from ccproxy.adapters.openai.adapter import OpenAIAdapter
 
@@ -171,16 +165,12 @@ async def create_openai_chat_completion(
             async for chunk in self.openai_adapter.adapt_stream(stream):
                 yield chunk
 
-    # Create chained adapter if we have detection service
+    # Create chained adapter with injected detection service
     request_adapter: Any = openai_adapter
+    response_adapter: Any = openai_adapter
     if detection_service:
         claude_transformer = ClaudeAPIRequestTransformer(detection_service)
         request_adapter = ChainedAdapter(openai_adapter, claude_transformer)
-
-    # Get the adapter from plugin manager and delegate to it
-    adapter = proxy_service.plugin_manager.get_plugin_adapter("claude_api")
-    if not adapter:
-        raise HTTPException(status_code=503, detail="Claude API plugin not initialized")
 
     # Delegate to adapter which will handle the request properly
     return await adapter.handle_request(request, "/v1/chat/completions", request.method)

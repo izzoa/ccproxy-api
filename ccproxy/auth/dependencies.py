@@ -73,7 +73,10 @@ async def _get_auth_manager_with_settings(
         try:
             # If API has configured auth_token, validate against it
             if settings.security.auth_token:
-                if credentials.credentials == settings.security.auth_token:
+                if (
+                    credentials.credentials
+                    == settings.security.auth_token.get_secret_value()
+                ):
                     bearer_auth = BearerTokenAuthManager(credentials.credentials)
                     if await bearer_auth.is_authenticated():
                         return bearer_auth

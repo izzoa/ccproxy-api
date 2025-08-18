@@ -81,7 +81,7 @@ class ClaudeAPIRequestTransformer:
         if not has_detected_headers:
             # Convert Authorization header to x-api-key if needed
             # First check if we got an access_token parameter (from new interface)
-            if access_token and "x-api-key" not in transformed:
+            if access_token:  # and "x-api-key" not in transformed:
                 transformed["x-api-key"] = access_token
                 # Remove any Authorization header since we're using x-api-key
                 transformed.pop("Authorization", None)

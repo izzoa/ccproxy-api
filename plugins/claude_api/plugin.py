@@ -42,7 +42,7 @@ class Plugin(ProviderPlugin):
         """Initialize the Claude API plugin."""
         self._name = "claude_api"
         self._version = "1.0.0"
-        self._router_prefix = "/claude-api"
+        self._router_prefix = "/api"
         self._services: CoreServices | None = None
         self._config: ClaudeAPISettings | None = None
         self._adapter: ClaudeAPIAdapter | None = None
@@ -98,16 +98,19 @@ class Plugin(ProviderPlugin):
                 msg="Claude CLI not found in PATH or common locations",
             )
 
-        # Initialize adapter with shared HTTP client
-        self._adapter = ClaudeAPIAdapter(
-            http_client=services.http_client,
-            logger=services.logger.bind(plugin=self.name),
-        )
-
         # Initialize credentials manager for OAuth token management
         from ccproxy.services.credentials.manager import CredentialsManager
 
         self._credentials_manager = CredentialsManager()
+
+        # Initialize adapter with all required dependencies
+        self._adapter = ClaudeAPIAdapter(
+            proxy_service=None,  # Will be set by plugin manager via set_proxy_service
+            auth_manager=self._credentials_manager,
+            detection_service=self._detection_service,
+            http_client=services.http_client,
+            logger=services.logger.bind(plugin=self.name),
+        )
         logger.debug(
             "claude_api_plugin_initialized",
             status="initialized",

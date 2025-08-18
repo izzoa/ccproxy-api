@@ -1,13 +1,21 @@
 """Codex plugin routes."""
 
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response, StreamingResponse
 
-from ccproxy.api.dependencies import ProxyServiceDep
+from ccproxy.api.dependencies import (
+    get_plugin_adapter,
+    get_plugin_detection_service,
+)
 from ccproxy.auth.conditional import ConditionalAuthDep
+
+
+# Type aliases for dependency injection using centralized plugin dependencies
+CodexAdapterDep = Annotated[Any, Depends(get_plugin_adapter("codex"))]
+CodexDetectionDep = Annotated[Any, Depends(get_plugin_detection_service("codex"))]
 
 
 router = APIRouter(tags=["plugin-codex"])
@@ -34,112 +42,47 @@ def codex_path_transformer(path: str) -> str:
 @router.post("/responses", response_model=None)
 async def codex_responses(
     request: Request,
-    proxy_service: ProxyServiceDep,
+    adapter: CodexAdapterDep,
+    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
     """Create Codex completion with auto-generated session_id.
 
-    Creates a provider context and delegates to proxy service.
+    Delegates to the adapter which will handle the request properly.
     """
-    from ccproxy.services.provider_context import ProviderContext
-
-    # Get the codex plugin for auth manager
-    plugin = None
-    auth_manager = None
-    if hasattr(proxy_service, "plugin_manager"):
-        plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("codex")
-        adapter = proxy_service.plugin_manager.get_plugin_adapter("codex")
-        if adapter and hasattr(adapter, "_auth_manager"):
-            auth_manager = adapter._auth_manager
-
-    if not plugin:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=503, detail="Codex plugin not initialized")
-
-    if not auth_manager:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=503, detail="Codex auth manager not initialized"
-        )
-
     # Get session_id from header if provided
     header_session_id = request.headers.get("session_id")
     session_id = header_session_id or str(uuid.uuid4())
 
-    # Create provider context for codex
-    context = ProviderContext(
-        provider_name="codex",
-        auth_manager=auth_manager,
-        target_base_url="https://chatgpt.com",
-        route_prefix="/codex",
-        supports_streaming=True,
-        requires_session=True,
-        session_id=session_id,
-        path_transformer=lambda p: "/backend-api/codex/responses",
+    # Delegate to adapter which will handle the request properly
+    return await adapter.handle_request(
+        request, "/responses", request.method, session_id=session_id
     )
-
-    # Delegate to proxy service which will handle via the adapter
-    result = await proxy_service.dispatch_request(request, context)
-    return result
 
 
 @router.post("/{session_id}/responses", response_model=None)
 async def codex_responses_with_session(
     session_id: str,
     request: Request,
-    proxy_service: ProxyServiceDep,
+    adapter: CodexAdapterDep,
+    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
     """Create Codex completion with specific session_id.
 
-    Creates a provider context and delegates to proxy service.
+    Delegates to the adapter which will handle the request properly.
     """
-    from ccproxy.services.provider_context import ProviderContext
-
-    # Get the codex plugin for auth manager
-    plugin = None
-    auth_manager = None
-    if hasattr(proxy_service, "plugin_manager"):
-        plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("codex")
-        adapter = proxy_service.plugin_manager.get_plugin_adapter("codex")
-        if adapter and hasattr(adapter, "_auth_manager"):
-            auth_manager = adapter._auth_manager
-
-    if not plugin:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=503, detail="Codex plugin not initialized")
-
-    if not auth_manager:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=503, detail="Codex auth manager not initialized"
-        )
-
-    # Create provider context for codex
-    context = ProviderContext(
-        provider_name="codex",
-        auth_manager=auth_manager,
-        target_base_url="https://chatgpt.com",
-        route_prefix="/codex",
-        supports_streaming=True,
-        requires_session=True,
-        session_id=session_id,
-        path_transformer=lambda p: "/backend-api/codex/responses",
+    # Delegate to adapter which will handle the request properly
+    return await adapter.handle_request(
+        request, "/{session_id}/responses", request.method, session_id=session_id
     )
-
-    # Delegate to proxy service which will handle via the adapter
-    result = await proxy_service.dispatch_request(request, context)
-    return result
 
 
 @router.post("/chat/completions", response_model=None)
 async def codex_chat_completions(
     request: Request,
-    proxy_service: ProxyServiceDep,
+    adapter: CodexAdapterDep,
+    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
     """Create a chat completion using Codex with OpenAI-compatible format.
@@ -147,118 +90,53 @@ async def codex_chat_completions(
     This endpoint handles OpenAI format requests and converts them
     to/from Codex Response API format transparently.
     """
-    from ccproxy.services.provider_context import ProviderContext
-
-    # Get the codex plugin for auth manager
-    plugin = None
-    auth_manager = None
-    if hasattr(proxy_service, "plugin_manager"):
-        plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("codex")
-        adapter = proxy_service.plugin_manager.get_plugin_adapter("codex")
-        if adapter and hasattr(adapter, "_auth_manager"):
-            auth_manager = adapter._auth_manager
-
-    if not plugin:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=503, detail="Codex plugin not initialized")
-
-    if not auth_manager:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=503, detail="Codex auth manager not initialized"
-        )
-
     # Get session_id from header if provided
     header_session_id = request.headers.get("session_id")
     session_id = header_session_id or str(uuid.uuid4())
 
-    # Create provider context for codex with format conversion
-    context = ProviderContext(
-        provider_name="codex",
-        auth_manager=auth_manager,
-        target_base_url="https://chatgpt.com",
-        route_prefix="/codex",
-        supports_streaming=True,
-        requires_session=True,
-        session_id=session_id,
-        path_transformer=lambda p: "/backend-api/codex/responses",
+    # Delegate to adapter which will handle the request properly
+    return await adapter.handle_request(
+        request, "/chat/completions", request.method, session_id=session_id
     )
-
-    # Delegate to proxy service which will handle via the adapter
-    result = await proxy_service.dispatch_request(request, context)
-    return result
 
 
 @router.post("/{session_id}/chat/completions", response_model=None)
 async def codex_chat_completions_with_session(
     session_id: str,
     request: Request,
-    proxy_service: ProxyServiceDep,
+    adapter: CodexAdapterDep,
+    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
     """Create a chat completion with specific session_id using OpenAI format.
 
     This endpoint handles OpenAI format requests with a specific session_id.
     """
-    from ccproxy.services.provider_context import ProviderContext
-
-    # Get the codex plugin for auth manager
-    plugin = None
-    auth_manager = None
-    if hasattr(proxy_service, "plugin_manager"):
-        plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("codex")
-        adapter = proxy_service.plugin_manager.get_plugin_adapter("codex")
-        if adapter and hasattr(adapter, "_auth_manager"):
-            auth_manager = adapter._auth_manager
-
-    if not plugin:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=503, detail="Codex plugin not initialized")
-
-    if not auth_manager:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=503, detail="Codex auth manager not initialized"
-        )
-
-    # Create provider context for codex with format conversion
-    context = ProviderContext(
-        provider_name="codex",
-        auth_manager=auth_manager,
-        target_base_url="https://chatgpt.com",
-        route_prefix="/codex",
-        supports_streaming=True,
-        requires_session=True,
-        session_id=session_id,
-        path_transformer=lambda p: "/backend-api/codex/responses",
+    # Delegate to adapter which will handle the request properly
+    return await adapter.handle_request(
+        request, "/{session_id}/chat/completions", request.method, session_id=session_id
     )
-
-    # Delegate to proxy service which will handle via the adapter
-    result = await proxy_service.dispatch_request(request, context)
-    return result
 
 
 @router.post("/v1/chat/completions", response_model=None)
 async def codex_v1_chat_completions(
     request: Request,
-    proxy_service: ProxyServiceDep,
+    adapter: CodexAdapterDep,
+    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
     """OpenAI v1 compatible chat completions endpoint.
 
     Maps to the standard chat completions handler.
     """
-    return await codex_chat_completions(request, proxy_service, auth)
+    return await codex_chat_completions(request, adapter, detection_service, auth)
 
 
 @router.get("/v1/models", response_model=None)
 async def list_models(
     request: Request,
-    proxy_service: ProxyServiceDep,
+    adapter: CodexAdapterDep,
+    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> dict[str, Any]:
     """List available Codex models.
