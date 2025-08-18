@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+from pydantic import SecretStr
 from structlog import get_logger
 
 from ccproxy.auth.exceptions import (
@@ -229,7 +230,7 @@ class OAuthClient:
 
             return OAuthToken(
                 accessToken=token_response.access_token,
-                refreshToken=token_response.refresh_token or refresh_token,
+                refreshToken=token_response.refresh_token or SecretStr(refresh_token),
                 expiresAt=expires_at_ms,
                 scopes=token_response.scope.split() if token_response.scope else [],
                 subscriptionType="pro",  # Default value

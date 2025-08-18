@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
+from pydantic import SecretStr
 
 from ccproxy.adapters.base import APIAdapter
 from ccproxy.auth.manager import AuthManager
@@ -37,8 +38,8 @@ class MockAuthManager(AuthManager):
         from ccproxy.auth.models import ClaudeCredentials, OAuthToken
 
         oauth_token = OAuthToken(
-            accessToken="test-token",
-            refreshToken="test-refresh",
+            accessToken=SecretStr("test-token"),
+            refreshToken=SecretStr("test-refresh"),
             expiresAt=None,
             scopes=["test"],
             subscriptionType="test",

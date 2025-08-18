@@ -764,9 +764,8 @@ def status_command(
                     if validation_result.valid and validation_result.credentials:
                         oauth = validation_result.credentials.claude_ai_oauth
                         if oauth.access_token:
-                            token_preview = (
-                                f"{oauth.access_token[:8]}...{oauth.access_token[-8:]}"
-                            )
+                            token_str = oauth.access_token.get_secret_value()
+                            token_preview = f"{token_str[:8]}...{token_str[-8:]}"
                             console.print(f"\n  Token: [dim]{token_preview}[/dim]")
                 elif provider == "codex":
                     from ccproxy.auth.openai import OpenAITokenManager

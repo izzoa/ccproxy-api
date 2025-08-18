@@ -6,7 +6,7 @@ from typing import Any
 
 import jwt
 import structlog
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
 
 from ccproxy.auth.exceptions import (
     AuthenticationError,
@@ -248,8 +248,8 @@ class OpenAITokenManager:
 
         # Create minimal ClaudeCredentials for compatibility
         oauth_token = OAuthToken(
-            accessToken=credentials.access_token,
-            refreshToken=credentials.refresh_token,
+            accessToken=SecretStr(credentials.access_token),
+            refreshToken=SecretStr(credentials.refresh_token),
             expiresAt=int(credentials.expires_at.timestamp() * 1000),
             scopes=["openai-api"],
             subscriptionType="openai",

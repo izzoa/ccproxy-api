@@ -3,6 +3,7 @@
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
 from ccproxy.adapters.base import APIAdapter
 from ccproxy.auth.manager import AuthManager
@@ -21,8 +22,8 @@ class MockAuthManager(AuthManager):
         from ccproxy.auth.models import ClaudeCredentials, OAuthToken
 
         oauth_token = OAuthToken(
-            accessToken="test-token",
-            refreshToken="test-refresh",
+            accessToken=SecretStr("test-token"),
+            refreshToken=SecretStr("test-refresh"),
             expiresAt=None,
             scopes=["test"],
             subscriptionType="test",

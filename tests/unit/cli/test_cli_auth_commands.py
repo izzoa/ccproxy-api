@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
 from typer.testing import CliRunner
 
 from ccproxy.auth.models import (
@@ -46,8 +47,8 @@ class TestAuthCLICommands:
     def mock_oauth_token(self) -> OAuthToken:
         """Create mock OAuth token."""
         return OAuthToken(
-            accessToken="sk-test-token-123",
-            refreshToken="refresh-token-456",
+            accessToken=SecretStr("sk-test-token-123"),
+            refreshToken=SecretStr("refresh-token-456"),
             expiresAt=None,
             tokenType="Bearer",
             subscriptionType="pro",

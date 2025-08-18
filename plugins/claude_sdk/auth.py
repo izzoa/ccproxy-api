@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from pydantic import SecretStr
+
 from ccproxy.auth.models import ClaudeCredentials, UserProfile
 
 
@@ -22,8 +24,8 @@ class NoOpAuthManager:
         from ccproxy.auth.models import OAuthToken
 
         oauth_token = OAuthToken(
-            accessToken="sdk-managed",
-            refreshToken="sdk-managed",
+            accessToken=SecretStr("sdk-managed"),
+            refreshToken=SecretStr("sdk-managed"),
             expiresAt=None,
             scopes=[],
             subscriptionType="sdk",

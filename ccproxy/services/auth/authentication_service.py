@@ -65,7 +65,7 @@ class AuthenticationService:
                         # Get new credentials after refresh
                         credentials = await self._get_credentials()
                         if credentials and credentials.claude_ai_oauth.access_token:
-                            return credentials.claude_ai_oauth.access_token
+                            return credentials.claude_ai_oauth.access_token.get_secret_value()
 
                     raise self._create_auth_error_response(
                         CredentialValidation(
@@ -75,7 +75,7 @@ class AuthenticationService:
                         )
                     )
 
-            return credentials.claude_ai_oauth.access_token
+            return credentials.claude_ai_oauth.access_token.get_secret_value()
 
         except HTTPException:
             raise

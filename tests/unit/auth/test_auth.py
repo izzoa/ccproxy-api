@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from ccproxy.auth.bearer import BearerTokenAuthManager
 from ccproxy.auth.credentials_adapter import CredentialsAuthManager
@@ -170,8 +171,8 @@ class TestCredentialsAuthentication:
     ) -> None:
         """Test successful credentials retrieval."""
         oauth_token = OAuthToken(
-            accessToken="sk-test-token-123",
-            refreshToken="refresh-token-456",
+            accessToken=SecretStr("sk-test-token-123"),
+            refreshToken=SecretStr("refresh-token-456"),
             expiresAt=None,
             tokenType="Bearer",
             subscriptionType=None,
@@ -190,8 +191,8 @@ class TestCredentialsAuthentication:
     ) -> None:
         """Test authentication status when credentials are valid."""
         oauth_token = OAuthToken(
-            accessToken="sk-test-token-123",
-            refreshToken="refresh-token-456",
+            accessToken=SecretStr("sk-test-token-123"),
+            refreshToken=SecretStr("refresh-token-456"),
             expiresAt=None,
             tokenType="Bearer",
             subscriptionType=None,
@@ -534,8 +535,8 @@ class TestTokenRefreshFlow:
     def mock_oauth_token(self) -> OAuthToken:
         """Create mock OAuth token."""
         return OAuthToken(
-            accessToken="sk-test-token-123",
-            refreshToken="refresh-token-456",
+            accessToken=SecretStr("sk-test-token-123"),
+            refreshToken=SecretStr("refresh-token-456"),
             expiresAt=None,
             tokenType="Bearer",
             subscriptionType=None,
@@ -546,8 +547,8 @@ class TestTokenRefreshFlow:
         # This is a unit test for the OAuthToken model structure
         # Actual token refresh would be tested via the CredentialsManager or OAuthClient
         # in integration tests
-        assert mock_oauth_token.access_token == "sk-test-token-123"
-        assert mock_oauth_token.refresh_token == "refresh-token-456"
+        assert mock_oauth_token.access_token.get_secret_value() == "sk-test-token-123"
+        assert mock_oauth_token.refresh_token.get_secret_value() == "refresh-token-456"
 
     async def test_token_refresh_failure(self) -> None:
         """Test token refresh failure."""
