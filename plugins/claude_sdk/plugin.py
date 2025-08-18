@@ -277,3 +277,86 @@ class Plugin(ProviderPlugin):
             ClaudeSDKSettings class for plugin configuration
         """
         return ClaudeSDKSettings
+
+    async def get_oauth_client(self) -> None:
+        """Claude SDK doesn't use OAuth, uses cookie-based auth instead.
+
+        Returns:
+            None - Claude SDK uses different authentication mechanism
+        """
+        return None
+
+    async def get_profile_info(self) -> dict[str, Any] | None:
+        """Get Claude SDK profile information from stored credentials.
+
+        Returns:
+            Dictionary containing Claude SDK profile information
+        """
+        try:
+            # Claude SDK uses credentials manager directly from services
+            if not self._services:
+                return None
+
+            # Get credentials manager from services
+            from ccproxy.services.credentials import CredentialsManager
+
+            settings = self._services.settings
+            credentials_manager = CredentialsManager(config=settings.auth)
+
+            # Get profile using credentials manager
+            profile = await credentials_manager.get_account_profile()
+            if not profile:
+                # Try to validate and get credentials info
+                validation = await credentials_manager.validate()
+                if validation.valid and validation.credentials:
+                    # Build profile info from credentials
+                    oauth = validation.credentials.claude_ai_oauth
+                    profile_info = {
+                        "provider": "claude-sdk",
+                        "subscription_type": oauth.subscription_type,
+                        "authenticated": True,
+                    }
+
+                    if oauth.scopes:
+                        profile_info["scopes"] = oauth.scopes
+
+                    if oauth.expires_at:
+                        profile_info["expires_at"] = oauth.expires_at.isoformat()
+
+                    return profile_info
+
+            if profile:
+                profile_info = {"provider": "claude-sdk"}
+
+                if profile.organization:
+                    profile_info.update(
+                        {
+                            "organization_name": profile.organization.name,
+                            "organization_type": profile.organization.organization_type,
+                        }
+                    )
+
+                if profile.account:
+                    profile_info.update(
+                        {
+                            "email": profile.account.email,
+                            "full_name": profile.account.full_name,
+                            "display_name": profile.account.display_name,
+                            "has_claude_pro": profile.account.has_claude_pro,
+                        }
+                    )
+
+                return profile_info
+
+        except Exception as e:
+            logger.debug(f"Failed to get Claude SDK profile info: {e}")
+
+        return None
+
+    def get_auth_commands(self) -> list[Any] | None:
+        """Get Claude SDK specific auth command extensions.
+
+        Returns:
+            None - Claude SDK auth is handled by main auth commands
+        """
+        return None

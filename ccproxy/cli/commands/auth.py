@@ -479,100 +479,156 @@ def status_command(
     )
     toolkit.print_line()
 
-    try:
-        # Handle Claude SDK
-        if provider == "claude-sdk":
-            manager = get_credentials_manager()
-            validation_result = asyncio.run(manager.validate())
+    async def get_plugin_profile_info(provider_name: str) -> dict[str, Any] | None:
+        """Get profile info using plugin's method."""
+        try:
+            plugin = await get_plugin_for_provider(provider_name)
+            
+            # Initialize plugin with minimal CoreServices
+            import aiohttp
+            import structlog
+            from ccproxy.core.services import CoreServices
 
-            if validation_result.valid and not validation_result.expired:
-                console.print("[green]✓[/green] Authenticated with valid credentials")
+            settings = get_settings()
 
-                if validation_result.credentials:
-                    oauth = validation_result.credentials.claude_ai_oauth
-                    console.print(
-                        f"  Subscription: {oauth.subscription_type or 'Unknown'}"
-                    )
-
-                    exp_dt = oauth.expires_at_datetime
-                    now = datetime.now(UTC)
-                    time_diff = exp_dt - now
-                    if time_diff.total_seconds() > 0:
-                        days = time_diff.days
-                        hours = time_diff.seconds // 3600
-                        console.print(
-                            f"  Expires: {exp_dt.strftime('%Y-%m-%d %H:%M')} ({days}d {hours}h remaining)"
-                        )
-                    else:
-                        console.print("  Expires: [red]Expired[/red]")
-
-                    if detailed and oauth.access_token:
-                        token_preview = (
-                            f"{oauth.access_token[:8]}...{oauth.access_token[-8:]}"
-                        )
-                        console.print(f"  Token: [dim]{token_preview}[/dim]")
-
-                # Try to get account profile
-                profile = asyncio.run(manager.get_account_profile())
-                if profile:
-                    console.print("\n[bold]Account Information[/bold]")
-                    if profile.account:
-                        console.print(f"  Email: {profile.account.email}")
-                    if profile.organization:
-                        console.print(f"  Organization: {profile.organization.name}")
-            elif validation_result.valid and validation_result.expired:
-                console.print("[yellow]⚠[/yellow] Credentials expired")
-                console.print("  Run 'ccproxy auth login' to refresh")
-            else:
-                console.print("[red]✗[/red] Not authenticated")
-                console.print("  Run 'ccproxy auth login' to authenticate")
-
-        # Handle Codex/OpenAI
-        elif provider == "codex":
-            from ccproxy.auth.openai import OpenAITokenManager
-
-            token_manager = OpenAITokenManager()
-            credentials = asyncio.run(token_manager.load_credentials())
-
-            if credentials and not credentials.is_expired():
-                console.print("[green]✓[/green] Authenticated with valid credentials")
-                console.print(f"  Account ID: {credentials.account_id}")
-
-                exp_dt = credentials.expires_at
-                now = datetime.now(UTC)
-                time_diff = exp_dt - now
-                if time_diff.total_seconds() > 0:
-                    days = time_diff.days
-                    hours = time_diff.seconds // 3600
-                    console.print(
-                        f"  Expires: {exp_dt.strftime('%Y-%m-%d %H:%M')} ({days}d {hours}h remaining)"
-                    )
-
-                if detailed and credentials.access_token:
-                    token_preview = f"{credentials.access_token[:12]}...{credentials.access_token[-8:]}"
-                    console.print(f"  Token: [dim]{token_preview}[/dim]")
-
-            elif credentials and credentials.is_expired():
-                console.print("[yellow]⚠[/yellow] Credentials expired")
-                console.print(
-                    f"  Expired: {credentials.expires_at.strftime('%Y-%m-%d %H:%M')}"
+            async with aiohttp.ClientSession() as session:
+                services = CoreServices(
+                    settings=settings,
+                    http_client=session,
+                    logger=structlog.get_logger(),
                 )
-                console.print("  Run 'ccproxy auth login codex' to refresh")
-            else:
-                console.print("[red]✗[/red] Not authenticated")
-                console.print("  Run 'ccproxy auth login codex' to authenticate")
+                await plugin.initialize(services)
+                
+                # Get profile info
+                return await plugin.get_profile_info()
+        except ValueError:
+            # Provider doesn't support OAuth or doesn't exist
+            return None
+        except Exception as e:
+            logger.debug(f"Failed to get profile info for {provider_name}: {e}")
+            return None
 
-        # Handle other OAuth providers
+    try:
+        # Try to get profile info from ANY plugin (OAuth or not)
+        async def get_any_plugin_profile() -> dict[str, Any] | None:
+            """Get profile info from any plugin, not just OAuth ones."""
+            try:
+                loader = PluginLoader()
+                plugins = await loader.discover_plugins()
+                
+                for plugin in plugins:
+                    if plugin.name == provider:
+                        # Initialize plugin with minimal CoreServices
+                        import aiohttp
+                        import structlog
+                        from ccproxy.core.services import CoreServices
+
+                        settings = get_settings()
+
+                        async with aiohttp.ClientSession() as session:
+                            services = CoreServices(
+                                settings=settings,
+                                http_client=session,
+                                logger=structlog.get_logger(),
+                            )
+                            await plugin.initialize(services)
+                            
+                            # Get profile info
+                            return await plugin.get_profile_info()
+                            
+                return None
+            except Exception as e:
+                logger.debug(f"Failed to get profile info for {provider}: {e}")
+                return None
+
+        # Get profile info from the plugin
+        profile_info = asyncio.run(get_any_plugin_profile())
+        
+        if profile_info:
+            console.print("[green]✓[/green] Authenticated with valid credentials")
+            
+            # Display profile information generically
+            console.print("\n[bold]Account Information[/bold]")
+            
+            # Define field display names
+            field_display_names = {
+                "email": "Email",
+                "organization_name": "Organization",
+                "organization_type": "Organization Type",
+                "subscription_type": "Subscription",
+                "plan_type": "Plan",
+                "user_id": "User ID",
+                "account_id": "Account ID",
+                "full_name": "Full Name",
+                "display_name": "Display Name",
+                "has_claude_pro": "Claude Pro",
+                "has_claude_max": "Claude Max",
+                "rate_limit_tier": "Rate Limit Tier",
+                "billing_type": "Billing Type",
+                "expires_at": "Expires At",
+                "scopes": "Scopes",
+                "email_verified": "Email Verified",
+                "subscription_start": "Subscription Start",
+                "subscription_until": "Subscription Until",
+                "organization_role": "Organization Role",
+                "organization_id": "Organization ID",
+            }
+            
+            # Display fields in a sensible order
+            priority_fields = ["email", "organization_name", "subscription_type", "plan_type", "expires_at"]
+            
+            # Show priority fields first
+            for field in priority_fields:
+                if field in profile_info:
+                    display_name = field_display_names.get(field, field.replace("_", " ").title())
+                    value = profile_info[field]
+                    
+                    # Format special values
+                    if field == "scopes" and isinstance(value, list):
+                        value = ", ".join(value)
+                    elif field == "user_id" and len(str(value)) > 20:
+                        value = f"{str(value)[:12]}..."
+                    elif isinstance(value, bool):
+                        value = "Yes" if value else "No"
+                        
+                    console.print(f"  {display_name}: {value}")
+            
+            # Show remaining fields
+            for field, value in profile_info.items():
+                if field not in priority_fields and field not in ["provider", "authenticated"]:
+                    display_name = field_display_names.get(field, field.replace("_", " ").title())
+                    
+                    # Format special values
+                    if field == "scopes" and isinstance(value, list):
+                        value = ", ".join(value)
+                    elif field == "user_id" and len(str(value)) > 20:
+                        value = f"{str(value)[:12]}..."
+                    elif isinstance(value, bool):
+                        value = "Yes" if value else "No"
+                        
+                    console.print(f"  {display_name}: {value}")
+                    
+            # For detailed mode, try to show token preview if available
+            if detailed:
+                # Special handling for different providers
+                if provider == "claude-sdk":
+                    manager = get_credentials_manager()
+                    validation_result = asyncio.run(manager.validate())
+                    if validation_result.valid and validation_result.credentials:
+                        oauth = validation_result.credentials.claude_ai_oauth
+                        if oauth.access_token:
+                            token_preview = f"{oauth.access_token[:8]}...{oauth.access_token[-8:]}"
+                            console.print(f"\n  Token: [dim]{token_preview}[/dim]")
+                elif provider == "codex":
+                    from ccproxy.auth.openai import OpenAITokenManager
+                    token_manager = OpenAITokenManager()
+                    credentials = asyncio.run(token_manager.load_credentials())
+                    if credentials and credentials.access_token:
+                        token_preview = f"{credentials.access_token[:12]}...{credentials.access_token[-8:]}"
+                        console.print(f"\n  Token: [dim]{token_preview}[/dim]")
         else:
-            providers = asyncio.run(discover_oauth_providers())
-            if provider not in providers:
-                available = ", ".join(providers.keys()) if providers else "none"
-                console.print(f"[red]✗[/red] Unknown provider '{provider}'")
-                console.print(f"  Available: {available}")
-                raise typer.Exit(1)
-
-            # For now, just show provider is configured
-            console.print(f"[green]✓[/green] {provider} provider configured")
+            # No profile info means not authenticated or provider doesn't exist
+            console.print("[red]✗[/red] Not authenticated or provider not found")
             console.print(f"  Run 'ccproxy auth login {provider}' to authenticate")
 
     except Exception as e:
