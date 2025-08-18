@@ -14,6 +14,8 @@ from ccproxy.api.dependencies import (
     ObservabilityMetricsDep,
     SettingsDep,
 )
+
+# get_cached_settings is already imported above from ccproxy.api.dependencies
 from ccproxy.observability.storage.models import AccessLog
 
 
@@ -700,6 +702,7 @@ async def get_logs_analytics(
 @logs_router.get("/stream")
 async def stream_logs(
     request: Request,
+    settings: SettingsDep,
     model: str | None = Query(None, description="Filter by model name"),
     service_type: str | None = Query(
         None,
@@ -871,15 +874,30 @@ async def stream_logs(
             }
             yield f"data: {json.dumps(error_event)}\n\n"
 
+    # Prepare headers for streaming response
+    response_headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+    }
+
+    # Add secure CORS headers using proper configuration
+    from ccproxy.utils.cors import get_cors_headers, get_request_origin
+
+    request_headers = dict(request.headers)
+    request_origin = get_request_origin(request_headers)
+    cors_headers = get_cors_headers(settings.cors, request_origin, request_headers)
+    response_headers.update(cors_headers)
+
+    # For SSE, also need to explicitly allow Cache-Control header
+    if "Access-Control-Allow-Headers" in response_headers:
+        current_headers = response_headers["Access-Control-Allow-Headers"]
+        if "Cache-Control" not in current_headers:
+            response_headers["Access-Control-Allow-Headers"] += ", Cache-Control"
+
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control",
-        },
+        headers=response_headers,
     )
 
 

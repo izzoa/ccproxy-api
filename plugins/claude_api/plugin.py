@@ -198,7 +198,8 @@ class Plugin(ProviderPlugin):
                 summary["auth"] = "not_configured"
 
             return summary
-        except Exception:
+        except Exception as e:
+            logger.warning("claude_api_auth_status_error", error=str(e), exc_info=e)
             return {"auth": "status_error"}
 
     async def shutdown(self) -> None:

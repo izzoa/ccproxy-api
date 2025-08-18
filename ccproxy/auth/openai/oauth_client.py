@@ -15,8 +15,13 @@ import structlog
 import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
+from pydantic import ValidationError
 
-from ccproxy.auth.exceptions import OAuthError, OAuthTokenRefreshError
+from ccproxy.auth.exceptions import (
+    CredentialsStorageError,
+    OAuthError,
+    OAuthTokenRefreshError,
+)
 from ccproxy.core.async_task_manager import create_managed_task
 from plugins.codex.config import CodexSettings
 
@@ -138,6 +143,16 @@ class OpenAIOAuthClient:
             except httpx.HTTPError as e:
                 logger.error("token_exchange_http_error", error=str(e), exc_info=e)
                 raise OAuthTokenRefreshError(f"Token exchange HTTP error: {e}") from e
+            except json.JSONDecodeError as e:
+                logger.error(
+                    "token_exchange_json_decode_error", error=str(e), exc_info=e
+                )
+                raise OAuthTokenRefreshError(f"Invalid JSON response: {e}") from e
+            except ValidationError as e:
+                logger.error(
+                    "token_exchange_validation_error", error=str(e), exc_info=e
+                )
+                raise OAuthTokenRefreshError(f"Token validation failed: {e}") from e
             except Exception as e:
                 logger.error(
                     "token_exchange_unexpected_error", error=str(e), exc_info=e
@@ -261,9 +276,45 @@ class OpenAIOAuthClient:
                     </html>
                     """
                 )
+            except CredentialsStorageError as e:
+                logger.error("oauth_credentials_save_failed", error=str(e), exc_info=e)
+                self._auth_error = f"Failed to save credentials: {e}"
+                self._auth_complete.set()
+                return HTMLResponse(
+                    f"""
+                    <html>
+                    <head><title>Authentication Failed</title></head>
+                    <body>
+                        <h1>Authentication Failed</h1>
+                        <p>Failed to save credentials: {e}</p>
+                        <p>You can close this window and try again.</p>
+                        <script>setTimeout(() => window.close(), 3000);</script>
+                    </body>
+                    </html>
+                    """,
+                    status_code=500,
+                )
+            except ValidationError as e:
+                logger.error("oauth_validation_error", error=str(e), exc_info=e)
+                self._auth_error = f"Credential validation failed: {e}"
+                self._auth_complete.set()
+                return HTMLResponse(
+                    """
+                    <html>
+                    <head><title>Authentication Failed</title></head>
+                    <body>
+                        <h1>Authentication Failed</h1>
+                        <p>Credential validation failed</p>
+                        <p>You can close this window and try again.</p>
+                        <script>setTimeout(() => window.close(), 3000);</script>
+                    </body>
+                    </html>
+                    """,
+                    status_code=500,
+                )
             except Exception as e:
                 logger.error(
-                    "token_exchange_unexpected_error", error=str(e), exc_info=e
+                    "oauth_callback_unexpected_error", error=str(e), exc_info=e
                 )
                 self._auth_error = f"Token exchange failed: {e}"
                 self._auth_complete.set()

@@ -86,248 +86,15 @@ class SessionPool:
             session_exists=session_id in self.sessions,
         )
 
-        if not self.config.enabled:
-            logger.error("session_pool_disabled", session_id=session_id)
-            raise ClaudeProxyError(
-                message="Session pool is disabled",
-                error_type="configuration_error",
-                status_code=500,
-            )
+        # Validate pool is enabled
+        self._validate_pool_enabled(session_id)
 
-        # Check session limit and get/create session
+        # Get or create session with proper locking
         async with self._lock:
-            if (
-                session_id not in self.sessions
-                and len(self.sessions) >= self.config.max_sessions
-            ):
-                logger.error(
-                    "session_pool_at_capacity",
-                    session_id=session_id,
-                    current_sessions=len(self.sessions),
-                    max_sessions=self.config.max_sessions,
-                )
-                raise ServiceUnavailableError(
-                    f"Session pool at capacity: {self.config.max_sessions}"
-                )
-            options.continue_conversation = True
-            # Get existing session or create new one
-            if session_id in self.sessions:
-                session_client = self.sessions[session_id]
-                logger.debug(
-                    "session_pool_existing_session_found",
-                    session_id=session_id,
-                    client_id=session_client.client_id,
-                    session_status=session_client.status.value,
-                )
+            session_client = await self._get_or_create_session(session_id, options)
 
-                # Check if session is currently being interrupted
-                if session_client.status.value == "interrupting":
-                    logger.warning(
-                        "session_pool_interrupting_session",
-                        session_id=session_id,
-                        client_id=session_client.client_id,
-                        message="Session is currently being interrupted, waiting for completion then creating new session",
-                    )
-                    # Wait for the interrupt process to complete properly
-                    interrupt_completed = (
-                        await session_client.wait_for_interrupt_complete(timeout=5.0)
-                    )
-                    if interrupt_completed:
-                        logger.debug(
-                            "session_pool_interrupt_completed",
-                            session_id=session_id,
-                            client_id=session_client.client_id,
-                            message="Interrupt completed successfully, proceeding with session replacement",
-                        )
-                    else:
-                        logger.warning(
-                            "session_pool_interrupt_timeout",
-                            session_id=session_id,
-                            client_id=session_client.client_id,
-                            message="Interrupt did not complete within 5 seconds, proceeding anyway",
-                        )
-                    # Don't try to reuse a session that was being interrupted
-                    await self._remove_session_unlocked(session_id)
-                    session_client = await self._create_session_unlocked(
-                        session_id, options
-                    )
-                # Check if session has an active stream that needs cleanup
-                elif (
-                    session_client.has_active_stream
-                    or session_client.active_stream_handle
-                ):
-                    logger.debug(
-                        "session_pool_active_stream_detected",
-                        session_id=session_id,
-                        client_id=session_client.client_id,
-                        has_stream=session_client.has_active_stream,
-                        has_handle=bool(session_client.active_stream_handle),
-                        idle_seconds=session_client.metrics.idle_seconds,
-                        message="Session has active stream/handle, checking if cleanup needed",
-                    )
-
-                    # Check timeout types based on proper message lifecycle timing
-                    # - No SystemMessage received within configured timeout (first chunk timeout) -> terminate session
-                    # - SystemMessage received but no activity for configured timeout (ongoing timeout) -> interrupt stream
-                    # - Never check for completed streams (ResultMessage received)
-                    handle = session_client.active_stream_handle
-                    if handle is not None:
-                        is_first_chunk_timeout = handle.is_first_chunk_timeout()
-                        is_ongoing_timeout = handle.is_ongoing_timeout()
-                    else:
-                        # Handle was cleared by another thread, no timeout checks needed
-                        is_first_chunk_timeout = False
-                        is_ongoing_timeout = False
-
-                    if session_client.active_stream_handle and (
-                        is_first_chunk_timeout or is_ongoing_timeout
-                    ):
-                        old_handle_id = session_client.active_stream_handle.handle_id
-
-                        if is_first_chunk_timeout:
-                            # First chunk timeout indicates connection issue - terminate session client
-                            logger.warning(
-                                "session_pool_first_chunk_timeout",
-                                session_id=session_id,
-                                old_handle_id=old_handle_id,
-                                idle_seconds=session_client.active_stream_handle.idle_seconds,
-                                message=f"No first chunk received within {self.config.stream_first_chunk_timeout} seconds, terminating session client",
-                            )
-
-                            # Remove the entire session - connection is likely broken
-                            await self._remove_session_unlocked(session_id)
-                            session_client = await self._create_session_unlocked(
-                                session_id, options
-                            )
-
-                        elif is_ongoing_timeout:
-                            # Ongoing timeout - interrupt the stream but keep session
-                            logger.info(
-                                "session_pool_interrupting_ongoing_timeout",
-                                session_id=session_id,
-                                old_handle_id=old_handle_id,
-                                idle_seconds=session_client.active_stream_handle.idle_seconds,
-                                has_first_chunk=session_client.active_stream_handle.has_first_chunk,
-                                is_completed=session_client.active_stream_handle.is_completed,
-                                message=f"Stream idle for {self.config.stream_ongoing_timeout}+ seconds, interrupting stream but keeping session",
-                            )
-
-                            try:
-                                # Interrupt the old stream handle to stop its worker
-                                interrupted = await session_client.active_stream_handle.interrupt()
-                                if interrupted:
-                                    logger.info(
-                                        "session_pool_interrupted_ongoing_timeout",
-                                        session_id=session_id,
-                                        old_handle_id=old_handle_id,
-                                        message="Successfully interrupted ongoing timeout stream",
-                                    )
-                                else:
-                                    logger.debug(
-                                        "session_pool_interrupt_ongoing_not_needed",
-                                        session_id=session_id,
-                                        old_handle_id=old_handle_id,
-                                        message="Ongoing timeout stream was already completed",
-                                    )
-                            except asyncio.CancelledError as e:
-                                logger.warning(
-                                    "session_pool_interrupt_ongoing_cancelled",
-                                    session_id=session_id,
-                                    old_handle_id=old_handle_id,
-                                    error=str(e),
-                                    exc_info=e,
-                                    message="Interrupt cancelled during ongoing timeout stream cleanup",
-                                )
-                            except TimeoutError as e:
-                                logger.warning(
-                                    "session_pool_interrupt_ongoing_timeout",
-                                    session_id=session_id,
-                                    old_handle_id=old_handle_id,
-                                    error=str(e),
-                                    exc_info=e,
-                                    message="Interrupt timed out during ongoing timeout stream cleanup",
-                                )
-                            except Exception as e:
-                                logger.warning(
-                                    "session_pool_interrupt_ongoing_failed",
-                                    session_id=session_id,
-                                    old_handle_id=old_handle_id,
-                                    error=str(e),
-                                    exc_info=e,
-                                    message="Failed to interrupt ongoing timeout stream, clearing anyway",
-                                )
-                            finally:
-                                # Always clear the handle after interrupt attempt
-                                session_client.active_stream_handle = None
-                                session_client.has_active_stream = False
-                    elif session_client.active_stream_handle and not (
-                        is_first_chunk_timeout or is_ongoing_timeout
-                    ):
-                        # Stream is recent, likely from a previous request that just finished
-                        # Just clear the handle without interrupting to allow immediate reuse
-                        logger.debug(
-                            "session_pool_clearing_recent_stream",
-                            session_id=session_id,
-                            old_handle_id=session_client.active_stream_handle.handle_id,
-                            idle_seconds=session_client.active_stream_handle.idle_seconds,
-                            has_first_chunk=session_client.active_stream_handle.has_first_chunk,
-                            is_completed=session_client.active_stream_handle.is_completed,
-                            message="Clearing recent stream handle for immediate reuse",
-                        )
-                        session_client.active_stream_handle = None
-                        session_client.has_active_stream = False
-                    else:
-                        # No handle but has_active_stream flag is set, just clear the flag
-                        session_client.has_active_stream = False
-
-                    logger.debug(
-                        "session_pool_stream_cleared",
-                        session_id=session_id,
-                        client_id=session_client.client_id,
-                        was_interrupted=(is_first_chunk_timeout or is_ongoing_timeout),
-                        was_recent=not (is_first_chunk_timeout or is_ongoing_timeout),
-                        was_first_chunk_timeout=is_first_chunk_timeout,
-                        was_ongoing_timeout=is_ongoing_timeout,
-                        message="Stream state cleared, session ready for reuse",
-                    )
-                # Check if session is still valid
-                elif session_client.is_expired():
-                    logger.debug("session_expired", session_id=session_id)
-                    await self._remove_session_unlocked(session_id)
-                    session_client = await self._create_session_unlocked(
-                        session_id, options
-                    )
-                elif (
-                    not await session_client.is_healthy()
-                    and self.config.connection_recovery
-                ):
-                    logger.debug("session_unhealthy_recovering", session_id=session_id)
-                    await session_client.connect()
-                    # Mark session as reused since we're recovering an existing session
-                    session_client.mark_as_reused()
-                else:
-                    logger.debug(
-                        "session_pool_reusing_healthy_session",
-                        session_id=session_id,
-                        client_id=session_client.client_id,
-                    )
-                    # Mark session as reused
-                    session_client.mark_as_reused()
-            else:
-                logger.debug("session_pool_creating_new_session", session_id=session_id)
-                session_client = await self._create_session_unlocked(
-                    session_id, options
-                )
-
-            # Ensure session is connected before returning (inside lock to prevent race conditions)
-            if not await session_client.ensure_connected():
-                logger.error(
-                    "session_pool_connection_failed",
-                    session_id=session_id,
-                )
-                raise ServiceUnavailableError(
-                    f"Failed to establish session connection: {session_id}"
-                )
+            # Ensure connected before returning
+            await self._ensure_session_connected(session_client, session_id)
 
         logger.debug(
             "session_pool_get_client_complete",
@@ -338,6 +105,311 @@ class SessionPool:
             session_message_count=session_client.metrics.message_count,
         )
         return session_client
+
+    def _validate_pool_enabled(self, session_id: str) -> None:
+        """Validate that the session pool is enabled."""
+        if not self.config.enabled:
+            logger.error("session_pool_disabled", session_id=session_id)
+            raise ClaudeProxyError(
+                message="Session pool is disabled",
+                error_type="configuration_error",
+                status_code=500,
+            )
+
+    async def _get_or_create_session(
+        self, session_id: str, options: ClaudeCodeOptions
+    ) -> SessionClient:
+        """Get existing session or create new one (requires lock)."""
+        # Check capacity limits for new sessions
+        if (
+            session_id not in self.sessions
+            and len(self.sessions) >= self.config.max_sessions
+        ):
+            logger.error(
+                "session_pool_at_capacity",
+                session_id=session_id,
+                current_sessions=len(self.sessions),
+                max_sessions=self.config.max_sessions,
+            )
+            raise ServiceUnavailableError(
+                f"Session pool at capacity: {self.config.max_sessions}"
+            )
+
+        options.continue_conversation = True
+
+        # Route to existing or new session
+        if session_id in self.sessions:
+            return await self._handle_existing_session(session_id, options)
+        else:
+            logger.debug("session_pool_creating_new_session", session_id=session_id)
+            return await self._create_session_unlocked(session_id, options)
+
+    async def _handle_existing_session(
+        self, session_id: str, options: ClaudeCodeOptions
+    ) -> SessionClient:
+        """Handle an existing session based on its state (requires lock)."""
+        session_client = self.sessions[session_id]
+        logger.debug(
+            "session_pool_existing_session_found",
+            session_id=session_id,
+            client_id=session_client.client_id,
+            session_status=session_client.status.value,
+        )
+
+        # Handle interrupting sessions
+        if session_client.status.value == "interrupting":
+            return await self._handle_interrupting_session(
+                session_id, session_client, options
+            )
+
+        # Handle active streams
+        if session_client.has_active_stream or session_client.active_stream_handle:
+            return await self._handle_active_stream(session_id, session_client, options)
+
+        # Handle expired or unhealthy sessions
+        return await self._handle_expired_or_unhealthy(
+            session_id, session_client, options
+        )
+
+    async def _handle_interrupting_session(
+        self, session_id: str, session_client: SessionClient, options: ClaudeCodeOptions
+    ) -> SessionClient:
+        """Handle a session that is currently being interrupted (requires lock)."""
+        logger.warning(
+            "session_pool_interrupting_session",
+            session_id=session_id,
+            client_id=session_client.client_id,
+            message="Session is currently being interrupted, waiting for completion then creating new session",
+        )
+
+        # Wait for the interrupt process to complete
+        interrupt_completed = await session_client.wait_for_interrupt_complete(
+            timeout=5.0
+        )
+
+        if interrupt_completed:
+            logger.debug(
+                "session_pool_interrupt_completed",
+                session_id=session_id,
+                client_id=session_client.client_id,
+                message="Interrupt completed successfully, proceeding with session replacement",
+            )
+        else:
+            logger.warning(
+                "session_pool_interrupt_timeout",
+                session_id=session_id,
+                client_id=session_client.client_id,
+                message="Interrupt did not complete within 5 seconds, proceeding anyway",
+            )
+
+        # Don't try to reuse a session that was being interrupted
+        await self._remove_session_unlocked(session_id)
+        return await self._create_session_unlocked(session_id, options)
+
+    async def _handle_active_stream(
+        self, session_id: str, session_client: SessionClient, options: ClaudeCodeOptions
+    ) -> SessionClient:
+        """Handle a session with an active stream (requires lock)."""
+        logger.debug(
+            "session_pool_active_stream_detected",
+            session_id=session_id,
+            client_id=session_client.client_id,
+            has_stream=session_client.has_active_stream,
+            has_handle=bool(session_client.active_stream_handle),
+            idle_seconds=session_client.metrics.idle_seconds,
+            message="Session has active stream/handle, checking if cleanup needed",
+        )
+
+        # Check for stream timeouts
+        is_first_chunk_timeout, is_ongoing_timeout = self._check_stream_timeouts(
+            session_client
+        )
+
+        if session_client.active_stream_handle and (
+            is_first_chunk_timeout or is_ongoing_timeout
+        ):
+            if is_first_chunk_timeout:
+                return await self._handle_first_chunk_timeout(
+                    session_id, session_client, options
+                )
+            elif is_ongoing_timeout:
+                await self._handle_ongoing_timeout(session_id, session_client)
+                # Session continues after stream interrupt
+        elif session_client.active_stream_handle:
+            # Stream is recent, clear without interrupting
+            self._clear_recent_stream(session_id, session_client)
+        else:
+            # No handle but flag is set, just clear the flag
+            session_client.has_active_stream = False
+
+        logger.debug(
+            "session_pool_stream_cleared",
+            session_id=session_id,
+            client_id=session_client.client_id,
+            was_interrupted=(is_first_chunk_timeout or is_ongoing_timeout),
+            was_recent=not (is_first_chunk_timeout or is_ongoing_timeout),
+            was_first_chunk_timeout=is_first_chunk_timeout,
+            was_ongoing_timeout=is_ongoing_timeout,
+            message="Stream state cleared, session ready for reuse",
+        )
+
+        # After clearing stream, continue with normal session handling
+        return await self._handle_expired_or_unhealthy(
+            session_id, session_client, options
+        )
+
+    def _check_stream_timeouts(
+        self, session_client: SessionClient
+    ) -> tuple[bool, bool]:
+        """Check for stream timeout conditions."""
+        handle = session_client.active_stream_handle
+        if handle is not None:
+            is_first_chunk_timeout = handle.is_first_chunk_timeout()
+            is_ongoing_timeout = handle.is_ongoing_timeout()
+        else:
+            # Handle was cleared by another thread
+            is_first_chunk_timeout = False
+            is_ongoing_timeout = False
+
+        return is_first_chunk_timeout, is_ongoing_timeout
+
+    async def _handle_first_chunk_timeout(
+        self, session_id: str, session_client: SessionClient, options: ClaudeCodeOptions
+    ) -> SessionClient:
+        """Handle first chunk timeout - terminate and recreate session (requires lock)."""
+        old_handle_id = session_client.active_stream_handle.handle_id
+
+        logger.warning(
+            "session_pool_first_chunk_timeout",
+            session_id=session_id,
+            old_handle_id=old_handle_id,
+            idle_seconds=session_client.active_stream_handle.idle_seconds,
+            message=f"No first chunk received within {self.config.stream_first_chunk_timeout} seconds, terminating session client",
+        )
+
+        # Remove the entire session - connection is likely broken
+        await self._remove_session_unlocked(session_id)
+        return await self._create_session_unlocked(session_id, options)
+
+    async def _handle_ongoing_timeout(
+        self, session_id: str, session_client: SessionClient
+    ) -> None:
+        """Handle ongoing stream timeout - interrupt stream but keep session (requires lock)."""
+        old_handle_id = session_client.active_stream_handle.handle_id
+
+        logger.info(
+            "session_pool_interrupting_ongoing_timeout",
+            session_id=session_id,
+            old_handle_id=old_handle_id,
+            idle_seconds=session_client.active_stream_handle.idle_seconds,
+            has_first_chunk=session_client.active_stream_handle.has_first_chunk,
+            is_completed=session_client.active_stream_handle.is_completed,
+            message=f"Stream idle for {self.config.stream_ongoing_timeout}+ seconds, interrupting stream but keeping session",
+        )
+
+        try:
+            # Interrupt the old stream handle
+            interrupted = await session_client.active_stream_handle.interrupt()
+            if interrupted:
+                logger.info(
+                    "session_pool_interrupted_ongoing_timeout",
+                    session_id=session_id,
+                    old_handle_id=old_handle_id,
+                    message="Successfully interrupted ongoing timeout stream",
+                )
+            else:
+                logger.debug(
+                    "session_pool_interrupt_ongoing_not_needed",
+                    session_id=session_id,
+                    old_handle_id=old_handle_id,
+                    message="Ongoing timeout stream was already completed",
+                )
+        except asyncio.CancelledError as e:
+            logger.warning(
+                "session_pool_interrupt_ongoing_cancelled",
+                session_id=session_id,
+                old_handle_id=old_handle_id,
+                error=str(e),
+                exc_info=e,
+                message="Interrupt cancelled during ongoing timeout stream cleanup",
+            )
+        except TimeoutError as e:
+            logger.warning(
+                "session_pool_interrupt_ongoing_timeout",
+                session_id=session_id,
+                old_handle_id=old_handle_id,
+                error=str(e),
+                exc_info=e,
+                message="Interrupt timed out during ongoing timeout stream cleanup",
+            )
+        except Exception as e:
+            logger.warning(
+                "session_pool_interrupt_ongoing_failed",
+                session_id=session_id,
+                old_handle_id=old_handle_id,
+                error=str(e),
+                exc_info=e,
+                message="Failed to interrupt ongoing timeout stream, clearing anyway",
+            )
+        finally:
+            # Always clear the handle after interrupt attempt
+            session_client.active_stream_handle = None
+            session_client.has_active_stream = False
+
+    def _clear_recent_stream(
+        self, session_id: str, session_client: SessionClient
+    ) -> None:
+        """Clear a recent stream handle without interrupting."""
+        logger.debug(
+            "session_pool_clearing_recent_stream",
+            session_id=session_id,
+            old_handle_id=session_client.active_stream_handle.handle_id,
+            idle_seconds=session_client.active_stream_handle.idle_seconds,
+            has_first_chunk=session_client.active_stream_handle.has_first_chunk,
+            is_completed=session_client.active_stream_handle.is_completed,
+            message="Clearing recent stream handle for immediate reuse",
+        )
+        session_client.active_stream_handle = None
+        session_client.has_active_stream = False
+
+    async def _handle_expired_or_unhealthy(
+        self, session_id: str, session_client: SessionClient, options: ClaudeCodeOptions
+    ) -> SessionClient:
+        """Handle expired or unhealthy sessions (requires lock)."""
+        # Check if session is expired
+        if session_client.is_expired():
+            logger.debug("session_expired", session_id=session_id)
+            await self._remove_session_unlocked(session_id)
+            return await self._create_session_unlocked(session_id, options)
+
+        # Check if session needs recovery
+        if not await session_client.is_healthy() and self.config.connection_recovery:
+            logger.debug("session_unhealthy_recovering", session_id=session_id)
+            await session_client.connect()
+            session_client.mark_as_reused()
+            return session_client
+
+        # Session is healthy and ready for reuse
+        logger.debug(
+            "session_pool_reusing_healthy_session",
+            session_id=session_id,
+            client_id=session_client.client_id,
+        )
+        session_client.mark_as_reused()
+        return session_client
+
+    async def _ensure_session_connected(
+        self, session_client: SessionClient, session_id: str
+    ) -> None:
+        """Ensure session is connected before returning (requires lock)."""
+        if not await session_client.ensure_connected():
+            logger.error(
+                "session_pool_connection_failed",
+                session_id=session_id,
+            )
+            raise ServiceUnavailableError(
+                f"Failed to establish session connection: {session_id}"
+            )
 
     async def _create_session(
         self, session_id: str, options: ClaudeCodeOptions

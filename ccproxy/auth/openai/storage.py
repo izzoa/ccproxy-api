@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import jwt
 import structlog
+from pydantic import ValidationError
 
 from ccproxy.auth.exceptions import CredentialsInvalidError, CredentialsStorageError
 
@@ -99,6 +100,14 @@ class OpenAITokenStorage:
                 exc_info=e,
             )
             raise CredentialsStorageError("Failed to access auth file") from e
+        except ValidationError as e:
+            logger.error(
+                "credentials_validation_error",
+                file_path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            raise CredentialsInvalidError("Invalid credentials format") from e
         except Exception as e:
             logger.error(
                 "credentials_load_unexpected_error",
@@ -119,6 +128,8 @@ class OpenAITokenStorage:
             logger.warning("jwt_decode_failed", error=str(e), exc_info=e)
         except KeyError as e:
             logger.warning("jwt_missing_exp_claim", error=str(e), exc_info=e)
+        except ValueError as e:
+            logger.warning("jwt_timestamp_parse_failed", error=str(e), exc_info=e)
         except Exception as e:
             logger.warning("jwt_decode_unexpected_error", error=str(e), exc_info=e)
         return None
@@ -200,6 +211,32 @@ class OpenAITokenStorage:
                 with contextlib.suppress(Exception):
                     temp_file.unlink()
             raise CredentialsStorageError("Failed to encode credentials") from e
+        except (TypeError, ValueError) as e:
+            logger.error(
+                "json_encode_failed",
+                file_path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            # Clean up temp file if it exists
+            temp_file = self.file_path.with_suffix(f"{self.file_path.suffix}.tmp")
+            if temp_file.exists():
+                with contextlib.suppress(Exception):
+                    temp_file.unlink()
+            raise CredentialsStorageError("Failed to encode credentials as JSON") from e
+        except ValidationError as e:
+            logger.error(
+                "credentials_validation_error",
+                file_path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            # Clean up temp file if it exists
+            temp_file = self.file_path.with_suffix(f"{self.file_path.suffix}.tmp")
+            if temp_file.exists():
+                with contextlib.suppress(Exception):
+                    temp_file.unlink()
+            raise CredentialsInvalidError("Invalid credentials data") from e
         except Exception as e:
             logger.error(
                 "credentials_save_unexpected_error",
@@ -228,7 +265,13 @@ class OpenAITokenStorage:
             return False
         except (OSError, PermissionError):
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug(
+                "unexpected_exists_error",
+                file_path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
             return False
 
     async def delete(self) -> bool:

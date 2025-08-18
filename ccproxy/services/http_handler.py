@@ -140,6 +140,12 @@ class PluginHTTPHandler:
                             error=str(e),
                             exc_info=e,
                         )
+                    except (TypeError, AttributeError) as e:
+                        self.logger.warning(
+                            "response_adaptation_type_error",
+                            error=str(e),
+                            exc_info=e,
+                        )
                     except Exception as e:
                         self.logger.warning(
                             "response_adaptation_unexpected_error",
@@ -168,7 +174,7 @@ class PluginHTTPHandler:
                             )
                             if transformed_headers:
                                 response_headers = transformed_headers
-                        except TypeError as e:
+                        except (TypeError, AttributeError) as e:
                             self.logger.warning(
                                 "response_header_transform_type_error",
                                 error=str(e),
@@ -196,6 +202,11 @@ class PluginHTTPHandler:
         except httpx.HTTPError as e:
             self.logger.error("http_error", url=url, error=str(e), exc_info=e)
             raise ProxyConnectionError(f"HTTP error: {e}") from e
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            self.logger.error(
+                "http_request_decode_error", url=url, error=str(e), exc_info=e
+            )
+            raise ProxyConnectionError(f"Decode error: {e}") from e
         except Exception as e:
             self.logger.error(
                 "http_request_unexpected_error", url=url, error=str(e), exc_info=e
@@ -256,6 +267,12 @@ class PluginHTTPHandler:
             except UnicodeDecodeError as e:
                 self.logger.warning(
                     "request_adaptation_unicode_decode_error",
+                    error=str(e),
+                    exc_info=e,
+                )
+            except (TypeError, AttributeError) as e:
+                self.logger.warning(
+                    "request_adaptation_type_error",
                     error=str(e),
                     exc_info=e,
                 )

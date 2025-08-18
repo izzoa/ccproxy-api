@@ -4,7 +4,13 @@ This module handles Claude SDK-specific response transformations,
 including headers and body modifications.
 """
 
+from typing import TYPE_CHECKING, Any
+
 import structlog
+
+
+if TYPE_CHECKING:
+    from ccproxy.config.cors import CORSSettings
 
 
 logger = structlog.get_logger(__name__)
@@ -14,21 +20,28 @@ class ClaudeSDKResponseTransformer:
     """Transform responses from Claude SDK operations.
 
     This transformer handles SDK-specific response modifications,
-    primarily for headers since body transformation is handled
-    by format adapters.
+    including CORS headers and SDK indicators.
     """
 
-    def __init__(self) -> None:
-        """Initialize the response transformer."""
-        self.logger = logger
+    def __init__(self, cors_settings: "CORSSettings | None" = None) -> None:
+        """Initialize the response transformer.
 
-    def transform_headers(self, headers: dict[str, str]) -> dict[str, str]:
+        Args:
+            cors_settings: CORS configuration settings
+        """
+        self.logger = logger
+        self.cors_settings = cors_settings
+
+    def transform_headers(
+        self, headers: dict[str, str], **kwargs: Any
+    ) -> dict[str, str]:
         """Transform response headers from Claude SDK.
 
-        Add SDK-specific headers to indicate the response came from SDK.
+        Add SDK-specific headers and secure CORS headers.
 
         Args:
             headers: Original response headers
+            **kwargs: Additional arguments including request_headers for CORS
 
         Returns:
             Transformed headers
@@ -45,6 +58,36 @@ class ClaudeSDKResponseTransformer:
         elif "application/json" not in transformed.get("content-type", ""):
             # Default to JSON if not set
             transformed["content-type"] = "application/json"
+
+        # Add secure CORS headers if settings are available
+        if self.cors_settings:
+            from ccproxy.utils.cors import get_cors_headers, get_request_origin
+
+            request_headers = kwargs.get("request_headers", {})
+            request_origin = get_request_origin(request_headers)
+            cors_headers = get_cors_headers(
+                self.cors_settings, request_origin, request_headers
+            )
+            transformed.update(cors_headers)
+        else:
+            # Fallback to secure defaults if no CORS settings available
+            self.logger.warning("cors_settings_not_available_using_fallback")
+            # Only add CORS headers if Origin header is present in request
+            request_headers = kwargs.get("request_headers", {})
+            from ccproxy.utils.cors import get_request_origin
+
+            request_origin = get_request_origin(request_headers)
+            # Use a secure default - localhost origins only
+            if request_origin and any(
+                origin in request_origin for origin in ["localhost", "127.0.0.1"]
+            ):
+                transformed["Access-Control-Allow-Origin"] = request_origin
+                transformed["Access-Control-Allow-Headers"] = (
+                    "Content-Type, Authorization, Accept, Origin, X-Requested-With"
+                )
+                transformed["Access-Control-Allow-Methods"] = (
+                    "GET, POST, PUT, DELETE, OPTIONS"
+                )
 
         self.logger.debug(
             "claude_sdk_response_headers_transformed",

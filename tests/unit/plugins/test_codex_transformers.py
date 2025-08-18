@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ccproxy.config.cors import CORSSettings
 from plugins.codex.transformers.request import CodexRequestTransformer
 from plugins.codex.transformers.response import CodexResponseTransformer
 
@@ -137,8 +138,8 @@ class TestCodexResponseTransformer:
         # Just ensure it initializes without error
         assert transformer is not None
 
-    def test_transform_headers_basic(self):
-        """Test basic header transformation."""
+    def test_transform_headers_basic_no_cors_settings(self):
+        """Test basic header transformation without CORS settings (secure fallback)."""
         transformer = CodexResponseTransformer()
         headers = {
             "content-type": "application/json",
@@ -151,9 +152,73 @@ class TestCodexResponseTransformer:
         assert "content-length" not in result
         assert result["content-type"] == "application/json"
         assert result["custom-header"] == "value"
-        assert result["Access-Control-Allow-Origin"] == "*"
-        assert result["Access-Control-Allow-Headers"] == "*"
-        assert result["Access-Control-Allow-Methods"] == "*"
+        # Without CORS settings and no Origin header, no CORS headers should be added
+        assert "Access-Control-Allow-Origin" not in result
+
+    def test_transform_headers_localhost_origin_fallback(self):
+        """Test header transformation with localhost origin uses secure fallback."""
+        transformer = CodexResponseTransformer()
+        headers = {"content-type": "application/json"}
+        request_headers = {"origin": "http://localhost:3000"}
+
+        result = transformer.transform_headers(headers, request_headers=request_headers)
+
+        assert result["content-type"] == "application/json"
+        # Secure fallback allows localhost origins
+        assert result["Access-Control-Allow-Origin"] == "http://localhost:3000"
+        assert (
+            "Content-Type, Authorization, Accept, Origin, X-Requested-With"
+            in result["Access-Control-Allow-Headers"]
+        )
+        assert (
+            "GET, POST, PUT, DELETE, OPTIONS" in result["Access-Control-Allow-Methods"]
+        )
+
+    def test_transform_headers_non_localhost_origin_fallback(self):
+        """Test header transformation with non-localhost origin uses secure fallback (blocks)."""
+        transformer = CodexResponseTransformer()
+        headers = {"content-type": "application/json"}
+        request_headers = {"origin": "https://evil.example.com"}
+
+        result = transformer.transform_headers(headers, request_headers=request_headers)
+
+        assert result["content-type"] == "application/json"
+        # Secure fallback blocks non-localhost origins
+        assert "Access-Control-Allow-Origin" not in result
+
+    def test_transform_headers_with_cors_settings(self):
+        """Test header transformation with proper CORS settings."""
+        cors_settings = CORSSettings(
+            origins=["https://app.example.com", "https://test.example.com"],
+            methods=["GET", "POST"],
+            headers=["Content-Type", "Authorization"],
+        )
+        transformer = CodexResponseTransformer(cors_settings)
+        headers = {"content-type": "application/json"}
+        request_headers = {"origin": "https://app.example.com"}
+
+        result = transformer.transform_headers(headers, request_headers=request_headers)
+
+        assert result["content-type"] == "application/json"
+        # CORS settings properly applied
+        assert result["Access-Control-Allow-Origin"] == "https://app.example.com"
+        assert result["Access-Control-Allow-Methods"] == "GET, POST"
+        assert result["Access-Control-Allow-Headers"] == "Content-Type, Authorization"
+
+    def test_transform_headers_with_cors_settings_blocked_origin(self):
+        """Test header transformation with CORS settings blocks unauthorized origin."""
+        cors_settings = CORSSettings(
+            origins=["https://app.example.com"], methods=["GET", "POST"]
+        )
+        transformer = CodexResponseTransformer(cors_settings)
+        headers = {"content-type": "application/json"}
+        request_headers = {"origin": "https://evil.example.com"}
+
+        result = transformer.transform_headers(headers, request_headers=request_headers)
+
+        assert result["content-type"] == "application/json"
+        # Origin not in allowed list, so no CORS headers
+        assert "Access-Control-Allow-Origin" not in result
 
     def test_transform_headers_excludes_problematic(self):
         """Test that problematic headers are excluded."""

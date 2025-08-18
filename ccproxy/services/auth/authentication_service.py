@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+import httpx
 import structlog
 from fastapi import HTTPException
 
@@ -88,6 +89,14 @@ class AuthenticationService:
                     message=f"Authentication error: {str(e)}",
                 )
             ) from e
+        except (ValueError, TypeError) as e:
+            logger.error("access_token_validation_error", error=str(e), exc_info=e)
+            raise self._create_auth_error_response(
+                CredentialValidation(
+                    status=CredentialStatus.INVALID,
+                    message=f"Authentication error: {str(e)}",
+                )
+            ) from e
         except Exception as e:
             logger.error("access_token_unexpected_error", error=str(e), exc_info=e)
             raise self._create_auth_error_response(
@@ -129,8 +138,15 @@ class AuthenticationService:
             return CredentialValidation(
                 status=CredentialStatus.INVALID, message="Invalid credentials"
             )
+        except (ValueError, TypeError) as e:
+            logger.debug("credential_validation_value_error", error=str(e), exc_info=e)
+            return CredentialValidation(
+                status=CredentialStatus.INVALID, message="Invalid credentials"
+            )
         except Exception as e:
-            logger.debug("credential_validation_unexpected_error", error=str(e))
+            logger.debug(
+                "credential_validation_unexpected_error", error=str(e), exc_info=e
+            )
             return CredentialValidation(
                 status=CredentialStatus.INVALID, message="Invalid credentials"
             )
@@ -164,6 +180,9 @@ class AuthenticationService:
         except (CredentialsNotFoundError, CredentialsExpiredError) as e:
             logger.debug("token_refresh_credential_error", error=str(e))
             return False
+        except (httpx.HTTPError, httpx.TimeoutException) as e:
+            logger.error("token_refresh_http_error", error=str(e), exc_info=e)
+            return False
         except Exception as e:
             logger.error("token_refresh_unexpected_error", error=str(e), exc_info=e)
             return False
@@ -174,8 +193,11 @@ class AuthenticationService:
             return await self.credentials_manager.get_valid_credentials()
         except (CredentialsNotFoundError, CredentialsExpiredError):
             return None
+        except (ValueError, TypeError) as e:
+            logger.debug("get_credentials_value_error", error=str(e), exc_info=e)
+            return None
         except Exception as e:
-            logger.debug("get_credentials_unexpected_error", error=str(e))
+            logger.debug("get_credentials_unexpected_error", error=str(e), exc_info=e)
             return None
 
     def _create_auth_error_response(

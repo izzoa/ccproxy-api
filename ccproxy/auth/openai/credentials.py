@@ -1,11 +1,12 @@
 """OpenAI credentials management for Codex authentication."""
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
 import jwt
 import structlog
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ccproxy.auth.exceptions import (
     AuthenticationError,
@@ -133,6 +134,12 @@ class OpenAITokenManager:
         except (CredentialsStorageError, CredentialsInvalidError) as e:
             logger.error("credentials_load_failed", error=str(e), exc_info=e)
             return None
+        except json.JSONDecodeError as e:
+            logger.error("credentials_json_decode_error", error=str(e), exc_info=e)
+            return None
+        except ValidationError as e:
+            logger.error("credentials_validation_error", error=str(e), exc_info=e)
+            return None
         except Exception as e:
             logger.error("unexpected_load_error", error=str(e), exc_info=e)
             return None
@@ -147,6 +154,12 @@ class OpenAITokenManager:
         except CredentialsStorageError as e:
             logger.error("credentials_save_failed", error=str(e), exc_info=e)
             return False
+        except json.JSONDecodeError as e:
+            logger.error("credentials_json_encode_error", error=str(e), exc_info=e)
+            return False
+        except ValidationError as e:
+            logger.error("credentials_validation_error", error=str(e), exc_info=e)
+            return False
         except Exception as e:
             logger.error("unexpected_save_error", error=str(e), exc_info=e)
             return False
@@ -160,6 +173,9 @@ class OpenAITokenManager:
             return False
         except CredentialsStorageError as e:
             logger.error("credentials_delete_failed", error=str(e), exc_info=e)
+            return False
+        except ValidationError as e:
+            logger.error("credentials_validation_error", error=str(e), exc_info=e)
             return False
         except Exception as e:
             logger.error("unexpected_delete_error", error=str(e), exc_info=e)
@@ -176,7 +192,8 @@ class OpenAITokenManager:
             CredentialsInvalidError,
         ):
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug("unexpected_has_credentials_error", error=str(e), exc_info=e)
             return False
 
     async def get_valid_token(self) -> str | None:
@@ -251,7 +268,8 @@ class OpenAITokenManager:
             return bool(token)
         except (AuthenticationError, CredentialsStorageError, CredentialsInvalidError):
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug("unexpected_is_authenticated_error", error=str(e), exc_info=e)
             return False
 
     async def get_user_profile(self) -> UserProfile | None:
@@ -290,7 +308,10 @@ class OpenAITokenManager:
             return bool(token)
         except (AuthenticationError, CredentialsStorageError, CredentialsInvalidError):
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug(
+                "unexpected_validate_credentials_error", error=str(e), exc_info=e
+            )
             return False
 
     def get_provider_name(self) -> str:
@@ -403,6 +424,12 @@ class OpenAITokenManager:
         except (CredentialsStorageError, CredentialsInvalidError) as e:
             logger.debug("credentials_error", error=str(e), exc_info=e)
             status["auth_error"] = "Credentials error"
+        except json.JSONDecodeError as e:
+            logger.debug("auth_status_json_decode_error", error=str(e), exc_info=e)
+            status["auth_error"] = "Token decode failed"
+        except ValidationError as e:
+            logger.debug("auth_status_validation_error", error=str(e), exc_info=e)
+            status["auth_error"] = "Validation error"
         except Exception as e:
             logger.debug("unexpected_auth_status_error", error=str(e), exc_info=e)
             status["auth_error"] = str(e)

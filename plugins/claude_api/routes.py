@@ -1,14 +1,13 @@
 """Claude API plugin routes."""
 
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 from starlette.responses import Response
 
 from ccproxy.api.dependencies import (
-    ProxyServiceDep,
-    get_plugin_adapter,
-    get_plugin_detection_service,
+    ClaudeAPIAdapterDep,
+    ClaudeAPIDetectionDep,
 )
 from ccproxy.auth.conditional import ConditionalAuthDep
 from ccproxy.services.handler_config import HandlerConfig
@@ -17,18 +16,9 @@ from .transformers import ClaudeAPIRequestTransformer, ClaudeAPIResponseTransfor
 
 
 if TYPE_CHECKING:
-    from .adapter import ClaudeAPIAdapter
+    pass
 
 router = APIRouter(tags=["plugin-claude-api"])
-
-
-# Type aliases for dependency injection using centralized plugin dependencies
-ClaudeAPIAdapterDep = Annotated[
-    "ClaudeAPIAdapter", Depends(get_plugin_adapter("claude_api"))
-]
-ClaudeAPIDetectionDep = Annotated[
-    Any, Depends(get_plugin_detection_service("claude_api"))
-]
 
 
 def claude_api_path_transformer(path: str) -> str:
@@ -182,7 +172,6 @@ async def create_openai_chat_completion(
 @router.get("/v1/models", response_model=None)
 async def list_models(
     request: Request,
-    proxy_service: ProxyServiceDep,
     auth: ConditionalAuthDep,
 ) -> dict[str, Any]:
     """List available Claude models.

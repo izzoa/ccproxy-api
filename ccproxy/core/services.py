@@ -65,8 +65,21 @@ class CoreServices:
                     try:
                         validated_config = config_class(**raw_config)
                         return validated_config.model_dump()
+                    except (ValueError, TypeError) as e:
+                        self.logger.error(
+                            "config_validation_error",
+                            plugin_name=plugin_name,
+                            error=str(e),
+                            exc_info=e,
+                        )
+                        return {}
                     except Exception as e:
-                        self.logger.error(f"Invalid config for {plugin_name}: {e}")
+                        self.logger.error(
+                            "config_unexpected_error",
+                            plugin_name=plugin_name,
+                            error=str(e),
+                            exc_info=e,
+                        )
                         return {}
 
         # Default: look in plugins dictionary

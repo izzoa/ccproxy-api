@@ -110,6 +110,8 @@ class HTTPProxy(BaseProxy):
 
         except HTTPError as e:
             raise ProxyError(f"HTTP request failed: {e}") from e
+        except (ValueError, TypeError) as e:
+            raise ProxyError(f"Invalid request data: {e}") from e
         except Exception as e:
             raise ProxyError(f"Unexpected error during HTTP request: {e}") from e
 

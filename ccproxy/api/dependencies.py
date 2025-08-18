@@ -13,7 +13,6 @@ from ccproxy.core.http import BaseProxyClient
 from ccproxy.core.http_client import get_shared_http_client
 from ccproxy.observability import PrometheusMetrics, get_metrics
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
-from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.proxy_service import ProxyService
 
@@ -47,11 +46,9 @@ def get_cached_settings(request: Request) -> Settings:
     return settings
 
 
-# Type aliases for dependency injection
-SettingsDep = Annotated[Settings, Depends(get_cached_settings)]
-
-
-async def get_http_client(settings: SettingsDep) -> httpx.AsyncClient:
+async def get_http_client(
+    settings: Annotated[Settings, Depends(get_cached_settings)],
+) -> httpx.AsyncClient:
     """Get shared HTTP client instance.
 
     Args:
@@ -65,7 +62,7 @@ async def get_http_client(settings: SettingsDep) -> httpx.AsyncClient:
 
 
 def get_credentials_manager(
-    settings: SettingsDep,
+    settings: Annotated[Settings, Depends(get_cached_settings)],
 ) -> CredentialsManager:
     """Get credentials manager instance.
 
@@ -81,7 +78,7 @@ def get_credentials_manager(
 
 def get_proxy_service(
     request: Request,
-    settings: SettingsDep,
+    settings: Annotated[Settings, Depends(get_cached_settings)],
     credentials_manager: Annotated[
         CredentialsManager, Depends(get_credentials_manager)
     ],
@@ -165,74 +162,125 @@ async def get_duckdb_storage(request: Request) -> SimpleDuckDBStorage | None:
 
 
 # Plugin adapter dependencies
-def get_plugin_adapter(plugin_name: str) -> Any:
-    """Create a dependency function for getting a specific plugin adapter.
+def get_claude_api_adapter(proxy_service: ProxyService) -> Any:
+    """Get Claude API adapter instance.
 
     Args:
-        plugin_name: Name of the plugin
+        proxy_service: Proxy service dependency
 
     Returns:
-        Dependency function that returns the plugin adapter
+        Claude API adapter instance
+
+    Raises:
+        HTTPException: If plugin is not initialized
     """
+    from fastapi import HTTPException
 
-    def _get_adapter(proxy_service: ProxyServiceDep) -> BaseAdapter:
-        """Get plugin adapter instance.
-
-        Args:
-            proxy_service: Proxy service dependency
-
-        Returns:
-            Plugin adapter instance
-
-        Raises:
-            HTTPException: If plugin is not initialized
-        """
-        from fastapi import HTTPException
-
-        if not proxy_service.plugin_manager:
-            raise HTTPException(
-                status_code=503, detail="Plugin manager not initialized"
-            )
-        adapter = proxy_service.plugin_manager.get_plugin_adapter(plugin_name)
-        if not adapter:
-            raise HTTPException(
-                status_code=503, detail=f"{plugin_name} plugin not initialized"
-            )
-        return adapter
-
-    return _get_adapter
+    if not proxy_service.plugin_manager:
+        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
+    adapter = proxy_service.plugin_manager.get_plugin_adapter("claude_api")
+    if not adapter:
+        raise HTTPException(status_code=503, detail="Claude API plugin not initialized")
+    return adapter
 
 
-def get_plugin_detection_service(plugin_name: str) -> Any:
-    """Create a dependency function for getting a plugin's detection service.
+def get_claude_api_detection_service(proxy_service: ProxyService) -> Any | None:
+    """Get Claude API detection service.
 
     Args:
-        plugin_name: Name of the plugin
+        proxy_service: Proxy service dependency
 
     Returns:
-        Dependency function that returns the detection service
+        Claude API detection service if available, None otherwise
     """
-
-    def _get_detection_service(proxy_service: ProxyServiceDep) -> Any | None:
-        """Get plugin detection service.
-
-        Args:
-            proxy_service: Proxy service dependency
-
-        Returns:
-            Plugin detection service if available, None otherwise
-        """
-        if not proxy_service.plugin_manager:
-            return None
-        plugin = proxy_service.plugin_manager.plugin_registry.get_plugin(plugin_name)
-        if plugin and hasattr(plugin, "_detection_service"):
-            return plugin._detection_service
+    if not proxy_service.plugin_manager:
         return None
+    plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("claude_api")
+    if plugin and hasattr(plugin, "_detection_service"):
+        return plugin._detection_service
+    return None
 
-    return _get_detection_service
+
+def get_claude_sdk_adapter(proxy_service: ProxyService) -> Any:
+    """Get Claude SDK adapter instance.
+
+    Args:
+        proxy_service: Proxy service dependency
+
+    Returns:
+        Claude SDK adapter instance
+
+    Raises:
+        HTTPException: If plugin is not initialized
+    """
+    from fastapi import HTTPException
+
+    if not proxy_service.plugin_manager:
+        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
+    adapter = proxy_service.plugin_manager.get_plugin_adapter("claude_sdk")
+    if not adapter:
+        raise HTTPException(status_code=503, detail="Claude SDK plugin not initialized")
+    return adapter
+
+
+def get_claude_sdk_detection_service(proxy_service: ProxyService) -> Any | None:
+    """Get Claude SDK detection service.
+
+    Args:
+        proxy_service: Proxy service dependency
+
+    Returns:
+        Claude SDK detection service if available, None otherwise
+    """
+    if not proxy_service.plugin_manager:
+        return None
+    plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("claude_sdk")
+    if plugin and hasattr(plugin, "_detection_service"):
+        return plugin._detection_service
+    return None
+
+
+def get_codex_adapter(proxy_service: ProxyService) -> Any:
+    """Get Codex adapter instance.
+
+    Args:
+        proxy_service: Proxy service dependency
+
+    Returns:
+        Codex adapter instance
+
+    Raises:
+        HTTPException: If plugin is not initialized
+    """
+    from fastapi import HTTPException
+
+    if not proxy_service.plugin_manager:
+        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
+    adapter = proxy_service.plugin_manager.get_plugin_adapter("codex")
+    if not adapter:
+        raise HTTPException(status_code=503, detail="Codex plugin not initialized")
+    return adapter
+
+
+def get_codex_detection_service(proxy_service: ProxyService) -> Any | None:
+    """Get Codex detection service.
+
+    Args:
+        proxy_service: Proxy service dependency
+
+    Returns:
+        Codex detection service if available, None otherwise
+    """
+    if not proxy_service.plugin_manager:
+        return None
+    plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("codex")
+    if plugin and hasattr(plugin, "_detection_service"):
+        return plugin._detection_service
+    return None
 
 
 # Type aliases for service dependencies
+SettingsDep = Annotated[Settings, Depends(get_cached_settings)]
 ProxyServiceDep = Annotated[ProxyService, Depends(get_proxy_service)]
 HTTPClientDep = Annotated[httpx.AsyncClient, Depends(get_http_client)]
 ObservabilityMetricsDep = Annotated[
@@ -240,3 +288,28 @@ ObservabilityMetricsDep = Annotated[
 ]
 LogStorageDep = Annotated[SimpleDuckDBStorage | None, Depends(get_log_storage)]
 DuckDBStorageDep = Annotated[SimpleDuckDBStorage | None, Depends(get_duckdb_storage)]
+
+# Type aliases for plugin dependencies
+ClaudeAPIAdapterDep = Annotated[
+    Any, Depends(lambda ps=Depends(get_proxy_service): get_claude_api_adapter(ps))
+]
+ClaudeAPIDetectionDep = Annotated[
+    Any | None,
+    Depends(lambda ps=Depends(get_proxy_service): get_claude_api_detection_service(ps)),
+]
+
+ClaudeSDKAdapterDep = Annotated[
+    Any, Depends(lambda ps=Depends(get_proxy_service): get_claude_sdk_adapter(ps))
+]
+ClaudeSDKDetectionDep = Annotated[
+    Any | None,
+    Depends(lambda ps=Depends(get_proxy_service): get_claude_sdk_detection_service(ps)),
+]
+
+CodexAdapterDep = Annotated[
+    Any, Depends(lambda ps=Depends(get_proxy_service): get_codex_adapter(ps))
+]
+CodexDetectionDep = Annotated[
+    Any | None,
+    Depends(lambda ps=Depends(get_proxy_service): get_codex_detection_service(ps)),
+]

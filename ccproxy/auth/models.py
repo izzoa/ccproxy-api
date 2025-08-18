@@ -2,29 +2,42 @@
 
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 class OAuthToken(BaseModel):
     """OAuth token information from Claude credentials."""
 
-    access_token: str = Field(..., alias="accessToken")
-    refresh_token: str = Field(..., alias="refreshToken")
+    access_token: SecretStr = Field(..., alias="accessToken")
+    refresh_token: SecretStr = Field(..., alias="refreshToken")
     expires_at: int | None = Field(None, alias="expiresAt")
     scopes: list[str] = Field(default_factory=list)
     subscription_type: str | None = Field(None, alias="subscriptionType")
     token_type: str = Field(default="Bearer", alias="tokenType")
 
+    @field_validator("access_token", "refresh_token", mode="before")
+    @classmethod
+    def validate_tokens(cls, v: str | SecretStr | None) -> SecretStr | None:
+        """Convert string values to SecretStr."""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return SecretStr(v)
+        return v
+
     def __repr__(self) -> str:
         """Safe string representation that masks sensitive tokens."""
+        access_token_str = self.access_token.get_secret_value()
+        refresh_token_str = self.refresh_token.get_secret_value()
+
         access_preview = (
-            f"{self.access_token[:8]}...{self.access_token[-8:]}"
-            if len(self.access_token) > 16
+            f"{access_token_str[:8]}...{access_token_str[-8:]}"
+            if len(access_token_str) > 16
             else "***"
         )
         refresh_preview = (
-            f"{self.refresh_token[:8]}...{self.refresh_token[-8:]}"
-            if len(self.refresh_token) > 16
+            f"{refresh_token_str[:8]}...{refresh_token_str[-8:]}"
+            if len(refresh_token_str) > 16
             else "***"
         )
 

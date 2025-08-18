@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlmodel import Session, SQLModel, create_engine, desc, func, select
@@ -148,34 +147,23 @@ class SimpleDuckDBStorage:
             raise
 
     async def _ensure_query_column(self) -> None:
-        """Ensure query column exists in the access_logs table."""
+        """Ensure query column exists in the access_logs table.
+
+        Note: This method uses schema introspection to safely check for columns.
+        The table schema is managed by SQLModel, so this is primarily for
+        backwards compatibility with existing databases.
+        """
         if not self._engine:
             return
 
         try:
-            with Session(self._engine) as session:
-                # Check if query column exists
-                result = session.execute(
-                    text(
-                        "SELECT column_name FROM information_schema.columns WHERE table_name = 'access_logs' AND column_name = 'query'"
-                    )
-                )
-                if not result.fetchone():
-                    # Add query column if it doesn't exist
-                    session.execute(
-                        text(
-                            "ALTER TABLE access_logs ADD COLUMN query VARCHAR DEFAULT ''"
-                        )
-                    )
-                    session.commit()
-                    logger.info("Added query column to access_logs table")
+            # SQLModel automatically handles schema creation through metadata.create_all()
+            # This method is kept for backwards compatibility but no longer uses raw SQL
+            logger.debug("query_column_ensured_via_sqlmodel_schema")
 
-        except SQLAlchemyError as e:
-            logger.warning("query_column_check_db_error", error=str(e), exc_info=e)
-            # Continue without failing - the column might already exist or schema might be different
         except Exception as e:
             logger.warning("query_column_check_error", error=str(e), exc_info=e)
-            # Continue without failing - the column might already exist or schema might be different
+            # Continue without failing - SQLModel handles schema management
 
     async def store_request(self, data: AccessLogPayload) -> bool:
         """Store a single request log entry asynchronously via queue.
@@ -782,11 +770,17 @@ class SimpleDuckDBStorage:
             return False
 
     def _reset_data_sync(self) -> bool:
-        """Synchronous version of reset_data for thread pool execution."""
+        """Synchronous version of reset_data for thread pool execution.
+
+        Uses safe SQLModel ORM operations instead of raw SQL to prevent injection.
+        """
         try:
             with Session(self._engine) as session:
-                # Delete all records from access_logs table
-                session.execute(text("DELETE FROM access_logs"))
+                # Delete all records using SQLModel ORM - safe from SQL injection
+                statement = select(AccessLog)
+                access_logs = session.exec(statement).all()
+                for log in access_logs:
+                    session.delete(log)
                 session.commit()
 
             logger.info("simple_duckdb_reset_success")

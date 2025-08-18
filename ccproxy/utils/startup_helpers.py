@@ -83,12 +83,26 @@ async def validate_claude_authentication_startup(
             message="No Claude authentication credentials found. Please run 'ccproxy auth login' to authenticate.",
             searched_paths=settings.auth.storage.storage_paths,
         )
+    except (ImportError, ModuleNotFoundError) as e:
+        logger.error(
+            "claude_token_validation_import_error",
+            error=str(e),
+            message="Failed to import Claude authentication modules. The server will continue without Claude authentication.",
+            exc_info=e,
+        )
+    except (OSError, FileNotFoundError, PermissionError) as e:
+        logger.error(
+            "claude_token_validation_file_error",
+            error=str(e),
+            message="Failed to access Claude authentication files. The server will continue without Claude authentication.",
+            exc_info=e,
+        )
     except Exception as e:
         logger.error(
-            "claude_token_validation_error",
+            "claude_token_validation_unexpected_error",
             error=str(e),
             message="Failed to validate Claude authentication token. The server will continue without Claude authentication.",
-            exc_info=True,
+            exc_info=e,
         )
 
 
@@ -128,9 +142,15 @@ async def check_version_updates_startup(app: FastAPI, settings: Settings) -> Non
         else:
             logger.debug("version_check_startup_failed")
 
+    except (ImportError, ModuleNotFoundError) as e:
+        logger.debug(
+            "version_check_startup_import_error",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
     except Exception as e:
         logger.debug(
-            "version_check_startup_error",
+            "version_check_startup_unexpected_error",
             error=str(e),
             error_type=type(e).__name__,
         )
@@ -172,8 +192,20 @@ async def initialize_log_storage_startup(app: FastAPI, settings: Settings) -> No
                 path=str(settings.observability.duckdb_path),
                 collection_enabled=settings.observability.logs_collection_enabled,
             )
+        except (ImportError, ModuleNotFoundError) as e:
+            logger.error(
+                "log_storage_initialization_import_error", error=str(e), exc_info=e
+            )
+            # Continue without log storage (graceful degradation)
+        except (OSError, FileNotFoundError, PermissionError) as e:
+            logger.error(
+                "log_storage_initialization_file_error", error=str(e), exc_info=e
+            )
+            # Continue without log storage (graceful degradation)
         except Exception as e:
-            logger.error("log_storage_initialization_failed", error=str(e))
+            logger.error(
+                "log_storage_initialization_unexpected_error", error=str(e), exc_info=e
+            )
             # Continue without log storage (graceful degradation)
 
 
@@ -187,8 +219,10 @@ async def initialize_log_storage_shutdown(app: FastAPI) -> None:
         try:
             await app.state.log_storage.close()
             logger.debug("log_storage_closed")
+        except (OSError, FileNotFoundError, PermissionError) as e:
+            logger.error("log_storage_close_file_error", error=str(e), exc_info=e)
         except Exception as e:
-            logger.error("log_storage_close_failed", error=str(e))
+            logger.error("log_storage_close_unexpected_error", error=str(e), exc_info=e)
 
 
 async def setup_scheduler_startup(app: FastAPI, settings: Settings) -> None:
@@ -219,11 +253,19 @@ async def setup_scheduler_startup(app: FastAPI, settings: Settings) -> None:
                     pool_manager=app.state.session_manager,
                 )
                 logger.debug("session_pool_stats_task_added", interval_seconds=60)
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.error(
-                    "session_pool_stats_task_add_failed",
+                    "session_pool_stats_task_add_import_error",
                     error=str(e),
                     error_type=type(e).__name__,
+                    exc_info=e,
+                )
+            except Exception as e:
+                logger.error(
+                    "session_pool_stats_task_add_unexpected_error",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    exc_info=e,
                 )
     except SchedulerError as e:
         logger.error("scheduler_initialization_failed", error=str(e))
@@ -254,8 +296,18 @@ async def setup_session_manager_shutdown(app: FastAPI) -> None:
         try:
             await app.state.session_manager.shutdown()
             logger.debug("claude_sdk_session_manager_shutdown")
+        except (ImportError, ModuleNotFoundError) as e:
+            logger.error(
+                "claude_sdk_session_manager_shutdown_import_error",
+                error=str(e),
+                exc_info=e,
+            )
         except Exception as e:
-            logger.error("claude_sdk_session_manager_shutdown_failed", error=str(e))
+            logger.error(
+                "claude_sdk_session_manager_shutdown_unexpected_error",
+                error=str(e),
+                exc_info=e,
+            )
 
 
 async def initialize_proxy_service_startup(app: FastAPI, settings: Settings) -> None:
@@ -294,8 +346,14 @@ async def initialize_proxy_service_startup(app: FastAPI, settings: Settings) -> 
         # Store in app state for reuse in dependencies
         app.state.proxy_service = proxy_service
         logger.debug("proxy_service_initialized")
+    except (ImportError, ModuleNotFoundError) as e:
+        logger.error(
+            "proxy_service_initialization_import_error", error=str(e), exc_info=e
+        )
     except Exception as e:
-        logger.error("proxy_service_initialization_failed", error=str(e))
+        logger.error(
+            "proxy_service_initialization_unexpected_error", error=str(e), exc_info=e
+        )
         # Continue startup even if ProxyService fails (graceful degradation)
 
 
@@ -339,5 +397,9 @@ async def flush_streaming_batches_shutdown(app: FastAPI) -> None:
 
         await flush_all_streaming_batches()
         logger.debug("streaming_batches_flushed")
+    except (ImportError, ModuleNotFoundError) as e:
+        logger.error("streaming_batches_flush_import_error", error=str(e), exc_info=e)
     except Exception as e:
-        logger.error("streaming_batches_flush_failed", error=str(e))
+        logger.error(
+            "streaming_batches_flush_unexpected_error", error=str(e), exc_info=e
+        )

@@ -212,9 +212,12 @@ class TestValidateAuthenticationStartup:
                 # Verify error was logged
                 mock_logger.error.assert_called_once()
                 call_args = mock_logger.error.call_args[1]
-                assert "claude_token_validation_error" in mock_logger.error.call_args[0]
+                assert (
+                    "claude_token_validation_unexpected_error"
+                    in mock_logger.error.call_args[0]
+                )
                 assert call_args["error"] == "Unexpected error"
-                assert call_args["exc_info"] is True
+                assert call_args["exc_info"] is not None
 
 
 class TestCheckClaudeCLIStartup:
@@ -234,62 +237,40 @@ class TestCheckClaudeCLIStartup:
         self, mock_app: FastAPI, mock_settings: Mock
     ) -> None:
         """Test successful Claude CLI detection."""
-        with patch("ccproxy.api.routes.health.get_claude_cli_info") as mock_get_info:
-            # Setup mock CLI info response
-            mock_info = Mock()
-            mock_info.status = "available"
-            mock_info.version = "1.2.3"
-            mock_info.binary_path = "/usr/local/bin/claude"
-            mock_get_info.return_value = mock_info
+        with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
+            await check_claude_cli_startup(mock_app, mock_settings)
 
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await check_claude_cli_startup(mock_app, mock_settings)
-
-                # Verify info log was called
-                mock_logger.info.assert_called_once()
-                call_args = mock_logger.info.call_args[1]
-                assert "claude_cli_available" in mock_logger.info.call_args[0]
-                assert call_args["status"] == "available"
-                assert call_args["version"] == "1.2.3"
-                assert call_args["binary_path"] == "/usr/local/bin/claude"
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.info.assert_not_called()
+            mock_logger.warning.assert_not_called()
+            mock_logger.error.assert_not_called()
 
     async def test_claude_cli_unavailable(
         self, mock_app: FastAPI, mock_settings: Mock
     ) -> None:
         """Test handling when Claude CLI is unavailable."""
-        with patch("ccproxy.api.routes.health.get_claude_cli_info") as mock_get_info:
-            # Setup mock CLI info response for unavailable
-            mock_info = Mock()
-            mock_info.status = "not_found"
-            mock_info.error = "Claude CLI not found in PATH"
-            mock_info.binary_path = None
-            mock_get_info.return_value = mock_info
+        with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
+            await check_claude_cli_startup(mock_app, mock_settings)
 
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await check_claude_cli_startup(mock_app, mock_settings)
-
-                # Verify warning log was called
-                mock_logger.warning.assert_called_once()
-                call_args = mock_logger.warning.call_args[1]
-                assert "claude_cli_unavailable" in mock_logger.warning.call_args[0]
-                assert call_args["status"] == "not_found"
-                assert call_args["error"] == "Claude CLI not found in PATH"
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.info.assert_not_called()
+            mock_logger.warning.assert_not_called()
+            mock_logger.error.assert_not_called()
 
     async def test_claude_cli_check_error(
         self, mock_app: FastAPI, mock_settings: Mock
     ) -> None:
         """Test handling of errors during Claude CLI check."""
-        with patch("ccproxy.api.routes.health.get_claude_cli_info") as mock_get_info:
-            mock_get_info.side_effect = Exception("CLI check failed")
+        with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
+            await check_claude_cli_startup(mock_app, mock_settings)
 
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await check_claude_cli_startup(mock_app, mock_settings)
-
-                # Verify error log was called
-                mock_logger.error.assert_called_once()
-                call_args = mock_logger.error.call_args[1]
-                assert "claude_cli_check_failed" in mock_logger.error.call_args[0]
-                assert call_args["error"] == "CLI check failed"
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.info.assert_not_called()
+            mock_logger.warning.assert_not_called()
+            mock_logger.error.assert_not_called()
 
 
 class TestLogStorageLifecycle:
@@ -367,10 +348,11 @@ class TestLogStorageLifecycle:
                 mock_logger.error.assert_called_once()
                 call_args = mock_logger.error.call_args[1]
                 assert (
-                    "log_storage_initialization_failed"
+                    "log_storage_initialization_unexpected_error"
                     in mock_logger.error.call_args[0]
                 )
                 assert call_args["error"] == "Storage init failed"
+                assert call_args["exc_info"] is not None
 
     async def test_log_storage_shutdown_success(self, mock_app: FastAPI) -> None:
         """Test successful log storage shutdown."""
@@ -411,8 +393,11 @@ class TestLogStorageLifecycle:
             # Verify error was logged
             mock_logger.error.assert_called_once()
             call_args = mock_logger.error.call_args[1]
-            assert "log_storage_close_failed" in mock_logger.error.call_args[0]
+            assert (
+                "log_storage_close_unexpected_error" in mock_logger.error.call_args[0]
+            )
             assert call_args["error"] == "Close failed"
+            assert call_args["exc_info"] is not None
 
 
 class TestSchedulerLifecycle:
@@ -579,10 +564,11 @@ class TestSessionManagerShutdown:
             mock_logger.error.assert_called_once()
             call_args = mock_logger.error.call_args[1]
             assert (
-                "claude_sdk_session_manager_shutdown_failed"
+                "claude_sdk_session_manager_shutdown_unexpected_error"
                 in mock_logger.error.call_args[0]
             )
             assert call_args["error"] == "Shutdown failed"
+            assert call_args["exc_info"] is not None
 
 
 class TestFlushStreamingBatchesShutdown:
@@ -623,9 +609,11 @@ class TestFlushStreamingBatchesShutdown:
                 mock_logger.error.assert_called_once()
                 call_args = mock_logger.error.call_args[1]
                 assert (
-                    "streaming_batches_flush_failed" in mock_logger.error.call_args[0]
+                    "streaming_batches_flush_unexpected_error"
+                    in mock_logger.error.call_args[0]
                 )
                 assert call_args["error"] == "Flush failed"
+                assert call_args["exc_info"] is not None
 
 
 class TestClaudeDetectionStartup:
@@ -680,21 +668,13 @@ class TestPermissionServiceLifecycle:
         self, mock_app: FastAPI, mock_settings_enabled: Mock
     ) -> None:
         """Test successful permission service initialization."""
-        with patch(
-            "ccproxy.api.services.permission_service.get_permission_service"
-        ) as mock_get_service:
-            mock_permission_service = AsyncMock()
-            mock_permission_service._timeout_seconds = 30
-            mock_get_service.return_value = mock_permission_service
+        with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
+            await initialize_permission_service_startup(mock_app, mock_settings_enabled)
 
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await initialize_permission_service_startup(
-                    mock_app, mock_settings_enabled
-                )
-
-                # Verify service was started and stored
-                mock_permission_service.start.assert_called_once()
-                assert mock_app.state.permission_service == mock_permission_service
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.debug.assert_not_called()
+            mock_logger.error.assert_not_called()
 
     async def test_permission_service_startup_disabled(
         self, mock_app: FastAPI, mock_settings_disabled: Mock
@@ -705,11 +685,10 @@ class TestPermissionServiceLifecycle:
                 mock_app, mock_settings_disabled
             )
 
-            # Verify debug log for skipped service
-            mock_logger.debug.assert_called_once()
-            call_args = mock_logger.debug.call_args[1]
-            assert "permission_service_skipped" in mock_logger.debug.call_args[0]
-            assert call_args["builtin_permissions_enabled"] is False
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.debug.assert_not_called()
+            mock_logger.error.assert_not_called()
 
     async def test_permission_service_shutdown_success(
         self, mock_app: FastAPI, mock_settings_enabled: Mock
@@ -721,11 +700,10 @@ class TestPermissionServiceLifecycle:
         with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
             await setup_permission_service_shutdown(mock_app, mock_settings_enabled)
 
-            # Verify service was stopped
-            mock_permission_service.stop.assert_called_once()
-
-            # Verify debug log was called
-            mock_logger.debug.assert_called_once_with("permission_service_stopped")
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
+            mock_logger.debug.assert_not_called()
+            mock_logger.error.assert_not_called()
 
     async def test_permission_service_shutdown_disabled(
         self, mock_app: FastAPI, mock_settings_disabled: Mock
@@ -736,6 +714,7 @@ class TestPermissionServiceLifecycle:
         with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
             await setup_permission_service_shutdown(mock_app, mock_settings_disabled)
 
-            # Verify no logs were called (early return due to disabled setting)
+            # The function now just passes (handled by plugin)
+            # Verify no logs were called
             mock_logger.debug.assert_not_called()
             mock_logger.error.assert_not_called()

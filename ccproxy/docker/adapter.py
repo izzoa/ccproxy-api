@@ -3,6 +3,7 @@
 import asyncio
 import os
 import shlex
+import subprocess
 from pathlib import Path
 from typing import cast
 
@@ -52,7 +53,14 @@ class DockerAdapter:
             )
         except (OSError, PermissionError):
             return False
-        except Exception:
+        except (
+            TimeoutError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as e:
+            logger.warning(
+                "docker_sudo_check_subprocess_error", error=str(e), exc_info=e
+            )
             return False
 
     async def is_available(self) -> bool:
@@ -88,8 +96,25 @@ class DockerAdapter:
                 "docker_availability_check_permission_error", error=str(e), exc_info=e
             )
             return False
+        except (
+            TimeoutError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as e:
+            logger.warning(
+                "docker_availability_check_subprocess_error",
+                command=cmd_str,
+                error=str(e),
+                exc_info=e,
+            )
+            return False
         except Exception as e:
-            logger.warning("docker_availability_check_error", error=str(e), exc_info=e)
+            logger.warning(
+                "docker_availability_check_unexpected_error",
+                command=cmd_str,
+                error=str(e),
+                exc_info=e,
+            )
             return False
 
     async def _run_with_sudo_fallback(
@@ -103,7 +128,7 @@ class DockerAdapter:
             logger.info("docker_permission_denied_using_sudo", error=str(e))
             sudo_cmd = ["sudo"] + docker_cmd
             return await run_command(sudo_cmd, middleware)
-        except Exception as e:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             # Check if this might be a permission error
             error_text = str(e).lower()
             if any(
@@ -114,10 +139,19 @@ class DockerAdapter:
                     "connect: permission denied",
                 ]
             ):
-                logger.info("docker_permission_denied_using_sudo")
+                logger.info("docker_permission_denied_using_sudo", error=str(e))
                 sudo_cmd = ["sudo"] + docker_cmd
                 return await run_command(sudo_cmd, middleware)
             # Re-raise if not a permission error
+            raise
+        except Exception as e:
+            # Fallback for other unexpected errors
+            logger.error(
+                "docker_sudo_fallback_unexpected_error",
+                cmd=" ".join(docker_cmd),
+                error=str(e),
+                exc_info=e,
+            )
             raise
 
     async def run_container(
@@ -201,9 +235,13 @@ class DockerAdapter:
                 "docker_container_run_permission_error", error=str(e), exc_info=e
             )
             raise error from e
-        except Exception as e:
+        except (
+            TimeoutError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as e:
             error = create_docker_error(
-                f"Failed to run Docker container: {e}",
+                f"Docker command failed: {e}",
                 cmd_str,
                 e,
                 {
@@ -212,7 +250,30 @@ class DockerAdapter:
                     "env_vars_count": len(environment),
                 },
             )
-            logger.error("docker_container_run_error", error=str(e), exc_info=e)
+            logger.error(
+                "docker_container_run_command_error",
+                cmd=cmd_str,
+                error=str(e),
+                exc_info=e,
+            )
+            raise error from e
+        except Exception as e:
+            error = create_docker_error(
+                f"Unexpected error running Docker container: {e}",
+                cmd_str,
+                e,
+                {
+                    "image": image,
+                    "volumes_count": len(volumes),
+                    "env_vars_count": len(environment),
+                },
+            )
+            logger.error(
+                "docker_container_run_unexpected_error",
+                cmd=cmd_str,
+                error=str(e),
+                exc_info=e,
+            )
             raise error from e
 
     async def run(
@@ -326,7 +387,14 @@ class DockerAdapter:
                 )
             except (OSError, PermissionError):
                 needs_sudo = True
-            except Exception:
+            except TimeoutError as e:
+                logger.debug("docker_sudo_check_timeout_error", error=str(e))
+                needs_sudo = False
+            except subprocess.TimeoutExpired as e:
+                logger.debug("docker_sudo_check_subprocess_timeout", error=str(e))
+                needs_sudo = False
+            except Exception as e:
+                logger.debug("docker_sudo_check_unexpected_error", error=str(e))
                 needs_sudo = False
 
             if needs_sudo:
@@ -348,6 +416,24 @@ class DockerAdapter:
             logger.error("docker_execvp_os_error", error=str(e))
             raise error from e
 
+        except PermissionError as e:
+            error = create_docker_error(
+                f"Docker executable permission/not found error: {e}",
+                cmd_str,
+                e,
+                {
+                    "image": image,
+                    "volumes_count": len(volumes),
+                    "env_vars_count": len(environment),
+                },
+            )
+            logger.error(
+                "docker_execvp_permission_file_error",
+                cmd=cmd_str,
+                error=str(e),
+                exc_info=e,
+            )
+            raise error from e
         except Exception as e:
             error = create_docker_error(
                 f"Unexpected error executing Docker container: {e}",
@@ -359,7 +445,9 @@ class DockerAdapter:
                     "env_vars_count": len(environment),
                 },
             )
-            logger.error("docker_execvp_unexpected_error", error=str(e), exc_info=e)
+            logger.error(
+                "docker_execvp_unexpected_error", cmd=cmd_str, error=str(e), exc_info=e
+            )
             raise error from e
 
     async def build_image(
@@ -457,6 +545,25 @@ class DockerAdapter:
                 exc_info=e,
             )
             raise error from e
+        except (
+            TimeoutError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as e:
+            error = create_docker_error(
+                f"Docker build command failed: {e}",
+                cmd_str,
+                e,
+                {"image": image_full_name, "dockerfile_dir": str(dockerfile_dir)},
+            )
+            logger.error(
+                "docker_build_command_error",
+                image=image_full_name,
+                cmd=cmd_str,
+                error=str(e),
+                exc_info=e,
+            )
+            raise error from e
         except Exception as e:
             error = create_docker_error(
                 f"Unexpected error building Docker image: {e}",
@@ -468,6 +575,7 @@ class DockerAdapter:
             logger.error(
                 "docker_build_unexpected_error",
                 image=image_full_name,
+                cmd=cmd_str,
                 error=str(e),
                 exc_info=e,
             )
@@ -537,10 +645,23 @@ class DockerAdapter:
                         "docker_image_check_permission_failed", image=image_full_name
                     )
                     return False
-                except Exception:
+                except (
+                    TimeoutError,
+                    subprocess.CalledProcessError,
+                    subprocess.TimeoutExpired,
+                ) as e:
+                    logger.debug(
+                        "docker_image_check_sudo_command_error",
+                        image=image_full_name,
+                        error=str(e),
+                    )
+                    return False
+                except Exception as e:
                     # Image doesn't exist even with sudo
                     logger.debug(
-                        "docker_image_does_not_exist_with_sudo", image=image_full_name
+                        "docker_image_does_not_exist_with_sudo",
+                        image=image_full_name,
+                        error=str(e),
                     )
                     return False
             else:
@@ -557,9 +678,26 @@ class DockerAdapter:
                 "docker_image_check_permission_error", error=str(e), exc_info=e
             )
             return False
+        except (
+            TimeoutError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as e:
+            logger.warning(
+                "docker_image_check_command_error",
+                image=image_full_name,
+                cmd=cmd_str,
+                error=str(e),
+                exc_info=e,
+            )
+            return False
         except Exception as e:
             logger.warning(
-                "docker_image_check_unexpected_error", error=str(e), exc_info=e
+                "docker_image_check_unexpected_error",
+                image=image_full_name,
+                cmd=cmd_str,
+                error=str(e),
+                exc_info=e,
             )
             return False
 
@@ -620,6 +758,25 @@ class DockerAdapter:
                 exc_info=e,
             )
             raise error from e
+        except (
+            TimeoutError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as e:
+            error = create_docker_error(
+                f"Docker pull command failed: {e}",
+                cmd_str,
+                e,
+                {"image": image_full_name},
+            )
+            logger.error(
+                "docker_pull_command_error",
+                image=image_full_name,
+                cmd=cmd_str,
+                error=str(e),
+                exc_info=e,
+            )
+            raise error from e
         except Exception as e:
             error = create_docker_error(
                 f"Unexpected error pulling Docker image: {e}",
@@ -631,6 +788,7 @@ class DockerAdapter:
             logger.error(
                 "docker_pull_unexpected_error",
                 image=image_full_name,
+                cmd=cmd_str,
                 error=str(e),
                 exc_info=e,
             )

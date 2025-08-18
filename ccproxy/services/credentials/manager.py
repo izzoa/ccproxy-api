@@ -129,6 +129,9 @@ class CredentialsManager(AuthManager):
         except PermissionError as e:
             logger.error("credentials_permission_error", error=str(e), exc_info=e)
             return None
+        except (ValueError, TypeError) as e:
+            logger.error("credentials_load_value_error", error=str(e), exc_info=e)
+            return None
         except Exception as e:
             logger.error("credentials_load_unexpected_error", error=str(e), exc_info=e)
             return None
@@ -149,6 +152,9 @@ class CredentialsManager(AuthManager):
             return False
         except OSError as e:
             logger.error("credentials_save_os_error", error=str(e), exc_info=e)
+            return False
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.error("credentials_save_encoding_error", error=str(e), exc_info=e)
             return False
         except Exception as e:
             logger.error("credentials_save_unexpected_error", error=str(e), exc_info=e)
@@ -172,7 +178,7 @@ class CredentialsManager(AuthManager):
         # Fetch and save user profile after successful login
         try:
             profile = await self._oauth_client.fetch_user_profile(
-                credentials.claude_ai_oauth.access_token
+                credentials.claude_ai_oauth.access_token.get_secret_value()
             )
             if profile:
                 # Save profile data
@@ -189,6 +195,11 @@ class CredentialsManager(AuthManager):
                 logger.debug(
                     "profile_fetch_skipped", context="login", reason="no_profile_data"
                 )
+        except httpx.TimeoutException as e:
+            logger.warning(
+                "profile_fetch_timeout", context="login", error=str(e), exc_info=e
+            )
+            # Continue with login even if profile fetch fails
         except httpx.HTTPError as e:
             logger.warning(
                 "profile_fetch_http_error", context="login", error=str(e), exc_info=e
@@ -285,7 +296,7 @@ class CredentialsManager(AuthManager):
             CredentialsExpiredError: If credentials expired and refresh fails
         """
         credentials = await self.get_valid_credentials()
-        return credentials.claude_ai_oauth.access_token
+        return credentials.claude_ai_oauth.access_token.get_secret_value()
 
     async def get_credentials(self) -> ClaudeCredentials:
         """Get valid credentials.
@@ -357,7 +368,7 @@ class CredentialsManager(AuthManager):
             if self._oauth_client is None:
                 raise RuntimeError("OAuth client not initialized")
             profile = await self._oauth_client.fetch_user_profile(
-                credentials.claude_ai_oauth.access_token,
+                credentials.claude_ai_oauth.access_token.get_secret_value(),
             )
             return profile
         except httpx.HTTPError as e:
@@ -621,7 +632,7 @@ class CredentialsManager(AuthManager):
 
         # Refresh the token
         token_response = await self._oauth_client.refresh_access_token(
-            oauth_token.refresh_token
+            oauth_token.refresh_token.get_secret_value()
         )
 
         # Calculate expires_at from expires_in if provided
@@ -658,7 +669,7 @@ class CredentialsManager(AuthManager):
         # Fetch user profile to update subscription type
         try:
             profile = await self._oauth_client.fetch_user_profile(
-                new_token.access_token
+                new_token.access_token.get_secret_value()
             )
             if profile:
                 # Save profile data
@@ -776,10 +787,9 @@ class CredentialsManager(AuthManager):
             if credentials.claude_ai_oauth:
                 token = credentials.claude_ai_oauth
                 status["token_available"] = True
+                token_str = token.access_token.get_secret_value()
                 status["token_preview"] = (
-                    f"{token.access_token[:12]}..."
-                    if len(token.access_token) > 12
-                    else "[SHORT]"
+                    f"{token_str[:12]}..." if len(token_str) > 12 else "[SHORT]"
                 )
 
                 # Check token expiration

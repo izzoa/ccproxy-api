@@ -1,8 +1,11 @@
 """Pricing updater for managing periodic refresh of pricing data."""
 
+import json
 from decimal import Decimal
 from typing import Any
 
+import httpx
+from pydantic import ValidationError
 from structlog import get_logger
 
 from ccproxy.config.pricing import PricingSettings
@@ -131,6 +134,21 @@ class PricingUpdater:
             logger.info("pricing_refresh_completed")
             return True
 
+        except httpx.TimeoutException as e:
+            logger.error("pricing_refresh_timeout", error=str(e), exc_info=e)
+            return False
+        except httpx.HTTPError as e:
+            logger.error("pricing_refresh_http_error", error=str(e), exc_info=e)
+            return False
+        except json.JSONDecodeError as e:
+            logger.error("pricing_refresh_json_error", error=str(e), exc_info=e)
+            return False
+        except ValidationError as e:
+            logger.error("pricing_refresh_validation_error", error=str(e), exc_info=e)
+            return False
+        except OSError as e:
+            logger.error("pricing_refresh_io_error", error=str(e), exc_info=e)
+            return False
         except Exception as e:
             logger.error("pricing_refresh_failed", error=str(e), exc_info=e)
             return False
@@ -303,6 +321,31 @@ class PricingUpdater:
             )
             return True
 
+        except httpx.TimeoutException as e:
+            logger.error(
+                "external_pricing_validation_timeout", error=str(e), exc_info=e
+            )
+            return False
+        except httpx.HTTPError as e:
+            logger.error(
+                "external_pricing_validation_http_error", error=str(e), exc_info=e
+            )
+            return False
+        except json.JSONDecodeError as e:
+            logger.error(
+                "external_pricing_validation_json_error", error=str(e), exc_info=e
+            )
+            return False
+        except ValidationError as e:
+            logger.error(
+                "external_pricing_validation_validation_error", error=str(e), exc_info=e
+            )
+            return False
+        except OSError as e:
+            logger.error(
+                "external_pricing_validation_io_error", error=str(e), exc_info=e
+            )
+            return False
         except Exception as e:
             logger.error("external_pricing_validation_failed", error=str(e), exc_info=e)
             return False

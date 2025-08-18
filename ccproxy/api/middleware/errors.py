@@ -44,7 +44,7 @@ def setup_error_handlers(app: FastAPI) -> None:
     except ImportError as e:
         logger.warning("error_handlers_metrics_import_failed", error=str(e), exc_info=e)
         metrics = None
-    except Exception as e:
+    except (AttributeError, TypeError) as e:
         logger.warning("error_handlers_metrics_unavailable", error=str(e), exc_info=e)
         metrics = None
 

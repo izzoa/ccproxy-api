@@ -142,6 +142,7 @@ class Plugin(ProviderPlugin):
                 "codex_plugin_detection_initialization_failed",
                 error=str(e),
                 msg="Using fallback Codex instructions",
+                exc_info=e,
             )
 
         self._detection_service = detection_service  # Store for health checks
@@ -220,7 +221,8 @@ class Plugin(ProviderPlugin):
                 summary["auth"] = "not_configured"
 
             return summary
-        except Exception:
+        except Exception as e:
+            logger.warning("codex_auth_status_error", error=str(e), exc_info=e)
             return {"auth": "status_error"}
 
     async def shutdown(self) -> None:

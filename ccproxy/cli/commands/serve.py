@@ -68,11 +68,7 @@ def _show_api_usage_info(toolkit: Any, settings: Settings) -> None:
     # Use rich console for code blocks
     console = Console()
 
-    auth_token = (
-        settings.security.auth_token.get_secret_value()
-        if settings.security.auth_token
-        else "NOT_SET"
-    )
+    auth_token = "YOUR_AUTH_TOKEN" if settings.security.auth_token else "NOT_SET"
     exports = f"""export ANTHROPIC_API_KEY={auth_token}
 export ANTHROPIC_BASE_URL={anthropic_base_url}
 export OPENAI_API_KEY={auth_token}

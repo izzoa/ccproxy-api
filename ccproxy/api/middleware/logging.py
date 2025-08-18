@@ -83,8 +83,13 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             error_message = f"IO/Permission error: {str(e)}"
             # Re-raise to let error handlers process it
             raise
+        except (RuntimeError, ValueError, TypeError) as e:
+            # Capture runtime/validation errors for logging
+            error_message = str(e)
+            # Re-raise to let error handlers process it
+            raise
         except Exception as e:
-            # Capture error for logging
+            # Capture other unexpected errors for logging
             error_message = str(e)
             # Re-raise to let error handlers process it
             raise
@@ -180,8 +185,14 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             except (OSError, PermissionError) as log_error:
                 # If logging fails due to IO/permission issues, don't crash the app
                 print(f"Failed to write access log (IO/Permission error): {log_error}")
+            except (AttributeError, TypeError, ValueError) as log_error:
+                # If logging fails due to attribute/type/value errors, don't crash the app
+                # Use print as a last resort to indicate the issue
+                print(
+                    f"Failed to write access log (attribute/type/value error): {log_error}"
+                )
             except Exception as log_error:
-                # If logging fails, don't crash the app
+                # If logging fails for other reasons, don't crash the app
                 # Use print as a last resort to indicate the issue
                 print(f"Failed to write access log: {log_error}")
 

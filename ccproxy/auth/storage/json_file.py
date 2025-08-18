@@ -4,6 +4,7 @@ import contextlib
 import json
 from pathlib import Path
 
+from pydantic import ValidationError
 from structlog import get_logger
 
 from ccproxy.auth.exceptions import (
@@ -58,9 +59,56 @@ class JsonFileTokenStorage(TokenStorage):
             raise CredentialsInvalidError(
                 f"Failed to parse credentials file {self.file_path}: {e}"
             ) from e
-        except Exception as e:
+        except FileNotFoundError as e:
+            logger.error(
+                "file_not_found", path=str(self.file_path), error=str(e), exc_info=e
+            )
             raise CredentialsStorageError(
-                f"Error loading credentials from {self.file_path}: {e}"
+                f"Credentials file not found: {self.file_path}"
+            ) from e
+        except PermissionError as e:
+            logger.error(
+                "permission_denied", path=str(self.file_path), error=str(e), exc_info=e
+            )
+            raise CredentialsStorageError(
+                f"Permission denied accessing credentials file: {self.file_path}"
+            ) from e
+        except UnicodeDecodeError as e:
+            logger.error(
+                "unicode_decode_error",
+                path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            raise CredentialsInvalidError(
+                f"Invalid file encoding in credentials file {self.file_path}: {e}"
+            ) from e
+        except OSError as e:
+            logger.error(
+                "file_io_error", path=str(self.file_path), error=str(e), exc_info=e
+            )
+            raise CredentialsStorageError(
+                f"Error accessing credentials file {self.file_path}: {e}"
+            ) from e
+        except ValidationError as e:
+            logger.error(
+                "validation_error",
+                path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            raise CredentialsInvalidError(
+                f"Invalid credentials format in {self.file_path}: {e}"
+            ) from e
+        except Exception as e:
+            logger.error(
+                "unexpected_load_error",
+                path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            raise CredentialsStorageError(
+                f"Unexpected error loading credentials from {self.file_path}: {e}"
             ) from e
 
     async def save(self, credentials: ClaudeCredentials) -> bool:
@@ -102,7 +150,62 @@ class JsonFileTokenStorage(TokenStorage):
                     path=str(self.file_path),
                 )
                 return True
+            except FileNotFoundError as e:
+                logger.error(
+                    "temp_file_not_found", path=str(temp_path), error=str(e), exc_info=e
+                )
+                raise CredentialsStorageError(
+                    f"Temporary file not found during save: {temp_path}"
+                ) from e
+            except PermissionError as e:
+                logger.error(
+                    "permission_denied", path=str(temp_path), error=str(e), exc_info=e
+                )
+                raise CredentialsStorageError(
+                    f"Permission denied writing credentials file: {temp_path}"
+                ) from e
+            except UnicodeEncodeError as e:
+                logger.error(
+                    "unicode_encode_error",
+                    path=str(temp_path),
+                    error=str(e),
+                    exc_info=e,
+                )
+                raise CredentialsStorageError(
+                    f"Error encoding credentials data: {e}"
+                ) from e
+            except OSError as e:
+                logger.error(
+                    "file_io_error", path=str(temp_path), error=str(e), exc_info=e
+                )
+                raise CredentialsStorageError(
+                    f"Error writing credentials file: {e}"
+                ) from e
+            except (TypeError, ValueError) as e:
+                logger.error(
+                    "json_encode_error",
+                    path=str(temp_path),
+                    error=str(e),
+                    exc_info=e,
+                )
+                raise CredentialsStorageError(
+                    f"Failed to encode credentials as JSON: {e}"
+                ) from e
+            except ValidationError as e:
+                logger.error(
+                    "validation_error",
+                    path=str(temp_path),
+                    error=str(e),
+                    exc_info=e,
+                )
+                raise CredentialsInvalidError(f"Invalid credentials format: {e}") from e
             except Exception as e:
+                logger.error(
+                    "unexpected_save_error",
+                    path=str(temp_path),
+                    error=str(e),
+                    exc_info=e,
+                )
                 raise
             finally:
                 # Clean up temp file if it exists
@@ -110,8 +213,26 @@ class JsonFileTokenStorage(TokenStorage):
                     with contextlib.suppress(Exception):
                         temp_path.unlink()
 
+        except CredentialsStorageError:
+            raise  # Re-raise already handled storage errors
+        except ValidationError as e:
+            logger.error(
+                "outer_validation_error",
+                path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            raise CredentialsInvalidError(f"Invalid credentials format: {e}") from e
         except Exception as e:
-            raise CredentialsStorageError(f"Error saving credentials: {e}") from e
+            logger.error(
+                "unexpected_outer_save_error",
+                path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            raise CredentialsStorageError(
+                f"Unexpected error saving credentials: {e}"
+            ) from e
 
     async def exists(self) -> bool:
         """Check if credentials file exists.
@@ -142,9 +263,43 @@ class JsonFileTokenStorage(TokenStorage):
                     path=str(self.file_path),
                 )
                 deleted = True
+        except FileNotFoundError as e:
+            logger.debug(
+                "file_not_found_during_delete",
+                path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            # File not found is success for delete operation
+        except PermissionError as e:
+            logger.error(
+                "permission_denied", path=str(self.file_path), error=str(e), exc_info=e
+            )
+            if not deleted:
+                raise CredentialsStorageError(
+                    f"Permission denied deleting credentials file: {self.file_path}"
+                ) from e
+            logger.debug("credentials_delete_partial", source="file", error=str(e))
+        except OSError as e:
+            logger.error(
+                "file_io_error", path=str(self.file_path), error=str(e), exc_info=e
+            )
+            if not deleted:
+                raise CredentialsStorageError(
+                    f"Error deleting credentials file: {self.file_path}"
+                ) from e
+            logger.debug("credentials_delete_partial", source="file", error=str(e))
         except Exception as e:
-            if not deleted:  # Only raise if we failed to delete from both
-                raise CredentialsStorageError(f"Error deleting credentials: {e}") from e
+            logger.error(
+                "unexpected_delete_error",
+                path=str(self.file_path),
+                error=str(e),
+                exc_info=e,
+            )
+            if not deleted:
+                raise CredentialsStorageError(
+                    f"Unexpected error deleting credentials: {e}"
+                ) from e
             logger.debug("credentials_delete_partial", source="file", error=str(e))
 
         return deleted

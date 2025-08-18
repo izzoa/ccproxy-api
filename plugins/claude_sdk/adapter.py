@@ -78,7 +78,11 @@ class ClaudeSDKAdapter(BaseAdapter):
         self.handler = ClaudeSDKHandler(config=config, session_manager=session_manager)
         self.format_adapter = ClaudeSDKFormatAdapter()
         self.request_transformer = ClaudeSDKRequestTransformer()
-        self.response_transformer = ClaudeSDKResponseTransformer()
+        # Initialize response transformer with CORS settings
+        cors_settings = (
+            getattr(proxy_service.config, "cors", None) if proxy_service else None
+        )
+        self.response_transformer = ClaudeSDKResponseTransformer(cors_settings)
         self.auth_manager = NoOpAuthManager()
         self._detection_service: Any | None = None
         self._initialized = False

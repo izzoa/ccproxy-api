@@ -163,5 +163,7 @@ class ProxyService:
 
             logger.info("ProxyService cleanup complete")
 
+        except (AttributeError, TypeError) as e:
+            logger.error("cleanup_attribute_error", error=str(e), exc_info=e)
         except Exception as e:
             logger.error("error_during_cleanup", error=str(e), exc_info=e)

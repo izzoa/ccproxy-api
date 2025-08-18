@@ -275,6 +275,7 @@ class Settings(BaseSettings):
         Returns:
             dict: Configuration with sensitive data masked
         """
+        # Use serialization mode that properly handles SecretStr
         return self.model_dump(mode="json")
 
     @classmethod

@@ -1,21 +1,13 @@
 """Routes for Claude SDK plugin."""
 
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 
 from ccproxy.api.dependencies import (
-    get_plugin_adapter,
-    get_plugin_detection_service,
+    ClaudeSDKAdapterDep,
 )
 from ccproxy.auth.conditional import ConditionalAuthDep
-
-
-# Type aliases for dependency injection using centralized plugin dependencies
-ClaudeSDKAdapterDep = Annotated[Any, Depends(get_plugin_adapter("claude_sdk"))]
-ClaudeSDKDetectionDep = Annotated[
-    Any, Depends(get_plugin_detection_service("claude_sdk"))
-]
 
 
 # Create router for Claude SDK endpoints

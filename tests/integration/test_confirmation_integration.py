@@ -10,12 +10,21 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ccproxy.config.settings import Settings, get_settings
+from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
 from plugins.permissions.models import PermissionStatus
 from plugins.permissions.routes import router as confirmation_router
 from plugins.permissions.service import (
     PermissionService,
     get_permission_service,
 )
+
+
+@pytest.fixture(autouse=True)
+async def task_manager_fixture():
+    """Start and stop task manager for each test."""
+    await start_task_manager()
+    yield
+    await stop_task_manager()
 
 
 @pytest.fixture
