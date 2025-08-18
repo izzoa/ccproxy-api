@@ -19,6 +19,7 @@ class MockAuthManager(AuthManager):
     async def get_credentials(self) -> Any:
         """Get mock credentials."""
         from ccproxy.auth.models import ClaudeCredentials, OAuthToken
+
         oauth_token = OAuthToken(
             accessToken="test-token",
             refreshToken="test-refresh",

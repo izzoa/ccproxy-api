@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+from typing import Any
 
 import structlog
 
@@ -62,7 +63,7 @@ class PluginLoader:
         return True
 
     async def resolve_plugin_dependencies(
-        self, plugin_dir: Path, user_consent_callback=None
+        self, plugin_dir: Path, user_consent_callback: Any = None
     ) -> bool:
         """Resolve missing dependencies for a plugin.
 
@@ -78,7 +79,7 @@ class PluginLoader:
             result, user_consent_callback
         )
 
-    def get_dependency_report(self, plugin_dirs: list[Path]) -> dict:
+    def get_dependency_report(self, plugin_dirs: list[Path]) -> dict[str, Any]:
         """Generate a comprehensive dependency report for multiple plugins.
 
         Args:

@@ -507,7 +507,7 @@ class PluginRegistry:
         # Check if registered
         return name in self._plugins
 
-    async def get_dependency_report(self) -> dict:
+    async def get_dependency_report(self) -> dict[str, Any]:
         """Generate a comprehensive dependency report for all plugins.
 
         Returns:
@@ -526,7 +526,7 @@ class PluginRegistry:
         return loader.get_dependency_report(plugin_dirs)
 
     async def resolve_all_dependencies(
-        self, user_consent_callback=None
+        self, user_consent_callback: Any = None
     ) -> dict[str, bool]:
         """Resolve dependencies for all plugins.
 

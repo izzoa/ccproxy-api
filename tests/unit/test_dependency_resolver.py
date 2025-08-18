@@ -2,10 +2,9 @@
 
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from packaging.version import Version
 
 from ccproxy.plugins.dependency_resolver import (
     DependencyInfo,
@@ -90,7 +89,9 @@ class TestPluginDependencyResolver:
 
     def test_resolver_initialization(self):
         """Test resolver initialization with different parameters."""
-        resolver = PluginDependencyResolver(auto_install=True, require_user_consent=False)
+        resolver = PluginDependencyResolver(
+            auto_install=True, require_user_consent=False
+        )
         assert resolver.auto_install is True
         assert resolver.require_user_consent is False
 
@@ -233,7 +234,9 @@ dependencies = ["requests>=2.25.0"]
     @pytest.mark.asyncio
     async def test_resolve_dependencies_user_consent_declined(self):
         """Test resolving dependencies when user declines consent."""
-        resolver = PluginDependencyResolver(auto_install=True, require_user_consent=True)
+        resolver = PluginDependencyResolver(
+            auto_install=True, require_user_consent=True
+        )
 
         result = PluginDependencyResult(
             plugin_name="test",
@@ -254,9 +257,7 @@ dependencies = ["requests>=2.25.0"]
     @pytest.mark.asyncio
     async def test_install_plugin_dependencies_success(self, mock_run, resolver):
         """Test successful dependency installation."""
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="Success", stderr=""
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="Success", stderr="")
 
         plugin_dir = Path("/test/plugin")
         missing_deps = [
@@ -296,9 +297,7 @@ dependencies = ["requests>=2.25.0"]
     @patch("subprocess.run")
     def test_install_specific_dependencies_success(self, mock_run, resolver):
         """Test successful installation of specific dependencies."""
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="Success", stderr=""
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="Success", stderr="")
 
         dependencies = ["requests>=2.25.0", "httpx>=0.24.0"]
         success = resolver.install_specific_dependencies(dependencies)
@@ -315,9 +314,7 @@ dependencies = ["requests>=2.25.0"]
     @patch("subprocess.run")
     def test_check_system_requirements(self, mock_run, resolver):
         """Test system requirements checking."""
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="uv 0.4.15", stderr=""
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="uv 0.4.15", stderr="")
 
         checks = resolver.check_system_requirements()
 
@@ -335,18 +332,14 @@ dependencies = ["requests>=2.25.0"]
                 plugin_path=Path("/test/plugin1"),
                 has_pyproject=True,
                 all_satisfied=True,
-                dependencies=[
-                    DependencyInfo("pkg1", "pkg1>=1.0", True, "1.5.0", True)
-                ],
+                dependencies=[DependencyInfo("pkg1", "pkg1>=1.0", True, "1.5.0", True)],
             ),
             PluginDependencyResult(
                 plugin_name="plugin2",
                 plugin_path=Path("/test/plugin2"),
                 has_pyproject=True,
                 all_satisfied=False,
-                dependencies=[
-                    DependencyInfo("pkg2", "pkg2>=2.0", False, None, False)
-                ],
+                dependencies=[DependencyInfo("pkg2", "pkg2>=2.0", False, None, False)],
             ),
         ]
 

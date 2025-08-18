@@ -13,18 +13,21 @@ from ccproxy.config.settings import Settings
 from ccproxy.core.http import BaseProxyClient
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.plugins.registry import PluginRegistry
+from ccproxy.services.auth import AuthenticationService
+from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.factories import ConcreteServiceFactory
 from ccproxy.services.interfaces import (
     ServiceContainer as ServiceContainerInterface,
+)
+from ccproxy.services.interfaces import (
     ServiceFactory,
 )
-from ccproxy.services.auth import AuthenticationService
-from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.mocking import MockResponseHandler
+from ccproxy.services.plugins import PluginManager
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
-from ccproxy.services.plugins import PluginManager
+
 
 if TYPE_CHECKING:
     from ccproxy.services.proxy_service import ProxyService
@@ -35,11 +38,11 @@ logger = structlog.get_logger(__name__)
 
 class ServiceContainer(ServiceContainerInterface):
     """Dependency injection container for all services.
-    
+
     This container manages service lifecycles and dependencies using proper
     dependency injection patterns. It removes singleton anti-patterns and
     provides a clean, testable interface for service management.
-    
+
     Key improvements:
     - No singleton pattern (_instance class variable removed)
     - Uses factory pattern for service creation
@@ -49,9 +52,7 @@ class ServiceContainer(ServiceContainerInterface):
     """
 
     def __init__(
-        self, 
-        settings: Settings, 
-        service_factory: ServiceFactory | None = None
+        self, settings: Settings, service_factory: ServiceFactory | None = None
     ) -> None:
         """Initialize the service container.
 
@@ -61,7 +62,7 @@ class ServiceContainer(ServiceContainerInterface):
         """
         self.settings = settings
         self._factory = service_factory or ConcreteServiceFactory()
-        
+
         # Service instances (created on-demand, not singletons)
         self._services: dict[str, object] = {}
         self._http_client: httpx.AsyncClient | None = None
@@ -121,58 +122,68 @@ class ServiceContainer(ServiceContainerInterface):
 
     def get_request_tracer(self) -> CoreRequestTracer:
         """Get request tracer service instance.
-        
+
         Uses caching to ensure single instance per container lifetime,
         but allows multiple containers for testing.
-        
+
         Returns:
             Request tracer service instance
         """
         service_key = "request_tracer"
         if service_key not in self._services:
-            self._services[service_key] = self._factory.create_request_tracer(self.settings)
+            self._services[service_key] = self._factory.create_request_tracer(
+                self.settings
+            )
         return self._services[service_key]  # type: ignore
 
     def get_mock_handler(self) -> MockResponseHandler:
         """Get mock handler service instance.
-        
+
         Uses caching to ensure single instance per container lifetime,
         but allows multiple containers for testing.
-        
+
         Returns:
             Mock handler service instance
         """
         service_key = "mock_handler"
         if service_key not in self._services:
-            self._services[service_key] = self._factory.create_mock_handler(self.settings)
+            self._services[service_key] = self._factory.create_mock_handler(
+                self.settings
+            )
         return self._services[service_key]  # type: ignore
 
-    def get_streaming_handler(self, metrics: PrometheusMetrics | None = None) -> StreamingHandler:
+    def get_streaming_handler(
+        self, metrics: PrometheusMetrics | None = None
+    ) -> StreamingHandler:
         """Get streaming handler service instance.
-        
+
         Uses caching to ensure single instance per container lifetime,
         but allows multiple containers for testing.
-        
+
         Args:
             metrics: Optional metrics service
-        
+
         Returns:
             Streaming handler service instance
         """
         service_key = "streaming_handler"
         if service_key not in self._services:
-            self._services[service_key] = self._factory.create_streaming_handler(self.settings, metrics)
+            self._services[service_key] = self._factory.create_streaming_handler(
+                self.settings, metrics
+            )
         return self._services[service_key]  # type: ignore
 
-    def get_auth_service(self, credentials_manager: CredentialsManager) -> AuthenticationService:
+    def get_auth_service(
+        self, credentials_manager: CredentialsManager
+    ) -> AuthenticationService:
         """Get authentication service instance.
-        
+
         Creates a new instance each time since it depends on credentials_manager
         which may vary between calls.
-        
+
         Args:
             credentials_manager: Credentials management service
-        
+
         Returns:
             Authentication service instance
         """
@@ -180,10 +191,10 @@ class ServiceContainer(ServiceContainerInterface):
 
     def get_proxy_config(self) -> ProxyConfiguration:
         """Get proxy configuration service instance.
-        
+
         Uses caching to ensure single instance per container lifetime,
         but allows multiple containers for testing.
-        
+
         Returns:
             Proxy configuration service instance
         """
@@ -208,7 +219,7 @@ class ServiceContainer(ServiceContainerInterface):
 
     async def close(self) -> None:
         """Close all managed resources during shutdown.
-        
+
         This method properly cleans up all resources managed by the container,
         ensuring graceful shutdown and preventing resource leaks.
         """
@@ -217,7 +228,7 @@ class ServiceContainer(ServiceContainerInterface):
             await self._http_client.aclose()
             self._http_client = None
             logger.debug("Closed shared HTTP client")
-        
+
         # Clear service cache
         self._services.clear()
         logger.debug("ServiceContainer resources closed")

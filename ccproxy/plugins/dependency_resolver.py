@@ -11,6 +11,7 @@ import structlog
 from packaging.requirements import Requirement
 from packaging.version import Version
 
+
 logger = structlog.get_logger(__name__)
 
 
@@ -103,7 +104,9 @@ class PluginDependencyResolver:
                 result.dependencies.append(dep_info)
 
             # Check if all dependencies are satisfied
-            result.all_satisfied = all(dep.meets_requirement for dep in result.dependencies)
+            result.all_satisfied = all(
+                dep.meets_requirement for dep in result.dependencies
+            )
 
             if not result.all_satisfied:
                 missing = [dep.name for dep in result.missing_dependencies]
@@ -153,9 +156,7 @@ class PluginDependencyResolver:
                     dep_info.meets_requirement = True
 
                 if not dep_info.meets_requirement:
-                    dep_info.error = (
-                        f"Version {installed_version} does not meet requirement {req.specifier}"
-                    )
+                    dep_info.error = f"Version {installed_version} does not meet requirement {req.specifier}"
 
             except importlib.metadata.PackageNotFoundError:
                 dep_info.is_installed = False
@@ -165,7 +166,13 @@ class PluginDependencyResolver:
         except Exception as e:
             dep_info.error = f"Failed to parse requirement: {e}"
             # Try to extract package name as fallback
-            dep_info.name = dep_spec.split(">=")[0].split("==")[0].split("<")[0].split(">")[0].strip()
+            dep_info.name = (
+                dep_spec.split(">=")[0]
+                .split("==")[0]
+                .split("<")[0]
+                .split(">")[0]
+                .strip()
+            )
 
         return dep_info
 
@@ -200,7 +207,9 @@ class PluginDependencyResolver:
         if self.require_user_consent and user_consent_callback:
             consent = await user_consent_callback(result.plugin_name, missing_deps)
             if not consent:
-                logger.info(f"User declined to install dependencies for {result.plugin_name}")
+                logger.info(
+                    f"User declined to install dependencies for {result.plugin_name}"
+                )
                 return False
 
         # Attempt to install missing dependencies
@@ -297,7 +306,9 @@ class PluginDependencyResolver:
             return False
 
         except subprocess.TimeoutExpired:
-            logger.error("Timeout installing specific dependencies", dependencies=dependencies)
+            logger.error(
+                "Timeout installing specific dependencies", dependencies=dependencies
+            )
             return False
 
         except FileNotFoundError:
@@ -313,7 +324,11 @@ class PluginDependencyResolver:
         Returns:
             Dictionary with system check results
         """
-        checks: dict[str, Any] = {"python_version": None, "uv_available": False, "uv_version": None}
+        checks: dict[str, Any] = {
+            "python_version": None,
+            "uv_available": False,
+            "uv_version": None,
+        }
 
         # Check Python version
         checks["python_version"] = {
@@ -324,16 +339,26 @@ class PluginDependencyResolver:
         # Check if uv is available
         try:
             result = subprocess.run(
-                ["uv", "--version"], capture_output=True, text=True, check=True, timeout=10
+                ["uv", "--version"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=10,
             )
             checks["uv_available"] = True
             checks["uv_version"] = result.stdout.strip()
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        except (
+            subprocess.CalledProcessError,
+            FileNotFoundError,
+            subprocess.TimeoutExpired,
+        ):
             checks["uv_available"] = False
 
         return checks
 
-    def generate_dependency_report(self, results: list[PluginDependencyResult]) -> dict[str, Any]:
+    def generate_dependency_report(
+        self, results: list[PluginDependencyResult]
+    ) -> dict[str, Any]:
         """Generate a comprehensive dependency report.
 
         Args:

@@ -75,7 +75,7 @@ def dependencies(
 ) -> None:
     """Check and manage plugin dependencies."""
 
-    async def _check_deps():
+    async def _check_deps() -> None:
         console = Console()
         loader = PluginLoader(auto_install=auto_install, require_user_consent=True)
 
