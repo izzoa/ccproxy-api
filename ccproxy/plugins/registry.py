@@ -19,8 +19,15 @@ logger = structlog.get_logger(__name__)
 class PluginRegistry:
     """Registry for provider plugins with lifecycle management."""
 
-    def __init__(self) -> None:
-        """Initialize plugin registry."""
+    def __init__(
+        self, auto_install_deps: bool = False, require_user_consent: bool = True
+    ) -> None:
+        """Initialize plugin registry.
+
+        Args:
+            auto_install_deps: Whether to automatically install missing dependencies
+            require_user_consent: Whether to require user consent before installing
+        """
         self._plugins: dict[str, ProviderPlugin] = {}
         self._adapters: dict[str, BaseAdapter] = {}
         self._initialized_plugins: set[str] = set()
@@ -29,6 +36,8 @@ class PluginRegistry:
         self._plugin_paths: dict[
             str, Path
         ] = {}  # Track plugin file paths for efficient reloading
+        self._auto_install_deps = auto_install_deps
+        self._require_user_consent = require_user_consent
 
     async def discover_and_initialize(self, services: CoreServices) -> None:
         """Discover and initialize all plugins.
@@ -37,7 +46,10 @@ class PluginRegistry:
             services: Core services to pass to plugins
         """
         self._services = services
-        loader = PluginLoader()
+        loader = PluginLoader(
+            auto_install=self._auto_install_deps,
+            require_user_consent=self._require_user_consent,
+        )
         plugins_with_paths = loader.load_plugins_with_paths()
 
         for plugin, path in plugins_with_paths:
@@ -481,7 +493,10 @@ class PluginRegistry:
         await self.unregister(name)
 
         # Load just this plugin
-        loader = PluginLoader()
+        loader = PluginLoader(
+            auto_install=self._auto_install_deps,
+            require_user_consent=self._require_user_consent,
+        )
         plugin_dir = plugin_path.parent
         plugin = loader.load_single_plugin(plugin_dir)
 
@@ -491,3 +506,47 @@ class PluginRegistry:
 
         # Check if registered
         return name in self._plugins
+
+    async def get_dependency_report(self) -> dict:
+        """Generate a comprehensive dependency report for all plugins.
+
+        Returns:
+            Dictionary with dependency report
+        """
+        loader = PluginLoader(
+            auto_install=self._auto_install_deps,
+            require_user_consent=self._require_user_consent,
+        )
+
+        # Collect all plugin directories
+        plugin_dirs = []
+        for plugin_path in self._plugin_paths.values():
+            plugin_dirs.append(plugin_path.parent)
+
+        return loader.get_dependency_report(plugin_dirs)
+
+    async def resolve_all_dependencies(
+        self, user_consent_callback=None
+    ) -> dict[str, bool]:
+        """Resolve dependencies for all plugins.
+
+        Args:
+            user_consent_callback: Optional callback to get user consent
+
+        Returns:
+            Dictionary mapping plugin names to resolution success status
+        """
+        loader = PluginLoader(
+            auto_install=self._auto_install_deps,
+            require_user_consent=self._require_user_consent,
+        )
+
+        results = {}
+        for plugin_name, plugin_path in self._plugin_paths.items():
+            plugin_dir = plugin_path.parent
+            success = await loader.resolve_plugin_dependencies(
+                plugin_dir, user_consent_callback
+            )
+            results[plugin_name] = success
+
+        return results

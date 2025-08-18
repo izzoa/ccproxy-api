@@ -7,7 +7,9 @@ import jwt
 import structlog
 from pydantic import BaseModel, Field, field_validator
 
-from ..base import AuthManager
+from ccproxy.auth.exceptions import AuthenticationError
+from ccproxy.auth.models import ClaudeCredentials, OAuthToken, UserProfile
+
 from .storage import OpenAITokenStorage
 
 
@@ -105,7 +107,7 @@ class OpenAICredentials(BaseModel):
         return cls(**data)
 
 
-class OpenAITokenManager(AuthManager):
+class OpenAITokenManager:
     """Manages OpenAI token storage and refresh operations."""
 
     def __init__(self, storage: OpenAITokenStorage | None = None):
@@ -167,10 +169,82 @@ class OpenAITokenManager(AuthManager):
         """Get storage location description."""
         return self.storage.get_location()
 
+    # ==================== Core Authentication Methods ====================
+
+    async def get_access_token(self) -> str:
+        """Get valid access token.
+
+        Returns:
+            Access token string
+
+        Raises:
+            AuthenticationError: If authentication fails
+        """
+        token = await self.get_valid_token()
+        if not token:
+            raise AuthenticationError("No valid OpenAI token")
+        return token
+
+    async def get_credentials(self) -> ClaudeCredentials:
+        """Get valid credentials.
+
+        Note: For OpenAI providers, this returns minimal/dummy Claude credentials.
+
+        Returns:
+            Minimal Claude credentials for compatibility
+
+        Raises:
+            AuthenticationError: If authentication fails
+        """
+        credentials = await self.load_credentials()
+        if not credentials or not credentials.active:
+            raise AuthenticationError("No valid OpenAI credentials")
+
+        # Create minimal ClaudeCredentials for compatibility
+        oauth_token = OAuthToken(
+            accessToken=credentials.access_token,
+            refreshToken=credentials.refresh_token,
+            expiresAt=int(credentials.expires_at.timestamp() * 1000),
+            scopes=["openai-api"],
+            subscriptionType="openai",
+            tokenType="Bearer",
+        )
+        return ClaudeCredentials(claudeAiOauth=oauth_token)
+
+    async def is_authenticated(self) -> bool:
+        """Check if current authentication is valid.
+
+        Returns:
+            True if authenticated, False otherwise
+        """
+        try:
+            token = await self.get_valid_token()
+            return bool(token)
+        except Exception:
+            return False
+
+    async def get_user_profile(self) -> UserProfile | None:
+        """Get user profile information.
+
+        Returns:
+            None - OpenAI token manager doesn't support user profiles
+        """
+        return None
+
+    # ==================== Context Manager Support ====================
+
+    async def __aenter__(self) -> "OpenAITokenManager":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Async context manager exit."""
+        pass
+
+    # ==================== Provider-Generic Methods ====================
+
     async def get_auth_headers(self) -> dict[str, str]:
         """Get OpenAI auth headers."""
-        from ccproxy.auth.exceptions import AuthenticationError
-
         token = await self.get_valid_token()
         if not token:
             raise AuthenticationError("No valid OpenAI token")

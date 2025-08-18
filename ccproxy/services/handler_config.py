@@ -1,4 +1,4 @@
-"""Provider context configuration for unified request handling."""
+"""Handler configuration for unified request handling."""
 
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -22,10 +22,10 @@ class PluginTransformerProtocol(Protocol):
 
 
 @dataclass(frozen=True)
-class ProviderContext:
+class HandlerConfig:
     """Processing pipeline configuration for HTTP/streaming handlers.
 
-    This simplified context only contains universal processing concerns,
+    This simplified config only contains universal processing concerns,
     not plugin-specific parameters like session_id or access_token.
 
     Following the Parameter Object pattern, this groups related processing

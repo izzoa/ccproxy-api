@@ -9,13 +9,39 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 from ccproxy.adapters.base import APIAdapter
-from ccproxy.auth.base import AuthManager
-from ccproxy.services.provider_context import ProviderContext
+from ccproxy.auth.manager import AuthManager
+from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.proxy_service import ProxyService
 
 
 class MockAuthManager(AuthManager):
     """Mock authentication manager for testing."""
+
+    async def get_access_token(self) -> str:
+        """Get mock access token."""
+        return "test-token"
+
+    async def get_credentials(self) -> Any:
+        """Get mock credentials."""
+        from ccproxy.auth.models import ClaudeCredentials, OAuthToken
+
+        oauth_token = OAuthToken(
+            accessToken="test-token",
+            refreshToken="test-refresh",
+            expiresAt=None,
+            scopes=["test"],
+            subscriptionType="test",
+            tokenType="Bearer",
+        )
+        return ClaudeCredentials(claudeAiOauth=oauth_token)
+
+    async def is_authenticated(self) -> bool:
+        """Mock authentication check."""
+        return True
+
+    async def get_user_profile(self) -> Any:
+        """Get mock user profile."""
+        return None
 
     async def get_auth_headers(self) -> dict[str, str]:
         """Get mock auth headers."""
@@ -28,6 +54,14 @@ class MockAuthManager(AuthManager):
     def get_provider_name(self) -> str:
         """Get mock provider name."""
         return "test-provider"
+
+    async def __aenter__(self) -> "MockAuthManager":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Async context manager exit."""
+        pass
 
 
 @pytest.fixture
@@ -73,7 +107,7 @@ async def test_streaming_response_no_content_length(
     """Test that Content-Length header is not passed through for streaming responses."""
     auth_manager = MockAuthManager()
 
-    context = ProviderContext(
+    context = HandlerConfig(
         provider_name="codex",
         auth_manager=auth_manager,
         target_base_url="https://chatgpt.com/backend-api/codex",
@@ -135,7 +169,7 @@ async def test_streaming_response_with_logging(
     """Test that StreamingResponseWithLogging is used and doesn't include Content-Length."""
     auth_manager = MockAuthManager()
 
-    context = ProviderContext(
+    context = HandlerConfig(
         provider_name="codex",
         auth_manager=auth_manager,
         target_base_url="https://chatgpt.com/backend-api/codex",
@@ -214,7 +248,7 @@ async def test_non_streaming_response_preserves_headers(
         b'"model": "gpt-4", "stream": false}'
     )
 
-    context = ProviderContext(
+    context = HandlerConfig(
         provider_name="codex",
         auth_manager=auth_manager,
         target_base_url="https://chatgpt.com/backend-api/codex",
@@ -274,7 +308,7 @@ async def test_streaming_with_adapter_no_content_length(
 
     adapter = MockAdapter()
 
-    context = ProviderContext(
+    context = HandlerConfig(
         provider_name="codex",
         auth_manager=auth_manager,
         target_base_url="https://chatgpt.com/backend-api/codex",

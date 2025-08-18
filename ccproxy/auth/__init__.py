@@ -27,7 +27,7 @@ from ccproxy.auth.exceptions import (
     OAuthLoginError,
     OAuthTokenRefreshError,
 )
-from ccproxy.auth.manager import AuthManager, BaseAuthManager
+from ccproxy.auth.manager import AuthManager
 from ccproxy.auth.storage import (
     JsonFileTokenStorage,
     KeyringTokenStorage,
@@ -37,9 +37,8 @@ from ccproxy.services.credentials.manager import CredentialsManager
 
 
 __all__ = [
-    # Manager interfaces
+    # Manager interface
     "AuthManager",
-    "BaseAuthManager",
     # Implementations
     "BearerTokenAuthManager",
     "CredentialsAuthManager",

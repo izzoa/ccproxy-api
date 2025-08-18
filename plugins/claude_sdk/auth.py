@@ -2,11 +2,10 @@
 
 from typing import Any
 
-from ccproxy.auth.manager import BaseAuthManager
 from ccproxy.auth.models import ClaudeCredentials, UserProfile
 
 
-class NoOpAuthManager(BaseAuthManager):
+class NoOpAuthManager:
     """No-operation auth manager for Claude SDK.
 
     The SDK handles authentication internally through the CLI,
@@ -40,6 +39,10 @@ class NoOpAuthManager(BaseAuthManager):
         """Return None since SDK doesn't provide user profile."""
         return None
 
+    async def __aenter__(self) -> "NoOpAuthManager":
+        """Async context manager entry."""
+        return self
+
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """No cleanup needed."""
         pass
@@ -47,3 +50,11 @@ class NoOpAuthManager(BaseAuthManager):
     async def get_auth_headers(self) -> dict[str, str]:
         """Return empty auth headers since SDK handles auth internally."""
         return {}
+
+    async def validate_credentials(self) -> bool:
+        """Always return True since SDK handles auth internally."""
+        return True
+
+    def get_provider_name(self) -> str:
+        """Get the provider name for logging."""
+        return "claude-sdk"

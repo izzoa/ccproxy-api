@@ -9,10 +9,10 @@ import structlog
 from fastapi import HTTPException, Request
 from starlette.responses import Response, StreamingResponse
 
-from ccproxy.auth.base import AuthManager
+from ccproxy.auth.manager import AuthManager
 from ccproxy.services.adapters.base import BaseAdapter
+from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.http_handler import PluginHTTPHandler
-from ccproxy.services.provider_context import ProviderContext
 from ccproxy.services.proxy_service import ProxyService
 
 from .format_adapter import CodexFormatAdapter
@@ -140,7 +140,7 @@ class CodexAdapter(BaseAdapter):
         target_url = "https://chatgpt.com/backend-api/codex/responses"
 
         # Create simplified provider context
-        context = ProviderContext(
+        context = HandlerConfig(
             request_adapter=self.format_adapter if needs_conversion else None,
             response_adapter=self.format_adapter if needs_conversion else None,
             request_transformer=self.request_transformer,
@@ -158,7 +158,7 @@ class CodexAdapter(BaseAdapter):
             is_streaming,
         ) = await self._http_handler.prepare_request(
             request_body=body,
-            provider_context=context,
+            handler_config=context,
             auth_headers=auth_headers,
             request_headers=dict(request.headers),
             session_id=session_id,
@@ -183,7 +183,7 @@ class CodexAdapter(BaseAdapter):
             url=target_url,
             headers=headers,
             body=transformed_body,
-            provider_context=context,
+            handler_config=context,
             is_streaming=is_streaming,
             streaming_handler=self.proxy_service.streaming_handler
             if is_streaming

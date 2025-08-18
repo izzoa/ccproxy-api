@@ -1,12 +1,11 @@
 """Plugin discovery and loading mechanism."""
 
-import importlib.metadata
 import importlib.util
-import subprocess
 from pathlib import Path
 
 import structlog
 
+from ccproxy.plugins.dependency_resolver import PluginDependencyResolver
 from ccproxy.plugins.protocol import ProviderPlugin
 
 
@@ -16,90 +15,84 @@ logger = structlog.get_logger(__name__)
 class PluginLoader:
     """Handles plugin discovery and loading."""
 
+    def __init__(self, auto_install: bool = False, require_user_consent: bool = True):
+        """Initialize plugin loader.
+
+        Args:
+            auto_install: Whether to automatically install missing dependencies
+            require_user_consent: Whether to require user consent before installing
+        """
+        self.dependency_resolver = PluginDependencyResolver(
+            auto_install=auto_install, require_user_consent=require_user_consent
+        )
+
     def _check_plugin_dependencies(self, plugin_dir: Path) -> bool:
-        """Check if plugin dependencies are installed.
+        """Check if plugin dependencies are installed using the dependency resolver.
 
         Args:
             plugin_dir: Path to the plugin directory
 
         Returns:
-            bool: True if dependencies are satisfied or installed successfully
+            bool: True if dependencies are satisfied
         """
-        pyproject_path = plugin_dir / "pyproject.toml"
-        if not pyproject_path.exists():
-            # No pyproject.toml, assume plugin has no extra dependencies
-            return True
+        result = self.dependency_resolver.analyze_plugin_dependencies(plugin_dir)
 
-        try:
-            # Parse pyproject.toml to check dependencies
-            import tomllib
-
-            with pyproject_path.open("rb") as f:
-                data = tomllib.load(f)
-
-            dependencies = data.get("project", {}).get("dependencies", [])
-            if not dependencies:
-                return True
-
-            # Check if dependencies are installed
-            missing = []
-            for dep in dependencies:
-                # Extract package name from dependency spec
-                pkg_name = (
-                    dep.split(">=")[0]
-                    .split("==")[0]
-                    .split("<")[0]
-                    .split(">")[0]
-                    .strip()
-                )
-                try:
-                    importlib.metadata.version(pkg_name)
-                except importlib.metadata.PackageNotFoundError:
-                    missing.append(dep)
-
-            if missing:
-                logger.warning(
-                    f"Plugin {plugin_dir.name} has missing dependencies: {missing}. "
-                    "Consider running 'uv sync' to install all workspace dependencies."
-                )
-                # Optionally attempt to install missing dependencies
-                # This is disabled by default for security/stability
-                # return self._install_plugin_dependencies(plugin_dir)
-                return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to check dependencies for {plugin_dir}: {e}")
-            return True  # Continue loading even if check fails
-
-    def _install_plugin_dependencies(self, plugin_dir: Path) -> bool:
-        """Install plugin dependencies using uv.
-
-        Args:
-            plugin_dir: Path to the plugin directory
-
-        Returns:
-            bool: True if installation succeeded
-        """
-        try:
-            logger.info(f"Installing dependencies for plugin {plugin_dir.name}")
-            result = subprocess.run(
-                ["uv", "pip", "install", "-e", str(plugin_dir)],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            logger.info(f"Successfully installed dependencies for {plugin_dir.name}")
-            return True
-        except subprocess.CalledProcessError as e:
+        if result.error:
             logger.error(
-                f"Failed to install dependencies for {plugin_dir.name}: {e.stderr}"
+                f"Error analyzing dependencies for {plugin_dir.name}: {result.error}"
+            )
+            # Continue loading even if analysis fails to maintain backward compatibility
+            return True
+
+        if not result.all_satisfied:
+            missing_deps = [dep.name for dep in result.missing_dependencies]
+            logger.warning(
+                f"Plugin {plugin_dir.name} has unsatisfied dependencies",
+                missing_dependencies=missing_deps,
+                suggestion="Run 'uv sync' to install all workspace dependencies or enable auto_install",
             )
             return False
-        except FileNotFoundError:
-            logger.error("uv command not found. Please install uv.")
-            return False
+
+        if result.dependencies:
+            logger.debug(
+                f"All dependencies satisfied for plugin {plugin_dir.name}",
+                dependencies=[dep.name for dep in result.installed_dependencies],
+            )
+
+        return True
+
+    async def resolve_plugin_dependencies(
+        self, plugin_dir: Path, user_consent_callback=None
+    ) -> bool:
+        """Resolve missing dependencies for a plugin.
+
+        Args:
+            plugin_dir: Path to the plugin directory
+            user_consent_callback: Optional callback to get user consent
+
+        Returns:
+            True if all dependencies are resolved
+        """
+        result = self.dependency_resolver.analyze_plugin_dependencies(plugin_dir)
+        return await self.dependency_resolver.resolve_dependencies(
+            result, user_consent_callback
+        )
+
+    def get_dependency_report(self, plugin_dirs: list[Path]) -> dict:
+        """Generate a comprehensive dependency report for multiple plugins.
+
+        Args:
+            plugin_dirs: List of plugin directories to analyze
+
+        Returns:
+            Dictionary with dependency report
+        """
+        results = []
+        for plugin_dir in plugin_dirs:
+            result = self.dependency_resolver.analyze_plugin_dependencies(plugin_dir)
+            results.append(result)
+
+        return self.dependency_resolver.generate_dependency_report(results)
 
     async def discover_plugins(self) -> list[ProviderPlugin]:
         """Discover plugins from multiple sources.

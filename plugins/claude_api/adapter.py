@@ -9,8 +9,8 @@ from httpx import AsyncClient
 from starlette.responses import Response, StreamingResponse
 
 from ccproxy.services.adapters.base import BaseAdapter
+from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.http_handler import PluginHTTPHandler
-from ccproxy.services.provider_context import ProviderContext
 
 from .transformers import ClaudeAPIRequestTransformer, ClaudeAPIResponseTransformer
 
@@ -141,7 +141,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             )
 
         # Create simplified provider context
-        provider_context = ProviderContext(
+        handler_config = HandlerConfig(
             request_adapter=self.openai_adapter if needs_conversion else None,
             response_adapter=self.openai_adapter if needs_conversion else None,
             request_transformer=self._request_transformer,
@@ -159,7 +159,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             is_streaming,
         ) = await self._http_handler.prepare_request(
             request_body=body,
-            provider_context=provider_context,
+            handler_config=handler_config,
             auth_headers=auth_headers,
             request_headers=dict(request.headers),
             access_token=access_token,
@@ -182,7 +182,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             url=target_url,
             headers=headers,
             body=transformed_body,
-            provider_context=provider_context,
+            handler_config=handler_config,
             is_streaming=is_streaming,
             streaming_handler=self.proxy_service.streaming_handler
             if is_streaming

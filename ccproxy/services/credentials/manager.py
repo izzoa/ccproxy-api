@@ -9,11 +9,11 @@ from typing import Any
 import httpx
 from structlog import get_logger
 
-from ccproxy.auth.base import AuthManager
 from ccproxy.auth.exceptions import (
     CredentialsExpiredError,
     CredentialsNotFoundError,
 )
+from ccproxy.auth.manager import AuthManager
 from ccproxy.auth.models import (
     ClaudeCredentials,
     OAuthToken,
@@ -247,6 +247,38 @@ class CredentialsManager(AuthManager):
         """
         credentials = await self.get_valid_credentials()
         return credentials.claude_ai_oauth.access_token
+
+    async def get_credentials(self) -> ClaudeCredentials:
+        """Get valid credentials.
+
+        Returns:
+            Valid credentials
+
+        Raises:
+            CredentialsNotFoundError: If no credentials found
+            CredentialsExpiredError: If credentials expired and refresh fails
+        """
+        return await self.get_valid_credentials()
+
+    async def is_authenticated(self) -> bool:
+        """Check if current authentication is valid.
+
+        Returns:
+            True if authenticated, False otherwise
+        """
+        try:
+            await self.get_valid_credentials()
+            return True
+        except Exception:
+            return False
+
+    async def get_user_profile(self) -> UserProfile | None:
+        """Get user profile information.
+
+        Returns:
+            UserProfile if available, None otherwise
+        """
+        return await self.fetch_user_profile()
 
     async def refresh_token(self) -> ClaudeCredentials:
         """Refresh the access token without checking expiration.

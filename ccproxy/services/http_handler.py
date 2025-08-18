@@ -12,7 +12,7 @@ import structlog
 from fastapi import HTTPException
 from starlette.responses import Response, StreamingResponse
 
-from ccproxy.services.provider_context import ProviderContext
+from ccproxy.services.handler_config import HandlerConfig
 
 
 logger = structlog.get_logger(__name__)
@@ -40,7 +40,7 @@ class PluginHTTPHandler:
         url: str,
         headers: dict[str, str],
         body: bytes,
-        provider_context: ProviderContext,
+        handler_config: HandlerConfig,
         is_streaming: bool = False,
         streaming_handler: Any | None = None,
         request_context: dict[str, Any] | None = None,
@@ -52,7 +52,7 @@ class PluginHTTPHandler:
             url: Target URL
             headers: Request headers
             body: Request body
-            provider_context: Provider context with adapters and transformers
+            handler_config: Provider context with adapters and transformers
             is_streaming: Whether this is a streaming request
             streaming_handler: Optional streaming handler for SSE requests
             request_context: Optional request context for observability
@@ -69,7 +69,7 @@ class PluginHTTPHandler:
                 url=url,
                 headers=headers,
                 body=body,
-                provider_context=provider_context,
+                handler_config=handler_config,
                 request_context=request_context or {},
                 client_config=self.client_config,
             )
@@ -81,7 +81,7 @@ class PluginHTTPHandler:
                 url=url,
                 headers=headers,
                 body=body,
-                provider_context=provider_context,
+                handler_config=handler_config,
             )
 
     async def _handle_regular_request(
@@ -90,7 +90,7 @@ class PluginHTTPHandler:
         url: str,
         headers: dict[str, str],
         body: bytes,
-        provider_context: ProviderContext,
+        handler_config: HandlerConfig,
     ) -> Response:
         """Handle a regular (non-streaming) HTTP request.
 
@@ -99,7 +99,7 @@ class PluginHTTPHandler:
             url: Target URL
             headers: Request headers
             body: Request body
-            provider_context: Provider context with adapters and transformers
+            handler_config: Provider context with adapters and transformers
 
         Returns:
             Response object
@@ -119,11 +119,11 @@ class PluginHTTPHandler:
                 response_headers = dict(response.headers)
 
                 # Apply response adapter if needed
-                if provider_context.response_adapter and response.status_code < 400:
+                if handler_config.response_adapter and response.status_code < 400:
                     try:
                         response_data = json.loads(response_body)
                         adapted_data = (
-                            await provider_context.response_adapter.adapt_response(
+                            await handler_config.response_adapter.adapt_response(
                                 response_data
                             )
                         )
@@ -135,22 +135,22 @@ class PluginHTTPHandler:
                         )
 
                 # Apply response transformer if provided
-                if provider_context.response_transformer:
+                if handler_config.response_transformer:
                     if hasattr(
-                        provider_context.response_transformer, "transform_headers"
+                        handler_config.response_transformer, "transform_headers"
                     ):
                         # It's a transformer object with methods
                         transformed_headers = (
-                            provider_context.response_transformer.transform_headers(
+                            handler_config.response_transformer.transform_headers(
                                 response_headers
                             )
                         )
                         if transformed_headers:
                             response_headers = transformed_headers
-                    elif callable(provider_context.response_transformer):
+                    elif callable(handler_config.response_transformer):
                         # It's a callable function
                         try:
-                            transformed_headers = provider_context.response_transformer(
+                            transformed_headers = handler_config.response_transformer(
                                 response_headers
                             )
                             if transformed_headers:
@@ -184,7 +184,7 @@ class PluginHTTPHandler:
     async def prepare_request(
         self,
         request_body: bytes,
-        provider_context: ProviderContext,
+        handler_config: HandlerConfig,
         auth_headers: dict[str, str] | None = None,
         request_headers: dict[str, str] | None = None,
         session_id: str | None = None,
@@ -197,7 +197,7 @@ class PluginHTTPHandler:
 
         Args:
             request_body: Original request body
-            provider_context: Provider context with adapters and transformers
+            handler_config: Provider context with adapters and transformers
             auth_headers: Authentication headers to include
             request_headers: Original request headers
             session_id: Optional session ID for stateful requests
@@ -220,9 +220,9 @@ class PluginHTTPHandler:
 
         # Apply request adapter if provided
         transformed_body = request_body
-        if provider_context.request_adapter and request_body:
+        if handler_config.request_adapter and request_body:
             try:
-                adapted_data = await provider_context.request_adapter.adapt_request(
+                adapted_data = await handler_config.request_adapter.adapt_request(
                     request_data
                 )
                 transformed_body = json.dumps(adapted_data).encode()
@@ -238,8 +238,8 @@ class PluginHTTPHandler:
             headers.update(auth_headers)
 
         # Apply request transformer if provided
-        if provider_context.request_transformer and hasattr(
-            provider_context.request_transformer, "transform_headers"
+        if handler_config.request_transformer and hasattr(
+            handler_config.request_transformer, "transform_headers"
         ):
             # It's a transformer object with methods
             kwargs = {}
@@ -251,7 +251,7 @@ class PluginHTTPHandler:
 
             try:
                 transformed_headers = (
-                    provider_context.request_transformer.transform_headers(
+                    handler_config.request_transformer.transform_headers(
                         headers, **kwargs
                     )
                 )
@@ -264,14 +264,14 @@ class PluginHTTPHandler:
                     error=str(e),
                 )
                 transformed_headers = (
-                    provider_context.request_transformer.transform_headers(headers)
+                    handler_config.request_transformer.transform_headers(headers)
                 )
                 if transformed_headers:
                     headers = transformed_headers
 
             # Transform body if the transformer has that method
-            if hasattr(provider_context.request_transformer, "transform_body"):
-                transformed_body = provider_context.request_transformer.transform_body(
+            if hasattr(handler_config.request_transformer, "transform_body"):
+                transformed_body = handler_config.request_transformer.transform_body(
                     transformed_body
                 )
 

@@ -9,8 +9,8 @@ from fastapi import HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
 from ccproxy.adapters.base import APIAdapter
-from ccproxy.auth.base import AuthManager
-from ccproxy.services.provider_context import ProviderContext
+from ccproxy.auth.manager import AuthManager
+from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.proxy_service import ProxyService
 
 
@@ -19,6 +19,40 @@ class MockAuthManager(AuthManager):
 
     def __init__(self, should_fail=False):
         self.should_fail = should_fail
+
+    async def get_access_token(self) -> str:
+        """Get mock access token."""
+        if self.should_fail:
+            from ccproxy.auth.exceptions import AuthenticationError
+
+            raise AuthenticationError("Mock auth failure")
+        return "test-token"
+
+    async def get_credentials(self) -> Any:
+        """Get mock credentials."""
+        if self.should_fail:
+            from ccproxy.auth.exceptions import AuthenticationError
+
+            raise AuthenticationError("Mock auth failure")
+        from ccproxy.auth.models import ClaudeCredentials, OAuthToken
+
+        oauth_token = OAuthToken(
+            accessToken="test-token",
+            refreshToken="test-refresh",
+            expiresAt=None,
+            scopes=["test"],
+            subscriptionType="test",
+            tokenType="Bearer",
+        )
+        return ClaudeCredentials(claudeAiOauth=oauth_token)
+
+    async def is_authenticated(self) -> bool:
+        """Mock authentication check."""
+        return not self.should_fail
+
+    async def get_user_profile(self) -> Any:
+        """Get mock user profile."""
+        return None
 
     async def get_auth_headers(self) -> dict[str, str]:
         """Get mock auth headers."""
@@ -35,6 +69,14 @@ class MockAuthManager(AuthManager):
     def get_provider_name(self) -> str:
         """Get mock provider name."""
         return "mock-provider"
+
+    async def __aenter__(self) -> "MockAuthManager":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Async context manager exit."""
+        pass
 
 
 class MockAdapter(APIAdapter):
@@ -92,7 +134,7 @@ async def test_dispatch_request_success(mock_proxy_service, mock_request):
     """Test successful request dispatch."""
     auth_manager = MockAuthManager()
 
-    context = ProviderContext(
+    context = HandlerConfig(
         provider_name="test",
         auth_manager=auth_manager,
         target_base_url="https://api.test.com",
@@ -128,7 +170,7 @@ async def test_dispatch_request_with_adapter(mock_proxy_service, mock_request):
     auth_manager = MockAuthManager()
     adapter = MockAdapter()
 
-    context = ProviderContext(
+    context = HandlerConfig(
         provider_name="test",
         auth_manager=auth_manager,
         target_base_url="https://api.test.com",
@@ -170,7 +212,7 @@ async def test_dispatch_request_streaming(mock_proxy_service, mock_request):
         b'{"messages": [], "model": "claude-3", "stream": true}'
     )
 
-    context = ProviderContext(
+    context = HandlerConfig(
         provider_name="test",
         auth_manager=auth_manager,
         target_base_url="https://api.test.com",
@@ -213,7 +255,7 @@ async def test_dispatch_request_auth_failure(mock_proxy_service, mock_request):
     """Test request dispatch with authentication failure."""
     auth_manager = MockAuthManager(should_fail=True)
 
-    context = ProviderContext(
+    context = HandlerConfig(
         provider_name="test",
         auth_manager=auth_manager,
         target_base_url="https://api.test.com",
@@ -232,7 +274,7 @@ async def test_dispatch_request_with_extra_headers(mock_proxy_service, mock_requ
     """Test request dispatch with extra headers."""
     auth_manager = MockAuthManager()
 
-    context = ProviderContext(
+    context = HandlerConfig(
         provider_name="test",
         auth_manager=auth_manager,
         target_base_url="https://api.test.com",
@@ -270,7 +312,7 @@ async def test_dispatch_request_url_building(mock_proxy_service, mock_request):
     # Test with /v1 prefix removal
     mock_request.url.path = "/v1/chat/completions"
 
-    context = ProviderContext(
+    context = HandlerConfig(
         provider_name="test",
         auth_manager=auth_manager,
         target_base_url="https://api.test.com",
@@ -299,7 +341,7 @@ async def test_dispatch_request_error_response(mock_proxy_service, mock_request)
     """Test error response handling in dispatch_request."""
     auth_manager = MockAuthManager()
 
-    context = ProviderContext(
+    context = HandlerConfig(
         provider_name="test",
         auth_manager=auth_manager,
         target_base_url="https://api.test.com",

@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from ccproxy.adapters.base import APIAdapter
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
-from ccproxy.services.provider_context import ProviderContext
+from ccproxy.services.handler_config import HandlerConfig
 
 
 logger = structlog.get_logger(__name__)
@@ -44,7 +44,7 @@ class StreamingHandler:
         return "text/event-stream" in accept_header or "stream" in accept_header
 
     async def should_stream(
-        self, request_body: bytes, provider_context: ProviderContext
+        self, request_body: bytes, handler_config: HandlerConfig
     ) -> bool:
         """Check if request body has stream:true flag.
 
@@ -52,7 +52,7 @@ class StreamingHandler:
         - Parses JSON body for 'stream' field
         - Handles parse errors gracefully
         """
-        if not provider_context.supports_streaming:
+        if not handler_config.supports_streaming:
             return False
 
         try:
@@ -67,7 +67,7 @@ class StreamingHandler:
         url: str,
         headers: dict[str, str],
         body: bytes,
-        provider_context: ProviderContext,
+        handler_config: HandlerConfig,
         request_context: RequestContext,
         client_config: dict[str, Any] | None = None,
     ) -> StreamingResponse:
@@ -103,10 +103,10 @@ class StreamingHandler:
                         return
 
                     # Stream the response
-                    if provider_context.response_adapter:
+                    if handler_config.response_adapter:
                         # Process SSE events with adapter
                         async for chunk in self._process_sse_events(
-                            response, provider_context.response_adapter
+                            response, handler_config.response_adapter
                         ):
                             total_chunks += 1
                             total_bytes += len(chunk)

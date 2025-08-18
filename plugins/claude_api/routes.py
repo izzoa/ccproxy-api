@@ -11,7 +11,7 @@ from ccproxy.api.dependencies import (
     get_plugin_detection_service,
 )
 from ccproxy.auth.conditional import ConditionalAuthDep
-from ccproxy.services.provider_context import ProviderContext
+from ccproxy.services.handler_config import HandlerConfig
 
 from .transformers import ClaudeAPIRequestTransformer, ClaudeAPIResponseTransformer
 
@@ -51,7 +51,7 @@ def create_anthropic_context(
     detection_service: Any | None = None,
     request_adapter: Any | None = None,
     response_adapter: Any | None = None,
-) -> ProviderContext:
+) -> HandlerConfig:
     """Create provider context for Anthropic API requests.
 
     DEPRECATED: This function is no longer used as the routes now use the adapter pattern.
@@ -65,7 +65,7 @@ def create_anthropic_context(
         response_adapter: Optional response adapter for format conversion
 
     Returns:
-        ProviderContext configured for Anthropic API
+        HandlerConfig configured for Anthropic API
     """
     # Create transformers with detection service
     request_transformer = None
@@ -78,7 +78,7 @@ def create_anthropic_context(
     # Always use response transformer to preserve server headers
     response_transformer_obj = ClaudeAPIResponseTransformer()
 
-    return ProviderContext(
+    return HandlerConfig(
         request_adapter=request_adapter,
         response_adapter=response_adapter,
         request_transformer=request_transformer,

@@ -15,9 +15,9 @@ from ccproxy.services.adapters.mock_adapter import MockAdapter
 from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.credentials.manager import CredentialsManager
+from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.plugins import PluginManager
-from ccproxy.services.provider_context import ProviderContext
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
 
@@ -84,7 +84,7 @@ class ProxyService:
     async def dispatch_request(
         self,
         request: Request,
-        provider_context: ProviderContext,
+        handler_config: HandlerConfig,
         provider_name: str | None = None,
     ) -> Response | StreamingResponse:
         """Pure delegation to adapters.
@@ -94,8 +94,8 @@ class ProxyService:
 
         Args:
             request: The incoming request
-            provider_context: The processing context
-            provider_name: The provider to route to (required since context no longer has it)
+            handler_config: The processing configuration
+            provider_name: The provider to route to (required since config no longer has it)
         """
         # 1. Check plugin manager is available
         if not self.plugin_manager:

@@ -24,6 +24,8 @@ class PluginManager:
         self,
         plugin_registry: PluginRegistry | None = None,
         proxy_service: Any | None = None,
+        auto_install_deps: bool = False,
+        require_user_consent: bool = True,
     ) -> None:
         """Initialize with plugin registry and optional proxy service reference.
 
@@ -31,8 +33,17 @@ class PluginManager:
         - Maintains adapter cache
         - Tracks initialization state
         - Stores proxy service reference to break circular dependency
+
+        Args:
+            plugin_registry: Optional plugin registry instance
+            proxy_service: Optional proxy service reference
+            auto_install_deps: Whether to automatically install missing dependencies
+            require_user_consent: Whether to require user consent before installing
         """
-        self.plugin_registry = plugin_registry or PluginRegistry()
+        self.plugin_registry = plugin_registry or PluginRegistry(
+            auto_install_deps=auto_install_deps,
+            require_user_consent=require_user_consent,
+        )
         self.adapters: dict[str, BaseAdapter] = {}
         self.tracers: dict[str, RequestTracer] = {}
         self.initialized = False
@@ -75,8 +86,11 @@ class PluginManager:
                 proxy_service=self._proxy_service,  # Pass proxy service reference
             )
 
-            # Discover all plugins using loader
-            loader = PluginLoader()
+            # Discover all plugins using loader (use registry's dependency settings)
+            loader = PluginLoader(
+                auto_install=self.plugin_registry._auto_install_deps,
+                require_user_consent=self.plugin_registry._require_user_consent,
+            )
             plugin_instances = await loader.discover_plugins()
             logger.debug(f"Discovered {len(plugin_instances)} plugins")
 
