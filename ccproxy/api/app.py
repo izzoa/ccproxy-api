@@ -29,6 +29,8 @@ from ccproxy.api.routes.plugins import router as plugins_router
 # proxy routes are now handled by plugin system
 from ccproxy.auth.oauth.routes import router as oauth_router
 from ccproxy.config.settings import Settings, get_settings
+from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
+from ccproxy.core.http_client import close_shared_http_client
 from ccproxy.core.logging import setup_logging
 from ccproxy.utils.models_provider import get_models_list
 from ccproxy.utils.startup_helpers import (
@@ -65,48 +67,27 @@ class ShutdownComponent(TypedDict):
     shutdown: Callable[[FastAPI], Awaitable[None]] | None
 
 
-# Define lifecycle components for startup/shutdown organization
-LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
-    {
-        "name": "Claude Authentication",
-        "startup": validate_claude_authentication_startup,
-        "shutdown": None,  # One-time validation, no cleanup needed
-    },
-    {
-        "name": "Version Check",
-        "startup": check_version_updates_startup,
-        "shutdown": None,  # One-time check, no cleanup needed
-    },
-    {
-        "name": "Claude CLI",
-        "startup": check_claude_cli_startup,
-        "shutdown": None,  # Detection only, no cleanup needed
-    },
-    {
-        "name": "Scheduler",
-        "startup": setup_scheduler_startup,
-        "shutdown": setup_scheduler_shutdown,
-    },
-    {
-        "name": "Log Storage",
-        "startup": initialize_log_storage_startup,
-        "shutdown": initialize_log_storage_shutdown,
-    },
-    {
-        "name": "Permission Service",
-        "startup": initialize_permission_service_startup,
-        "shutdown": setup_permission_service_shutdown,
-    },
-    {
-        "name": "Proxy Service",
-        "startup": initialize_proxy_service_startup,
-        "shutdown": None,  # Cleaned up with app shutdown
-    },
-]
+# Define startup/shutdown functions first
+async def setup_task_manager_startup(app: FastAPI, settings: Settings) -> None:
+    """Start the async task manager."""
+    await start_task_manager()
+    logger.debug("task_manager_startup_completed")
+
+
+async def setup_task_manager_shutdown(app: FastAPI) -> None:
+    """Stop the async task manager."""
+    await stop_task_manager()
+    logger.debug("task_manager_shutdown_completed")
+
+
+async def setup_http_client_shutdown(app: FastAPI) -> None:
+    """Close the shared HTTP client."""
+    await close_shared_http_client()
+    logger.debug("shared_http_client_shutdown_completed")
 
 
 async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
-    """Initialize plugin system during startup."""
+    """Initialize plugins during startup."""
     if not settings.enable_plugins:
         logger.info("plugin_system_disabled")
         return
@@ -162,6 +143,51 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
         )
 
 
+# Define lifecycle components for startup/shutdown organization
+LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
+    {
+        "name": "Task Manager",
+        "startup": setup_task_manager_startup,
+        "shutdown": setup_task_manager_shutdown,
+    },
+    {
+        "name": "Claude Authentication",
+        "startup": validate_claude_authentication_startup,
+        "shutdown": None,  # One-time validation, no cleanup needed
+    },
+    {
+        "name": "Version Check",
+        "startup": check_version_updates_startup,
+        "shutdown": None,  # One-time check, no cleanup needed
+    },
+    {
+        "name": "Claude CLI",
+        "startup": check_claude_cli_startup,
+        "shutdown": None,  # Detection only, no cleanup needed
+    },
+    {
+        "name": "Scheduler",
+        "startup": setup_scheduler_startup,
+        "shutdown": setup_scheduler_shutdown,
+    },
+    {
+        "name": "Log Storage",
+        "startup": initialize_log_storage_startup,
+        "shutdown": initialize_log_storage_shutdown,
+    },
+    {
+        "name": "Permission Service",
+        "startup": initialize_permission_service_startup,
+        "shutdown": setup_permission_service_shutdown,
+    },
+    {
+        "name": "Proxy Service",
+        "startup": initialize_proxy_service_startup,
+        "shutdown": None,  # Cleaned up with app shutdown
+    },
+]
+
+
 # Add plugin initialization to lifecycle components
 LIFECYCLE_COMPONENTS.append(
     {
@@ -171,11 +197,14 @@ LIFECYCLE_COMPONENTS.append(
     }
 )
 
-# Additional shutdown-only components that need special handling
 SHUTDOWN_ONLY_COMPONENTS: list[ShutdownComponent] = [
     {
         "name": "Streaming Batches",
         "shutdown": flush_streaming_batches_shutdown,
+    },
+    {
+        "name": "Shared HTTP Client",
+        "shutdown": setup_http_client_shutdown,
     },
 ]
 

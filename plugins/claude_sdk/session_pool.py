@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from claude_code_sdk import ClaudeCodeOptions
 
+from ccproxy.core.async_task_manager import create_managed_task
 from ccproxy.core.errors import ClaudeProxyError, ServiceUnavailableError
 
 from .config import SessionPoolSettings
@@ -44,7 +45,11 @@ class SessionPool:
             cleanup_interval=self.config.cleanup_interval,
         )
 
-        self.cleanup_task = asyncio.create_task(self._cleanup_loop())
+        self.cleanup_task = await create_managed_task(
+            self._cleanup_loop(),
+            name="session_pool_cleanup",
+            creator="SessionPool",
+        )
 
     async def stop(self) -> None:
         """Stop the session pool and cleanup all sessions."""
@@ -332,7 +337,7 @@ class SessionPool:
         )
 
         # Start connection in background
-        connection_task = session_client.connect_background()
+        connection_task = await session_client.connect_background()
 
         # Add to sessions immediately (will connect in background)
         self.sessions[session_id] = session_client

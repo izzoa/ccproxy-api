@@ -14,6 +14,11 @@ from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widgets import Label, Static
 
+from ccproxy.core.async_task_manager import (
+    create_fire_and_forget_task,
+    create_managed_task,
+)
+
 from ..models import PermissionRequest
 
 
@@ -484,7 +489,20 @@ class TerminalPermissionHandler:
     def _ensure_processing_task_running(self) -> None:
         """Ensure the processing task is running."""
         if self._processing_task is None or self._processing_task.done():
-            self._processing_task = asyncio.create_task(self._process_queue())
+            # Use fire-and-forget since this is called from sync context
+            create_fire_and_forget_task(
+                self._create_processing_task(),
+                name="terminal_handler_processing",
+                creator="TerminalHandler",
+            )
+
+    async def _create_processing_task(self) -> None:
+        """Create the processing task in async context."""
+        self._processing_task = await create_managed_task(
+            self._process_queue(),
+            name="terminal_handler_queue_processor",
+            creator="TerminalHandler",
+        )
 
     async def _queue_and_wait_for_result(self, request: PermissionRequest) -> bool:
         """Queue a request and wait for its result."""
@@ -549,7 +567,11 @@ class TerminalPermissionHandler:
         if request_id in self._active_apps:
             app = self._active_apps[request_id]
             # Schedule the cancellation feedback asynchronously
-            asyncio.create_task(self._cancel_active_dialog(app, reason))
+            create_fire_and_forget_task(
+                self._cancel_active_dialog(app, reason),
+                name="terminal_dialog_cancel",
+                creator="TerminalHandler",
+            )
 
     async def _cancel_active_dialog(self, app: ConfirmationApp, reason: str) -> None:
         """Cancel an active dialog with visual feedback.

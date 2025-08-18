@@ -2,11 +2,13 @@
 
 from typing import TYPE_CHECKING
 
+import httpx
 import structlog
 
 from ccproxy.adapters.openai.adapter import OpenAIAdapter
 from ccproxy.config.settings import Settings
 from ccproxy.core.http import BaseProxyClient
+from ccproxy.core.http_client import HTTPClientFactory
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.plugins.registry import PluginRegistry
 from ccproxy.services.auth import AuthenticationService
@@ -48,6 +50,7 @@ class ServiceContainer:
         self._proxy_config: ProxyConfiguration | None = None
         self._plugin_manager: PluginManager | None = None
         self._metrics: PrometheusMetrics | None = None
+        self._http_client: httpx.AsyncClient | None = None
 
         logger.debug("ServiceContainer initialized")
 
@@ -59,8 +62,12 @@ class ServiceContainer:
     ) -> "ProxyService":
         """Factory method to create fully configured ProxyService.
 
-        - Passes all required services
-        - Returns ready-to-use ProxyService instance
+        This method breaks the circular dependency by:
+        1. Creating ProxyService without PluginManager first
+        2. Creating PluginManager with ProxyService reference
+        3. Setting the PluginManager on ProxyService
+
+        - Returns ready-to-use ProxyService instance with no circular dependencies
         """
         # Import here to avoid circular dependency
         from ccproxy.services.proxy_service import ProxyService
@@ -69,7 +76,7 @@ class ServiceContainer:
         if metrics:
             self._metrics = metrics
 
-        # Create the proxy service with all dependencies
+        # STEP 1: Create ProxyService without PluginManager first
         proxy_service = ProxyService(
             proxy_client=proxy_client,
             credentials_manager=credentials_manager,
@@ -80,11 +87,21 @@ class ServiceContainer:
             request_transformer=self.get_request_transformer(),
             auth_service=self.get_auth_service(credentials_manager),
             config=self.get_proxy_config(),
-            plugin_manager=self.get_plugin_manager(),
+            http_client=self.get_http_client(),
+            plugin_manager=None,  # Will be set in step 3
             metrics=metrics,
         )
 
-        logger.debug("ProxyService created with all dependencies")
+        # STEP 2: Create PluginManager with ProxyService reference
+        plugin_registry = PluginRegistry()
+        plugin_manager = PluginManager(plugin_registry, proxy_service)
+
+        # STEP 3: Set PluginManager on ProxyService
+        proxy_service.set_plugin_manager(plugin_manager)
+
+        logger.debug(
+            "ProxyService created with all dependencies (no circular dependencies)"
+        )
         return proxy_service
 
     def get_request_tracer(self) -> CoreRequestTracer:
@@ -130,11 +147,15 @@ class ServiceContainer:
         return self._request_transformer
 
     def get_plugin_manager(self) -> PluginManager:
-        """Get singleton plugin manager instance."""
+        """Get singleton plugin manager instance.
+
+        NOTE: This method is deprecated in favor of the factory pattern
+        in create_proxy_service() which avoids circular dependencies.
+        """
         if not self._plugin_manager:
             plugin_registry = PluginRegistry()
-            self._plugin_manager = PluginManager(plugin_registry)
-            logger.debug("Created PluginManager")
+            self._plugin_manager = PluginManager(plugin_registry, None)
+            logger.debug("Created PluginManager (deprecated path)")
         return self._plugin_manager
 
     def get_auth_service(
@@ -152,3 +173,24 @@ class ServiceContainer:
             self._proxy_config = ProxyConfiguration()
             logger.debug("Created ProxyConfiguration")
         return self._proxy_config
+
+    def get_http_client(self) -> httpx.AsyncClient:
+        """Get singleton shared HTTP client instance.
+
+        This provides the centralized HTTP client with optimized configuration
+        for the proxy use case, addressing Issue #9.
+
+        Returns:
+            Shared httpx.AsyncClient instance
+        """
+        if not self._http_client:
+            self._http_client = HTTPClientFactory.create_shared_client(self.settings)
+            logger.debug("Created shared HTTP client")
+        return self._http_client
+
+    async def close(self) -> None:
+        """Close all managed resources during shutdown."""
+        if self._http_client:
+            await self._http_client.aclose()
+            self._http_client = None
+            logger.debug("Closed shared HTTP client")

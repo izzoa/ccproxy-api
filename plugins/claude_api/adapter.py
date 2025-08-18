@@ -36,7 +36,7 @@ class ClaudeAPIAdapter(BaseAdapter):
         """Initialize the Claude API adapter.
 
         Args:
-            proxy_service: ProxyService instance for handling requests (can be None, will be set later)
+            proxy_service: ProxyService instance for handling requests (can be None initially)
             auth_manager: Authentication manager for credentials
             detection_service: Detection service for Claude CLI detection
             http_client: Optional HTTP client for making requests
@@ -86,13 +86,16 @@ class ClaudeAPIAdapter(BaseAdapter):
     def set_proxy_service(self, proxy_service: Any) -> None:
         """Set the proxy service and complete initialization.
 
-        This is called by the plugin manager after the adapter is created.
+        DEPRECATED: This method is deprecated. ProxyService should be passed
+        to the constructor instead to avoid the anti-pattern of delayed initialization.
 
         Args:
             proxy_service: ProxyService instance for handling requests
         """
-        self.proxy_service = proxy_service
-        self._complete_initialization()
+        if self.proxy_service is None:
+            self.proxy_service = proxy_service
+            self._complete_initialization()
+        # If already set via constructor, ignore this call
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any

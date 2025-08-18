@@ -13,6 +13,7 @@ import typer
 from structlog import get_logger
 
 from ccproxy.config.settings import get_settings
+from ccproxy.core.async_task_manager import create_managed_task
 
 from ..models import PermissionRequest
 from .protocol import ConfirmationHandlerProtocol
@@ -142,8 +143,10 @@ class SSEConfirmationHandler:
             return
 
         if self.ui and request_id is not None:
-            task = asyncio.create_task(
-                self._handle_permission_with_cancellation(request)
+            task = await create_managed_task(
+                self._handle_permission_with_cancellation(request),
+                name=f"cli_permission_handler_{request_id}",
+                creator="CLIConfirmationHandler",
             )
             self._ongoing_requests[request_id] = task
 

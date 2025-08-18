@@ -21,6 +21,7 @@ import pytest
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from ccproxy.api.app import create_app
 from ccproxy.observability.context import RequestContext
@@ -179,7 +180,9 @@ def auth_settings(isolated_environment: Path) -> Settings:
     """
     return Settings(
         server=ServerSettings(log_level="WARNING"),
-        security=SecuritySettings(auth_token="test-auth-token-12345"),  # Auth enabled
+        security=SecuritySettings(
+            auth_token=SecretStr("test-auth-token-12345")
+        ),  # Auth enabled
         auth=AuthSettings(
             storage=CredentialStorageSettings(
                 storage_paths=[isolated_environment / ".claude/"]

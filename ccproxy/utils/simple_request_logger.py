@@ -9,6 +9,8 @@ from typing import Any
 
 import structlog
 
+from ccproxy.core.async_task_manager import create_managed_task
+
 
 logger = structlog.get_logger(__name__)
 
@@ -216,8 +218,10 @@ async def append_streaming_log(
         await _flush_streaming_batch(batch_key)
     else:
         # Schedule a delayed flush
-        batch["last_flush_task"] = asyncio.create_task(
-            _delayed_flush_streaming_batch(batch_key, _STREAMING_BATCH_TIMEOUT)
+        batch["last_flush_task"] = await create_managed_task(
+            _delayed_flush_streaming_batch(batch_key, _STREAMING_BATCH_TIMEOUT),
+            name=f"flush_batch_{batch_key}",
+            creator="simple_request_logger",
         )
 
 

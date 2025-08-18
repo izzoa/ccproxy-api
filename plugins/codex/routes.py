@@ -1,7 +1,7 @@
 """Codex plugin routes."""
 
 import uuid
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response, StreamingResponse
@@ -13,8 +13,11 @@ from ccproxy.api.dependencies import (
 from ccproxy.auth.conditional import ConditionalAuthDep
 
 
+if TYPE_CHECKING:
+    from .adapter import CodexAdapter
+
 # Type aliases for dependency injection using centralized plugin dependencies
-CodexAdapterDep = Annotated[Any, Depends(get_plugin_adapter("codex"))]
+CodexAdapterDep = Annotated["CodexAdapter", Depends(get_plugin_adapter("codex"))]
 CodexDetectionDep = Annotated[Any, Depends(get_plugin_detection_service("codex"))]
 
 

@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from ccproxy.core.async_task_manager import create_fire_and_forget_task
+
 
 if TYPE_CHECKING:
     from ccproxy.observability.context import RequestContext
@@ -427,8 +429,6 @@ def log_request_start(
     # Emit SSE event for real-time dashboard updates
     # Note: This is a synchronous function, so we schedule the async emission
     try:
-        import asyncio
-
         from ccproxy.observability.sse_events import emit_sse_event
 
         # Create event data for SSE
@@ -445,7 +445,11 @@ def log_request_start(
         sse_data = {k: v for k, v in sse_data.items() if v is not None}
 
         # Schedule async event emission
-        asyncio.create_task(emit_sse_event("request_start", sse_data))
+        create_fire_and_forget_task(
+            emit_sse_event("request_start", sse_data),
+            name="sse_request_start",
+            creator="access_logger",
+        )
 
     except Exception as e:
         # Log error but don't fail the request

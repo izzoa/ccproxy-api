@@ -148,7 +148,7 @@ class Plugin(ProviderPlugin):
 
         # Now create the adapter with all required dependencies
         self._adapter = CodexAdapter(
-            proxy_service=None,  # Will be set by plugin manager
+            proxy_service=services.proxy_service,  # Use proxy service from core services
             auth_manager=auth_manager,
             detection_service=detection_service,
             http_client=services.http_client,

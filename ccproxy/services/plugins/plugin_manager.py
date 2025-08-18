@@ -20,18 +20,26 @@ logger = structlog.get_logger(__name__)
 class PluginManager:
     """Manages plugin lifecycle and adapter registry."""
 
-    def __init__(self, plugin_registry: PluginRegistry | None = None) -> None:
-        """Initialize with plugin registry.
+    def __init__(
+        self,
+        plugin_registry: PluginRegistry | None = None,
+        proxy_service: Any | None = None,
+    ) -> None:
+        """Initialize with plugin registry and optional proxy service reference.
 
         - Wraps existing PluginRegistry
         - Maintains adapter cache
         - Tracks initialization state
+        - Stores proxy service reference to break circular dependency
         """
         self.plugin_registry = plugin_registry or PluginRegistry()
         self.adapters: dict[str, BaseAdapter] = {}
         self.tracers: dict[str, RequestTracer] = {}
         self.initialized = False
         self._http_client: httpx.AsyncClient | None = None
+        self._proxy_service = (
+            proxy_service  # Store reference to break circular dependency
+        )
 
     async def initialize_plugins(
         self,
@@ -57,13 +65,14 @@ class PluginManager:
             # Get settings for CoreServices
             settings = get_settings()
 
-            # Create proper CoreServices for plugins with registry reference
+            # Create proper CoreServices for plugins with registry and proxy service references
             core_services = CoreServices(
                 http_client=http_client,
                 logger=logger,
                 settings=settings,
                 scheduler=scheduler,
                 plugin_registry=self.plugin_registry,
+                proxy_service=self._proxy_service,  # Pass proxy service reference
             )
 
             # Discover all plugins using loader
@@ -83,9 +92,8 @@ class PluginManager:
                     # Get the adapter from registry
                     adapter = self.plugin_registry._adapters.get(plugin_instance.name)
 
-                    # Set proxy service reference if adapter supports it
-                    if adapter and hasattr(adapter, "set_proxy_service"):
-                        adapter.set_proxy_service(proxy_service)
+                    # NOTE: Adapters should already have ProxyService reference from constructor
+                    # No need for set_proxy_service() anti-pattern anymore
 
                     # Store adapter reference locally for quick access
                     if adapter:

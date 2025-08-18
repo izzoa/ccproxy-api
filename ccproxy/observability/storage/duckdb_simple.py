@@ -18,6 +18,8 @@ from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine, desc, func, select
 from typing_extensions import TypedDict
 
+from ccproxy.core.async_task_manager import create_managed_task
+
 from .models import AccessLog
 
 
@@ -106,8 +108,10 @@ class SimpleDuckDBStorage:
             self._create_schema_sync()
 
             # Start background worker for queue processing
-            self._background_worker_task = asyncio.create_task(
-                self._background_worker()
+            self._background_worker_task = await create_managed_task(
+                self._background_worker(),
+                name="duckdb_background_worker",
+                creator="SimpleDuckDBStorage",
             )
 
             self._initialized = True

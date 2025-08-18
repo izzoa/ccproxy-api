@@ -91,8 +91,10 @@ class Plugin(ProviderPlugin):
             )
             raise RuntimeError(error_msg)
 
-        # Initialize adapter with plugin config
-        self._adapter = ClaudeSDKAdapter(config=self._config)
+        # Initialize adapter with plugin config and proxy service
+        self._adapter = ClaudeSDKAdapter(
+            config=self._config, proxy_service=services.proxy_service
+        )
 
         # Set detection service on adapter
         self._adapter.set_detection_service(self._detection_service)

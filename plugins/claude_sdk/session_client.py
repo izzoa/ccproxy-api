@@ -11,6 +11,7 @@ import structlog
 from claude_code_sdk import ClaudeCodeOptions
 from pydantic import BaseModel
 
+from ccproxy.core.async_task_manager import create_managed_task
 from ccproxy.core.async_utils import patched_typing
 from ccproxy.utils.id_generator import generate_client_id
 
@@ -151,14 +152,18 @@ class SessionClient:
 
                 return False
 
-    def connect_background(self) -> asyncio.Task[bool]:
+    async def connect_background(self) -> asyncio.Task[bool]:
         """Start connection in background without blocking.
 
         Returns:
             Task that completes when connection is established
         """
         if self._connection_task is None or self._connection_task.done():
-            self._connection_task = asyncio.create_task(self._connect_async())
+            self._connection_task = await create_managed_task(
+                self._connect_async(),
+                name=f"session_connect_{self.session_id}",
+                creator="SessionClient",
+            )
             logger.debug(
                 "session_background_connection_started",
                 session_id=self.session_id,

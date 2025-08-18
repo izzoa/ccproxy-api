@@ -10,6 +10,8 @@ from typing import Any
 
 import structlog
 
+from ccproxy.core.async_task_manager import create_managed_task
+
 
 logger = structlog.get_logger(__name__)
 
@@ -115,7 +117,11 @@ class BaseScheduledTask(ABC):
 
         try:
             await self.setup()
-            self._task = asyncio.create_task(self._run_loop())
+            self._task = await create_managed_task(
+                self._run_loop(),
+                name=f"scheduled_task_{self.name}",
+                creator="BaseScheduledTask",
+            )
             logger.debug("task_started", task_name=self.name)
         except Exception as e:
             self._running = False

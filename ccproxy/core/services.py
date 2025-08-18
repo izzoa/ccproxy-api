@@ -11,6 +11,7 @@ from ccproxy.config.settings import Settings
 if TYPE_CHECKING:
     from ccproxy.plugins.registry import PluginRegistry
     from ccproxy.scheduler.core import Scheduler
+    from ccproxy.services.proxy_service import ProxyService
 
 
 class CoreServices:
@@ -23,6 +24,7 @@ class CoreServices:
         settings: Settings,
         scheduler: "Scheduler | None" = None,
         plugin_registry: "PluginRegistry | None" = None,
+        proxy_service: "ProxyService | None" = None,
     ):
         """Initialize core services.
 
@@ -32,12 +34,14 @@ class CoreServices:
             settings: Application settings
             scheduler: Optional scheduler for plugin tasks
             plugin_registry: Optional plugin registry for config introspection
+            proxy_service: Optional proxy service reference for adapter initialization
         """
         self.http_client = http_client
         self.logger = logger
         self.settings = settings
         self.scheduler = scheduler
         self.plugin_registry = plugin_registry
+        self.proxy_service = proxy_service
 
     def get_plugin_config(self, plugin_name: str) -> dict[str, Any]:
         """Get configuration for a specific plugin.

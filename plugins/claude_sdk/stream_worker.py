@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from ccproxy.adapters.sdk import models as sdk_models
+from ccproxy.core.async_task_manager import create_managed_task
 
 from .exceptions import StreamTimeoutError
 from .message_queue import MessageQueue
@@ -91,7 +92,11 @@ class StreamWorker:
         self._started_at = time.time()
 
         # Create worker task
-        self._worker_task = asyncio.create_task(self._run_worker())
+        self._worker_task = await create_managed_task(
+            self._run_worker(),
+            name=f"stream_worker_{self.worker_id}",
+            creator="StreamWorker",
+        )
 
         logger.debug(
             "stream_worker_started",

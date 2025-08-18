@@ -70,8 +70,8 @@ class PluginRegistry:
                 await plugin.initialize(self._services)
                 self._initialized_plugins.add(plugin.name)
 
-            # Create adapter after initialization
-            adapter = plugin.create_adapter()
+            # Create adapter after initialization (with proxy service if available)
+            adapter = self._create_adapter_with_proxy_service(plugin)
             self._adapters[plugin.name] = adapter
 
             # Register scheduled tasks if plugin has them and scheduler is available
@@ -166,6 +166,39 @@ class PluginRegistry:
         # Track tasks for this plugin for cleanup
         if registered_tasks:
             self._plugin_tasks[plugin.name] = registered_tasks
+
+    def _create_adapter_with_proxy_service(self, plugin: ProviderPlugin) -> BaseAdapter:
+        """Create adapter with ProxyService reference to avoid set_proxy_service anti-pattern.
+
+        Since plugins now receive ProxyService via CoreServices during initialization,
+        adapters should be fully initialized when created. This factory method
+        is kept for backward compatibility but should no longer need special handling.
+
+        Args:
+            plugin: Plugin instance to create adapter for
+
+        Returns:
+            Properly initialized adapter with ProxyService reference
+        """
+        # The plugin should have created the adapter with all dependencies
+        # via the ProxyService reference in CoreServices during initialization
+        adapter = plugin.create_adapter()
+
+        # Legacy support: If adapter still has set_proxy_service and wasn't properly initialized
+        if (
+            hasattr(adapter, "set_proxy_service")
+            and self._services
+            and hasattr(self._services, "proxy_service")
+            and self._services.proxy_service
+            and (not hasattr(adapter, "proxy_service") or adapter.proxy_service is None)
+        ):
+            logger.warning(
+                f"Adapter {type(adapter).__name__} still using deprecated set_proxy_service pattern",
+                plugin=plugin.name,
+            )
+            adapter.set_proxy_service(self._services.proxy_service)
+
+        return adapter
 
     def get_plugin_summary(self, plugin_name: str) -> dict[str, Any] | None:
         """Get consolidated summary information for a plugin.

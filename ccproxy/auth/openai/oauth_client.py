@@ -15,6 +15,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 
+from ccproxy.core.async_task_manager import create_managed_task
 from plugins.codex.config import CodexSettings
 
 from .credentials import OpenAICredentials, OpenAITokenManager
@@ -289,7 +290,11 @@ class OpenAIOAuthClient:
         app = self._create_callback_app(code_verifier, state)
 
         # Start callback server
-        self._server_task = asyncio.create_task(self._run_callback_server(app))
+        self._server_task = await create_managed_task(
+            self._run_callback_server(app),
+            name="oauth_callback_server",
+            creator="OpenAIOAuthClient",
+        )
 
         # Give server time to start
         await asyncio.sleep(1)

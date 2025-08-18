@@ -192,13 +192,17 @@ class HTTPXClient(HTTPClient):
         try:
             client = await self._get_client()
 
-            # Use the existing client and pass timeout to the request
+            # Use the existing client and pass timeout to the request method
+            # This fixes Issue #9 by avoiding creating new client instances
+            # for custom timeouts
+            request_timeout = timeout if timeout is not None else self.timeout
+
             response = await client.request(
                 method=method,
                 url=url,
                 headers=headers,
                 content=body,
-                timeout=timeout,  # Pass timeout to the request method
+                timeout=request_timeout,  # Pass timeout to the request method
             )
 
             # Always return the response, even for error status codes

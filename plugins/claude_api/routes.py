@@ -1,6 +1,6 @@
 """Claude API plugin routes."""
 
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response
@@ -16,11 +16,16 @@ from ccproxy.services.provider_context import ProviderContext
 from .transformers import ClaudeAPIRequestTransformer, ClaudeAPIResponseTransformer
 
 
+if TYPE_CHECKING:
+    from .adapter import ClaudeAPIAdapter
+
 router = APIRouter(tags=["plugin-claude-api"])
 
 
 # Type aliases for dependency injection using centralized plugin dependencies
-ClaudeAPIAdapterDep = Annotated[Any, Depends(get_plugin_adapter("claude_api"))]
+ClaudeAPIAdapterDep = Annotated[
+    "ClaudeAPIAdapter", Depends(get_plugin_adapter("claude_api"))
+]
 ClaudeAPIDetectionDep = Annotated[
     Any, Depends(get_plugin_detection_service("claude_api"))
 ]

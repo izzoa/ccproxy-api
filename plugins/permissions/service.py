@@ -7,6 +7,7 @@ from typing import Any
 
 from structlog import get_logger
 
+from ccproxy.core.async_task_manager import create_managed_task
 from ccproxy.core.errors import (
     PermissionNotFoundError,
 )
@@ -35,7 +36,11 @@ class PermissionService:
 
     async def start(self) -> None:
         if self._expiry_task is None:
-            self._expiry_task = asyncio.create_task(self._expiry_checker())
+            self._expiry_task = await create_managed_task(
+                self._expiry_checker(),
+                name="permission_expiry_checker",
+                creator="PermissionService",
+            )
             logger.debug("permission_service_started")
 
     async def stop(self) -> None:

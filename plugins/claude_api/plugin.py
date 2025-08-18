@@ -105,7 +105,7 @@ class Plugin(ProviderPlugin):
 
         # Initialize adapter with all required dependencies
         self._adapter = ClaudeAPIAdapter(
-            proxy_service=None,  # Will be set by plugin manager via set_proxy_service
+            proxy_service=services.proxy_service,  # Use proxy service from core services
             auth_manager=self._credentials_manager,
             detection_service=self._detection_service,
             http_client=services.http_client,

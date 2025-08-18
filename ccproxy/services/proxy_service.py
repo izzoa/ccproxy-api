@@ -42,7 +42,9 @@ class ProxyService:
         request_transformer: RequestTransformer,
         auth_service: AuthenticationService,
         config: ProxyConfiguration,
-        plugin_manager: PluginManager,
+        http_client: httpx.AsyncClient,  # Shared HTTP client for centralized management
+        plugin_manager: PluginManager
+        | None,  # Can be None initially to break circular dependency
         metrics: PrometheusMetrics | None = None,
     ) -> None:
         """Initialize with all dependencies injected.
@@ -66,36 +68,48 @@ class ProxyService:
         self.plugin_manager = plugin_manager
         self.metrics = metrics
 
-        # HTTP client for regular requests
-        self._http_client: httpx.AsyncClient | None = None
+        # Shared HTTP client (injected for centralized management)
+        self.http_client = http_client
 
-        logger.debug("ProxyService initialized with injected services")
+        logger.debug(
+            "ProxyService initialized with injected services and shared HTTP client"
+        )
+
+    def set_plugin_manager(self, plugin_manager: PluginManager) -> None:
+        """Set the plugin manager to break circular dependency.
+
+        This method is called by the ServiceContainer factory to complete
+        initialization after both ProxyService and PluginManager are created.
+        """
+        self.plugin_manager = plugin_manager
+        logger.debug("PluginManager set on ProxyService (circular dependency resolved)")
 
     async def dispatch_request(
         self, request: Request, provider_context: ProviderContext
     ) -> Response | StreamingResponse:
         """Pure delegation to adapters."""
-        # 1. Prepare context
+        # 1. Check plugin manager is available
+        if not self.plugin_manager:
+            raise HTTPException(503, "Plugin manager not initialized")
+
+        # 2. Prepare context
         request_id = str(uuid.uuid4())
         body = await request.body()
 
-        # 2. Check bypass mode first
+        # 3. Check bypass mode first
         if self.settings.server.bypass_mode:
             mock_adapter = MockAdapter(self.mock_handler)
             return await mock_adapter.handle_request(
                 request, str(request.url.path), request.method, request_id=request_id
             )
 
-        # 3. Get provider adapter
+        # 4. Get provider adapter
         adapter = self.plugin_manager.get_plugin_adapter(provider_context.provider_name)
         if not adapter:
             raise HTTPException(404, f"No adapter for {provider_context.provider_name}")
 
-        # 4. Set proxy service on adapter if needed
-        if hasattr(adapter, "set_proxy_service"):
-            adapter.set_proxy_service(self)
-
-        # 5. Delegate everything
+        # 5. Adapters should already have ProxyService reference (no set_proxy_service needed)
+        # 6. Delegate everything
         return await adapter.handle_request(
             request, str(request.url.path), request.method
         )
@@ -105,31 +119,27 @@ class ProxyService:
 
         - Delegates to plugin_manager
         - Called once during app startup
+        - Uses the shared HTTP client for centralized management
         """
-        # Create HTTP client for plugins
-        client_config = self.config.get_httpx_client_config()
-        http_client = httpx.AsyncClient(**client_config)
+        if not self.plugin_manager:
+            raise RuntimeError(
+                "Plugin manager not set - check ServiceContainer initialization"
+            )
 
-        # Initialize plugins with proper parameters
-        await self.plugin_manager.initialize_plugins(http_client, self, scheduler)
-
-        # Store HTTP client reference
-        self._http_client = http_client
+        # Initialize plugins with the shared HTTP client
+        await self.plugin_manager.initialize_plugins(self.http_client, self, scheduler)
 
     async def close(self) -> None:
         """Clean up resources on shutdown.
 
         - Closes proxy client
         - Closes credentials manager
-        - Any other cleanup needed
+        - Does NOT close HTTP client (managed by ServiceContainer)
         """
         try:
-            # Close HTTP client if exists
-            if self._http_client:
-                await self._http_client.aclose()
-
             # Close plugin manager
-            await self.plugin_manager.close()
+            if self.plugin_manager:
+                await self.plugin_manager.close()
 
             # Close proxy client
             if hasattr(self.proxy_client, "close"):

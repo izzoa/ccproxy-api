@@ -29,12 +29,15 @@ class ClaudeSDKAdapter(BaseAdapter):
     following the same pattern as claude_api and codex plugins.
     """
 
-    def __init__(self, config: ClaudeSDKSettings) -> None:
+    def __init__(
+        self, config: ClaudeSDKSettings, proxy_service: Any | None = None
+    ) -> None:
         """Initialize the Claude SDK adapter."""
         import uuid
 
         self.logger = structlog.get_logger(__name__)
         self.config = config
+        self.proxy_service = proxy_service
 
         # Generate or set default session ID
         self._runtime_default_session_id = None
@@ -97,10 +100,15 @@ class ClaudeSDKAdapter(BaseAdapter):
     def set_proxy_service(self, proxy_service: Any) -> None:
         """Set the proxy service for request handling.
 
+        DEPRECATED: This method is deprecated. ProxyService should be passed
+        to the constructor instead to avoid the anti-pattern of delayed initialization.
+
         Args:
             proxy_service: ProxyService instance for handling requests
         """
-        self.proxy_service = proxy_service
+        if self.proxy_service is None:
+            self.proxy_service = proxy_service
+        # If already set via constructor, ignore this call
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any

@@ -10,6 +10,8 @@ from typing import Any
 
 import structlog
 
+from ccproxy.core.async_task_manager import create_managed_task
+
 from .config import SessionPoolSettings
 from .message_queue import QueueListener
 from .session_client import SessionClient
@@ -245,7 +247,11 @@ class StreamHandle:
                         # Schedule interrupt using a background task with timeout control
                         try:
                             # Create a background task with proper timeout and error handling
-                            asyncio.create_task(self._safe_interrupt_with_timeout())
+                            await create_managed_task(
+                                self._safe_interrupt_with_timeout(),
+                                name=f"stream_interrupt_{self.handle_id}",
+                                creator="StreamHandle",
+                            )
                             logger.debug(
                                 "stream_handle_interrupt_scheduled",
                                 handle_id=self.handle_id,

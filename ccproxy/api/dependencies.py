@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+import httpx
 from fastapi import Depends, Request
 from structlog import get_logger
 
 from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.http import BaseProxyClient
+from ccproxy.core.http_client import get_shared_http_client
 from ccproxy.observability import PrometheusMetrics, get_metrics
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
 from ccproxy.services.adapters.base import BaseAdapter
@@ -47,6 +49,19 @@ def get_cached_settings(request: Request) -> Settings:
 
 # Type aliases for dependency injection
 SettingsDep = Annotated[Settings, Depends(get_cached_settings)]
+
+
+async def get_http_client(settings: SettingsDep) -> httpx.AsyncClient:
+    """Get shared HTTP client instance.
+
+    Args:
+        settings: Application settings dependency
+
+    Returns:
+        Shared HTTP client instance
+    """
+    logger.debug("Getting shared HTTP client instance")
+    return await get_shared_http_client(settings)
 
 
 def get_credentials_manager(
@@ -174,6 +189,10 @@ def get_plugin_adapter(plugin_name: str) -> Any:
         """
         from fastapi import HTTPException
 
+        if not proxy_service.plugin_manager:
+            raise HTTPException(
+                status_code=503, detail="Plugin manager not initialized"
+            )
         adapter = proxy_service.plugin_manager.get_plugin_adapter(plugin_name)
         if not adapter:
             raise HTTPException(
@@ -203,6 +222,8 @@ def get_plugin_detection_service(plugin_name: str) -> Any:
         Returns:
             Plugin detection service if available, None otherwise
         """
+        if not proxy_service.plugin_manager:
+            return None
         plugin = proxy_service.plugin_manager.plugin_registry.get_plugin(plugin_name)
         if plugin and hasattr(plugin, "_detection_service"):
             return plugin._detection_service
@@ -213,6 +234,7 @@ def get_plugin_detection_service(plugin_name: str) -> Any:
 
 # Type aliases for service dependencies
 ProxyServiceDep = Annotated[ProxyService, Depends(get_proxy_service)]
+HTTPClientDep = Annotated[httpx.AsyncClient, Depends(get_http_client)]
 ObservabilityMetricsDep = Annotated[
     PrometheusMetrics, Depends(get_observability_metrics)
 ]

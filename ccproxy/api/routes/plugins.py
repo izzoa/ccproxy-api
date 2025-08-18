@@ -79,10 +79,12 @@ async def list_plugins(
     Returns:
         List of all available plugins and providers
     """
-    plugins = []
+    plugins: list[PluginInfo] = []
 
     # No built-in providers - everything is a plugin now
     # All providers come from the plugin system
+    if not proxy.plugin_manager:
+        return PluginListResponse(plugins=plugins, total=0)
 
     # Plugin providers
     for name in proxy.plugin_manager.plugin_registry.list_plugins():
@@ -117,6 +119,8 @@ async def plugin_health(
         HTTPException: If plugin not found
     """
     # Check plugin providers
+    if not proxy.plugin_manager:
+        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
     adapter = proxy.plugin_manager.get_plugin_adapter(plugin_name)
     if adapter:
         # Get the plugin and run its health check if available
@@ -192,6 +196,8 @@ async def reload_plugin(
     """
 
     # Check if plugin exists
+    if not proxy.plugin_manager:
+        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
     if plugin_name not in proxy.plugin_manager.plugin_registry.list_plugins():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -228,7 +234,8 @@ async def discover_plugins(
         Updated list of all plugins
     """
     # Re-initialize plugins
-    proxy.plugin_manager.initialized = False
+    if proxy.plugin_manager:
+        proxy.plugin_manager.initialized = False
     await proxy.initialize_plugins()
 
     # Return updated list
@@ -254,6 +261,8 @@ async def unregister_plugin(
     """
 
     # Unregister the plugin
+    if not proxy.plugin_manager:
+        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
     success = await proxy.plugin_manager.plugin_registry.unregister(plugin_name)
 
     if success:
