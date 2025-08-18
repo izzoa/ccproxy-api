@@ -1,0 +1,7 @@
+[plugins.claude_sdk]
+default_session_id = "default-session"
+
+[plugins.claude_sdk.sdk_session_pool]
+enabled = true
+session_ttl = 3600
+max_sessions = 1000
