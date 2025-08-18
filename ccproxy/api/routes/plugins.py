@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from starlette import status
 
+from ccproxy.auth.conditional import ConditionalAuthDep
 from ccproxy.services.proxy_service import ProxyService
 
 
@@ -71,6 +72,7 @@ async def get_proxy_service(request: Request) -> ProxyService:
 @router.get("", response_model=PluginListResponse)
 async def list_plugins(
     proxy: ProxyService = Depends(get_proxy_service),
+    auth: ConditionalAuthDep = None,
 ) -> PluginListResponse:
     """List all loaded plugins and built-in providers.
 
@@ -99,7 +101,9 @@ async def list_plugins(
 
 @router.get("/{plugin_name}/health", response_model=PluginHealthResponse)
 async def plugin_health(
-    plugin_name: str, proxy: ProxyService = Depends(get_proxy_service)
+    plugin_name: str,
+    proxy: ProxyService = Depends(get_proxy_service),
+    auth: ConditionalAuthDep = None,
 ) -> PluginHealthResponse:
     """Check the health status of a specific plugin.
 
@@ -171,7 +175,9 @@ async def plugin_health(
 
 @router.post("/{plugin_name}/reload", response_model=PluginReloadResponse)
 async def reload_plugin(
-    plugin_name: str, proxy: ProxyService = Depends(get_proxy_service)
+    plugin_name: str,
+    proxy: ProxyService = Depends(get_proxy_service),
+    auth: ConditionalAuthDep = None,
 ) -> PluginReloadResponse:
     """Reload a specific plugin.
 
@@ -211,6 +217,7 @@ async def reload_plugin(
 @router.post("/discover", response_model=PluginListResponse)
 async def discover_plugins(
     proxy: ProxyService = Depends(get_proxy_service),
+    auth: ConditionalAuthDep = None,
 ) -> PluginListResponse:
     """Re-discover plugins from the plugin directory.
 
@@ -225,12 +232,14 @@ async def discover_plugins(
     await proxy.initialize_plugins()
 
     # Return updated list
-    return await list_plugins(proxy)
+    return await list_plugins(proxy, auth)
 
 
 @router.delete("/{plugin_name}")
 async def unregister_plugin(
-    plugin_name: str, proxy: ProxyService = Depends(get_proxy_service)
+    plugin_name: str,
+    proxy: ProxyService = Depends(get_proxy_service),
+    auth: ConditionalAuthDep = None,
 ) -> dict[str, str]:
     """Unregister a plugin.
 

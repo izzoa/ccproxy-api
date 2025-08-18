@@ -81,6 +81,18 @@ class MockPlugin:
         """Get scheduled task definitions for this plugin (optional)."""
         return None
 
+    async def get_oauth_client(self):
+        """Get OAuth client for this plugin if it supports OAuth authentication."""
+        return None
+
+    async def get_profile_info(self):
+        """Get provider-specific profile information from stored credentials."""
+        return None
+
+    def get_auth_commands(self):
+        """Get provider-specific auth command extensions."""
+        return None
+
 
 @pytest.mark.asyncio
 async def test_plugin_protocol():

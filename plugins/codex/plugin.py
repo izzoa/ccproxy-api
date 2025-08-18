@@ -6,7 +6,7 @@ import structlog
 
 
 if TYPE_CHECKING:
-    from ccproxy.services.credentials.openai_oauth_client import OpenAIOAuthClient
+    pass
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -287,7 +287,7 @@ class Plugin(ProviderPlugin):
         """
         return CodexSettings
 
-    async def get_oauth_client(self) -> "OpenAIOAuthClient | None":
+    async def get_oauth_client(self) -> Any:
         """Get OAuth client for Codex authentication.
 
         Returns:

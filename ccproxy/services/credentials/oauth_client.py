@@ -277,6 +277,19 @@ class OAuthClient:
             logger.debug("user_profile_fetched", endpoint=self.config.profile_url)
             return UserProfile.model_validate(data)
 
+    async def authenticate(self, open_browser: bool = True) -> ClaudeCredentials:
+        """Perform OAuth authentication flow (protocol-compatible method).
+
+        This is an alias for login() to implement OAuthClientProtocol.
+
+        Args:
+            open_browser: Whether to automatically open browser (currently ignored)
+
+        Returns:
+            ClaudeCredentials with OAuth token
+        """
+        return await self.login()
+
     async def login(self) -> ClaudeCredentials:
         """Perform OAuth login flow.
 

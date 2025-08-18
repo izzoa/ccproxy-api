@@ -6,12 +6,16 @@ import structlog
 
 
 if TYPE_CHECKING:
-    from ccproxy.services.credentials.oauth_client import OAuthClient
+    pass
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ccproxy.core.services import CoreServices
-from ccproxy.plugins.protocol import HealthCheckResult, ProviderPlugin
+from ccproxy.plugins.protocol import (
+    HealthCheckResult,
+    OAuthClientProtocol,
+    ProviderPlugin,
+)
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.utils.binary_resolver import BinaryResolver
 from ccproxy.utils.cli_logging import log_plugin_summary
@@ -285,7 +289,7 @@ class Plugin(ProviderPlugin):
         """
         return ClaudeAPISettings
 
-    async def get_oauth_client(self) -> "OAuthClient | None":
+    async def get_oauth_client(self) -> "OAuthClientProtocol | None":
         """Get OAuth client for Claude API authentication.
 
         Returns:

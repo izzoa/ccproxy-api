@@ -311,7 +311,7 @@ class Plugin(ProviderPlugin):
                 if validation.valid and validation.credentials:
                     # Build profile info from credentials
                     oauth = validation.credentials.claude_ai_oauth
-                    profile_info = {
+                    profile_info: dict[str, Any] = {
                         "provider": "claude-sdk",
                         "subscription_type": oauth.subscription_type,
                         "authenticated": True,
@@ -321,15 +321,19 @@ class Plugin(ProviderPlugin):
                         profile_info["scopes"] = oauth.scopes
 
                     if oauth.expires_at:
-                        profile_info["expires_at"] = oauth.expires_at.isoformat()
+                        from datetime import UTC, datetime
+
+                        profile_info["expires_at"] = datetime.fromtimestamp(
+                            oauth.expires_at / 1000, tz=UTC
+                        ).isoformat()
 
                     return profile_info
 
             if profile:
-                profile_info = {"provider": "claude-sdk"}
+                result_info: dict[str, Any] = {"provider": "claude-sdk"}
 
                 if profile.organization:
-                    profile_info.update(
+                    result_info.update(
                         {
                             "organization_name": profile.organization.name,
                             "organization_type": profile.organization.organization_type,
@@ -337,7 +341,7 @@ class Plugin(ProviderPlugin):
                     )
 
                 if profile.account:
-                    profile_info.update(
+                    result_info.update(
                         {
                             "email": profile.account.email,
                             "full_name": profile.account.full_name,
@@ -346,7 +350,7 @@ class Plugin(ProviderPlugin):
                         }
                     )
 
-                return profile_info
+                return result_info
 
         except Exception as e:
             logger.debug(f"Failed to get Claude SDK profile info: {e}")

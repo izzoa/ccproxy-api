@@ -34,7 +34,7 @@ class PluginLoader:
             # Parse pyproject.toml to check dependencies
             import tomllib
 
-            with open(pyproject_path, "rb") as f:
+            with pyproject_path.open("rb") as f:
                 data = tomllib.load(f)
 
             dependencies = data.get("project", {}).get("dependencies", [])

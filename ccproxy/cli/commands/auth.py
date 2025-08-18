@@ -1,7 +1,6 @@
 """Authentication and credential management commands."""
 
 import asyncio
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -20,6 +19,7 @@ from structlog import get_logger
 from ccproxy.cli.helpers import get_rich_toolkit
 from ccproxy.config.settings import get_settings
 from ccproxy.core.async_utils import get_claude_docker_home_dir
+from ccproxy.models.provider import ProviderConfig
 from ccproxy.plugins.loader import PluginLoader
 from ccproxy.services.credentials import CredentialsManager
 
@@ -73,7 +73,14 @@ async def discover_oauth_providers() -> dict[str, tuple[str, str]]:
             config_class = plugin.get_config_class()
             if config_class:
                 config = config_class()
-                if config.requires_auth and config.auth_type == "oauth":
+                # Check if config is a ProviderConfig with OAuth support
+                if (
+                    isinstance(config, ProviderConfig)
+                    and hasattr(config, "requires_auth")
+                    and config.requires_auth
+                    and hasattr(config, "auth_type")
+                    and config.auth_type == "oauth"
+                ):
                     oauth_providers[plugin.name] = (
                         config.auth_type,
                         f"{plugin.name} OAuth provider",
@@ -113,7 +120,12 @@ async def get_plugin_for_provider(provider: str) -> "ProviderPlugin":
                 config_class = plugin.get_config_class()
                 if config_class:
                     config = config_class()
-                    if config.requires_auth and config.auth_type == "oauth":
+                    if (
+                        hasattr(config, "requires_auth")
+                        and config.requires_auth
+                        and hasattr(config, "auth_type")
+                        and config.auth_type == "oauth"
+                    ):
                         return plugin
                     else:
                         raise ValueError(
@@ -122,7 +134,7 @@ async def get_plugin_for_provider(provider: str) -> "ProviderPlugin":
             except Exception as e:
                 raise ValueError(
                     f"Failed to check OAuth support for provider '{provider}': {e}"
-                )
+                ) from e
 
     raise ValueError(f"OAuth provider '{provider}' not found")
 
@@ -142,7 +154,7 @@ async def get_oauth_client_for_provider(provider: str) -> Any:
     plugin = await get_plugin_for_provider(provider)
 
     # Initialize plugin with minimal CoreServices for CLI context
-    import aiohttp
+    import httpx
     import structlog
 
     from ccproxy.core.services import CoreServices
@@ -150,10 +162,10 @@ async def get_oauth_client_for_provider(provider: str) -> Any:
     settings = get_settings()
 
     # Create minimal services for CLI usage
-    async with aiohttp.ClientSession() as session:
+    async with httpx.AsyncClient() as client:
         services = CoreServices(
             settings=settings,
-            http_client=session,
+            http_client=client,
             logger=structlog.get_logger(),
         )
 
@@ -483,22 +495,23 @@ def status_command(
         """Get profile info using plugin's method."""
         try:
             plugin = await get_plugin_for_provider(provider_name)
-            
+
             # Initialize plugin with minimal CoreServices
-            import aiohttp
+            import httpx
             import structlog
+
             from ccproxy.core.services import CoreServices
 
             settings = get_settings()
 
-            async with aiohttp.ClientSession() as session:
+            async with httpx.AsyncClient() as client:
                 services = CoreServices(
                     settings=settings,
-                    http_client=session,
+                    http_client=client,
                     logger=structlog.get_logger(),
                 )
                 await plugin.initialize(services)
-                
+
                 # Get profile info
                 return await plugin.get_profile_info()
         except ValueError:
@@ -515,27 +528,28 @@ def status_command(
             try:
                 loader = PluginLoader()
                 plugins = await loader.discover_plugins()
-                
+
                 for plugin in plugins:
                     if plugin.name == provider:
                         # Initialize plugin with minimal CoreServices
-                        import aiohttp
+                        import httpx
                         import structlog
+
                         from ccproxy.core.services import CoreServices
 
                         settings = get_settings()
 
-                        async with aiohttp.ClientSession() as session:
+                        async with httpx.AsyncClient() as client:
                             services = CoreServices(
                                 settings=settings,
-                                http_client=session,
+                                http_client=client,
                                 logger=structlog.get_logger(),
                             )
                             await plugin.initialize(services)
-                            
+
                             # Get profile info
                             return await plugin.get_profile_info()
-                            
+
                 return None
             except Exception as e:
                 logger.debug(f"Failed to get profile info for {provider}: {e}")
@@ -543,13 +557,13 @@ def status_command(
 
         # Get profile info from the plugin
         profile_info = asyncio.run(get_any_plugin_profile())
-        
+
         if profile_info:
             console.print("[green]✓[/green] Authenticated with valid credentials")
-            
+
             # Display profile information generically
             console.print("\n[bold]Account Information[/bold]")
-            
+
             # Define field display names
             field_display_names = {
                 "email": "Email",
@@ -573,16 +587,24 @@ def status_command(
                 "organization_role": "Organization Role",
                 "organization_id": "Organization ID",
             }
-            
+
             # Display fields in a sensible order
-            priority_fields = ["email", "organization_name", "subscription_type", "plan_type", "expires_at"]
-            
+            priority_fields = [
+                "email",
+                "organization_name",
+                "subscription_type",
+                "plan_type",
+                "expires_at",
+            ]
+
             # Show priority fields first
             for field in priority_fields:
                 if field in profile_info:
-                    display_name = field_display_names.get(field, field.replace("_", " ").title())
+                    display_name = field_display_names.get(
+                        field, field.replace("_", " ").title()
+                    )
                     value = profile_info[field]
-                    
+
                     # Format special values
                     if field == "scopes" and isinstance(value, list):
                         value = ", ".join(value)
@@ -590,14 +612,19 @@ def status_command(
                         value = f"{str(value)[:12]}..."
                     elif isinstance(value, bool):
                         value = "Yes" if value else "No"
-                        
+
                     console.print(f"  {display_name}: {value}")
-            
+
             # Show remaining fields
             for field, value in profile_info.items():
-                if field not in priority_fields and field not in ["provider", "authenticated"]:
-                    display_name = field_display_names.get(field, field.replace("_", " ").title())
-                    
+                if field not in priority_fields and field not in [
+                    "provider",
+                    "authenticated",
+                ]:
+                    display_name = field_display_names.get(
+                        field, field.replace("_", " ").title()
+                    )
+
                     # Format special values
                     if field == "scopes" and isinstance(value, list):
                         value = ", ".join(value)
@@ -605,9 +632,9 @@ def status_command(
                         value = f"{str(value)[:12]}..."
                     elif isinstance(value, bool):
                         value = "Yes" if value else "No"
-                        
+
                     console.print(f"  {display_name}: {value}")
-                    
+
             # For detailed mode, try to show token preview if available
             if detailed:
                 # Special handling for different providers
@@ -617,10 +644,13 @@ def status_command(
                     if validation_result.valid and validation_result.credentials:
                         oauth = validation_result.credentials.claude_ai_oauth
                         if oauth.access_token:
-                            token_preview = f"{oauth.access_token[:8]}...{oauth.access_token[-8:]}"
+                            token_preview = (
+                                f"{oauth.access_token[:8]}...{oauth.access_token[-8:]}"
+                            )
                             console.print(f"\n  Token: [dim]{token_preview}[/dim]")
                 elif provider == "codex":
                     from ccproxy.auth.openai import OpenAITokenManager
+
                     token_manager = OpenAITokenManager()
                     credentials = asyncio.run(token_manager.load_credentials())
                     if credentials and credentials.access_token:

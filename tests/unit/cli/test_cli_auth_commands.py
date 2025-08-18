@@ -20,12 +20,10 @@ from ccproxy.auth.models import (
 )
 from ccproxy.cli.commands.auth import (
     app,
-    credential_info,
     get_credentials_manager,
     get_docker_credential_paths,
     login_command,
     renew,
-    validate_credentials,
 )
 from ccproxy.services.credentials.manager import CredentialsManager
 
@@ -157,189 +155,6 @@ class TestGetDockerCredentialPaths(TestAuthCLICommands):
         mock_get_docker_home.assert_called_once()
 
 
-class TestValidateCredentialsCommand(TestAuthCLICommands):
-    """Test validate credentials CLI command."""
-
-    @patch("ccproxy.cli.commands.auth.get_credentials_manager")
-    def test_validate_credentials_valid(
-        self,
-        mock_get_manager: MagicMock,
-        runner: CliRunner,
-        mock_credentials_manager: AsyncMock,
-        mock_validation_result_valid: ValidationResult,
-    ) -> None:
-        """Test validate command with valid credentials."""
-        mock_get_manager.return_value = mock_credentials_manager
-        mock_credentials_manager.validate.return_value = mock_validation_result_valid
-
-        result = runner.invoke(app, ["validate"])
-
-        assert result.exit_code == 0
-        assert "Valid Claude credentials found" in result.stdout
-        mock_credentials_manager.validate.assert_called_once()
-
-    @patch("ccproxy.cli.commands.auth.get_credentials_manager")
-    def test_validate_credentials_invalid(
-        self,
-        mock_get_manager: MagicMock,
-        runner: CliRunner,
-        mock_credentials_manager: AsyncMock,
-        mock_validation_result_invalid: ValidationResult,
-    ) -> None:
-        """Test validate command with invalid credentials."""
-        mock_get_manager.return_value = mock_credentials_manager
-        mock_credentials_manager.validate.return_value = mock_validation_result_invalid
-
-        result = runner.invoke(app, ["validate"])
-
-        assert result.exit_code == 0
-        assert "No credentials file found" in result.stdout
-        mock_credentials_manager.validate.assert_called_once()
-
-    @patch("ccproxy.cli.commands.auth.get_credentials_manager")
-    def test_validate_credentials_docker_flag(
-        self,
-        mock_get_manager: MagicMock,
-        runner: CliRunner,
-        mock_credentials_manager: AsyncMock,
-        mock_validation_result_valid: ValidationResult,
-    ) -> None:
-        """Test validate command with --docker flag."""
-        mock_get_manager.return_value = mock_credentials_manager
-        mock_credentials_manager.validate.return_value = mock_validation_result_valid
-
-        result = runner.invoke(app, ["validate", "--docker"])
-
-        assert result.exit_code == 0
-        # Check that get_credentials_manager was called with Docker paths
-        mock_get_manager.assert_called_once()
-        call_args = mock_get_manager.call_args
-        # Check if custom_paths was passed as positional or keyword argument
-        if len(call_args[0]) > 0:
-            custom_paths = call_args[0][0]
-        else:
-            custom_paths = call_args.kwargs.get("custom_paths")
-        assert custom_paths is not None
-        assert any(".claude" in str(path) for path in custom_paths)
-
-    @patch("ccproxy.cli.commands.auth.get_credentials_manager")
-    def test_validate_credentials_custom_file(
-        self,
-        mock_get_manager: MagicMock,
-        runner: CliRunner,
-        mock_credentials_manager: AsyncMock,
-        mock_validation_result_valid: ValidationResult,
-    ) -> None:
-        """Test validate command with --credential-file flag."""
-        mock_get_manager.return_value = mock_credentials_manager
-        mock_credentials_manager.validate.return_value = mock_validation_result_valid
-        custom_file = "/custom/credentials.json"
-
-        result = runner.invoke(app, ["validate", "--credential-file", custom_file])
-
-        assert result.exit_code == 0
-        # Check that get_credentials_manager was called with custom file path
-        mock_get_manager.assert_called_once()
-        call_args = mock_get_manager.call_args
-        # Check if custom_paths was passed as positional or keyword argument
-        if len(call_args[0]) > 0:
-            custom_paths = call_args[0][0]
-        else:
-            custom_paths = call_args.kwargs.get("custom_paths")
-        assert custom_paths == [Path(custom_file)]
-
-    @patch("ccproxy.cli.commands.auth.get_credentials_manager")
-    def test_validate_credentials_exception(
-        self,
-        mock_get_manager: MagicMock,
-        runner: CliRunner,
-        mock_credentials_manager: AsyncMock,
-    ) -> None:
-        """Test validate command with exception."""
-        mock_get_manager.return_value = mock_credentials_manager
-        mock_credentials_manager.validate.side_effect = Exception("Test error")
-
-        result = runner.invoke(app, ["validate"])
-
-        assert result.exit_code == 1
-        assert "Error validating credentials: Test error" in result.stdout
-
-
-class TestCredentialInfoCommand(TestAuthCLICommands):
-    """Test credential info CLI command."""
-
-    @patch("ccproxy.cli.commands.auth.get_credentials_manager")
-    def test_credential_info_success(
-        self,
-        mock_get_manager: MagicMock,
-        runner: CliRunner,
-        mock_credentials_manager: AsyncMock,
-        mock_credentials: ClaudeCredentials,
-        mock_user_profile: UserProfile,
-    ) -> None:
-        """Test info command with successful credential loading."""
-        mock_get_manager.return_value = mock_credentials_manager
-        mock_credentials_manager.load.return_value = mock_credentials
-        mock_credentials_manager.get_account_profile.return_value = mock_user_profile
-        mock_credentials_manager.find_credentials_file.return_value = Path(
-            "/home/user/.claude/credentials.json"
-        )
-
-        result = runner.invoke(app, ["info"])
-
-        assert result.exit_code == 0
-        assert "Claude Credential Information" in result.stdout
-        assert "test@example.com" in result.stdout
-        assert "Test Organization" in result.stdout
-        mock_credentials_manager.load.assert_called_once()
-
-    @patch("ccproxy.cli.commands.auth.get_credentials_manager")
-    def test_credential_info_no_credentials(
-        self,
-        mock_get_manager: MagicMock,
-        runner: CliRunner,
-        mock_credentials_manager: AsyncMock,
-    ) -> None:
-        """Test info command with no credentials found."""
-        mock_get_manager.return_value = mock_credentials_manager
-        mock_credentials_manager.load.return_value = None
-
-        result = runner.invoke(app, ["info"])
-
-        assert result.exit_code == 1
-        assert "No credential file found" in result.stdout
-        mock_credentials_manager.load.assert_called_once()
-
-    @patch("ccproxy.cli.commands.auth.get_credentials_manager")
-    def test_credential_info_docker_flag(
-        self,
-        mock_get_manager: MagicMock,
-        runner: CliRunner,
-        mock_credentials_manager: AsyncMock,
-        mock_credentials: ClaudeCredentials,
-    ) -> None:
-        """Test info command with --docker flag."""
-        mock_get_manager.return_value = mock_credentials_manager
-        mock_credentials_manager.load.return_value = mock_credentials
-        mock_credentials_manager.get_account_profile.return_value = None
-        mock_credentials_manager.find_credentials_file.return_value = Path(
-            "/docker/home/.claude/credentials.json"
-        )
-
-        result = runner.invoke(app, ["info", "--docker"])
-
-        assert result.exit_code == 0
-        # Check that get_credentials_manager was called with Docker paths
-        mock_get_manager.assert_called_once()
-        call_args = mock_get_manager.call_args
-        # Check if custom_paths was passed as positional or keyword argument
-        if len(call_args[0]) > 0:
-            custom_paths = call_args[0][0]
-        else:
-            custom_paths = call_args.kwargs.get("custom_paths")
-        assert custom_paths is not None
-
-
 class TestLoginCommand(TestAuthCLICommands):
     """Test login CLI command."""
 
@@ -365,7 +180,7 @@ class TestLoginCommand(TestAuthCLICommands):
         result = runner.invoke(app, ["login"])
 
         assert result.exit_code == 0
-        assert "Successfully logged in to Claude!" in result.stdout
+        assert "Successfully logged in to Claude SDK!" in result.stdout
         mock_credentials_manager.login.assert_called_once()
 
     @patch("ccproxy.cli.commands.auth.get_credentials_manager")
@@ -542,9 +357,10 @@ class TestAuthCLIIntegration(TestAuthCLICommands):
         # Test help shows all commands
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "validate" in result.stdout
-        assert "info" in result.stdout
+        assert "providers" in result.stdout
         assert "login" in result.stdout
+        assert "status" in result.stdout
+        assert "logout" in result.stdout
         assert "renew" in result.stdout
 
     def test_command_structure_types(self) -> None:
@@ -552,17 +368,9 @@ class TestAuthCLIIntegration(TestAuthCLICommands):
         # Verify that our command functions have proper type hints
         import inspect
 
-        # Check validate_credentials function signature
-        sig = inspect.signature(validate_credentials)
-        assert sig.return_annotation is None  # typer commands return None
-
-        # Check credential_info function signature
-        sig = inspect.signature(credential_info)
-        assert sig.return_annotation is None
-
         # Check login_command function signature
         sig = inspect.signature(login_command)
-        assert sig.return_annotation is None
+        assert sig.return_annotation is None  # typer commands return None
 
         # Check renew function signature
         sig = inspect.signature(renew)
