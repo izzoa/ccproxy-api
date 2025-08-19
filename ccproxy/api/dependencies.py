@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import httpx
 from fastapi import Depends, Request
@@ -15,6 +15,11 @@ from ccproxy.observability import PrometheusMetrics, get_metrics
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.proxy_service import ProxyService
+
+
+if TYPE_CHECKING:
+    from plugins.claude_api.adapter import ClaudeAPIAdapter
+    from plugins.codex.adapter import CodexAdapter
 
 
 logger = get_logger(__name__)
@@ -162,7 +167,7 @@ async def get_duckdb_storage(request: Request) -> SimpleDuckDBStorage | None:
 
 
 # Plugin adapter dependencies
-def get_claude_api_adapter(proxy_service: ProxyService) -> Any:
+def get_claude_api_adapter(proxy_service: ProxyService) -> ClaudeAPIAdapter:
     """Get Claude API adapter instance.
 
     Args:
@@ -181,7 +186,7 @@ def get_claude_api_adapter(proxy_service: ProxyService) -> Any:
     adapter = proxy_service.plugin_manager.get_plugin_adapter("claude_api")
     if not adapter:
         raise HTTPException(status_code=503, detail="Claude API plugin not initialized")
-    return adapter
+    return cast("ClaudeAPIAdapter", adapter)
 
 
 def get_claude_api_detection_service(proxy_service: ProxyService) -> Any | None:
@@ -240,7 +245,7 @@ def get_claude_sdk_detection_service(proxy_service: ProxyService) -> Any | None:
     return None
 
 
-def get_codex_adapter(proxy_service: ProxyService) -> Any:
+def get_codex_adapter(proxy_service: ProxyService) -> CodexAdapter:
     """Get Codex adapter instance.
 
     Args:
@@ -259,7 +264,7 @@ def get_codex_adapter(proxy_service: ProxyService) -> Any:
     adapter = proxy_service.plugin_manager.get_plugin_adapter("codex")
     if not adapter:
         raise HTTPException(status_code=503, detail="Codex plugin not initialized")
-    return adapter
+    return cast("CodexAdapter", adapter)
 
 
 def get_codex_detection_service(proxy_service: ProxyService) -> Any | None:
@@ -291,7 +296,8 @@ DuckDBStorageDep = Annotated[SimpleDuckDBStorage | None, Depends(get_duckdb_stor
 
 # Type aliases for plugin dependencies
 ClaudeAPIAdapterDep = Annotated[
-    Any, Depends(lambda ps=Depends(get_proxy_service): get_claude_api_adapter(ps))
+    "ClaudeAPIAdapter",
+    Depends(lambda ps=Depends(get_proxy_service): get_claude_api_adapter(ps)),
 ]
 ClaudeAPIDetectionDep = Annotated[
     Any | None,
@@ -307,7 +313,7 @@ ClaudeSDKDetectionDep = Annotated[
 ]
 
 CodexAdapterDep = Annotated[
-    Any, Depends(lambda ps=Depends(get_proxy_service): get_codex_adapter(ps))
+    "CodexAdapter", Depends(lambda ps=Depends(get_proxy_service): get_codex_adapter(ps))
 ]
 CodexDetectionDep = Annotated[
     Any | None,

@@ -13,7 +13,7 @@ class BaseAdapter(ABC):
     @abstractmethod
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
-    ) -> Response:
+    ) -> Response | StreamingResponse:
         """Handle a provider-specific request.
 
         Args:
@@ -23,7 +23,7 @@ class BaseAdapter(ABC):
             **kwargs: Additional provider-specific arguments
 
         Returns:
-            Response object
+            Response or StreamingResponse object
         """
         ...
 
