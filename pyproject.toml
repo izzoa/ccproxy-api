@@ -70,6 +70,11 @@ ccproxy = "ccproxy.cli:main"
 ccproxy-api = "ccproxy.cli:main"
 ccproxy-perm = "ccproxy.cli.commands.permission:main"
 
+[project.entry-points."ccproxy.plugins"]
+claude_api = "plugins.claude_api.plugin:Plugin"
+claude_sdk = "plugins.claude_sdk.plugin:Plugin"
+codex = "plugins.codex.plugin:Plugin"
+
 [dependency-groups]
 dev = [
   "mypy>=1.16.1",

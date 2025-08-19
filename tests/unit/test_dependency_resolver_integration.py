@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from ccproxy.plugins.dependency_resolver import PluginDependencyResolver
 from ccproxy.plugins.loader import PluginLoader
 from ccproxy.plugins.registry import PluginRegistry
 
@@ -83,32 +84,32 @@ class TestDependencyResolverIntegration:
     """Test dependency resolver integration with plugin system."""
 
     @patch("importlib.metadata.version")
-    def test_loader_with_satisfied_dependencies(
+    def test_resolver_with_satisfied_dependencies(
         self, mock_version, temp_plugin_with_deps
     ):
-        """Test loader successfully loads plugin with satisfied dependencies."""
+        """Test dependency resolver with satisfied dependencies."""
         mock_version.return_value = "2.28.0"
 
-        loader = PluginLoader(auto_install=False)
+        resolver = PluginDependencyResolver(auto_install=False)
 
-        # Test dependency checking
-        success = loader._check_plugin_dependencies(temp_plugin_with_deps)
-        assert success is True
+        # Test dependency checking directly with resolver
+        result = resolver.analyze_plugin_dependencies(temp_plugin_with_deps)
+        assert result.all_satisfied is True
 
     @patch("importlib.metadata.version")
-    def test_loader_with_missing_dependencies(
+    def test_resolver_with_missing_dependencies(
         self, mock_version, temp_plugin_with_deps
     ):
-        """Test loader skips plugin with missing dependencies."""
+        """Test dependency resolver detects missing dependencies."""
         from importlib.metadata import PackageNotFoundError
 
         mock_version.side_effect = PackageNotFoundError("requests")
 
-        loader = PluginLoader(auto_install=False)
+        resolver = PluginDependencyResolver(auto_install=False)
 
-        # Test dependency checking
-        success = loader._check_plugin_dependencies(temp_plugin_with_deps)
-        assert success is False
+        # Test dependency checking directly with resolver
+        result = resolver.analyze_plugin_dependencies(temp_plugin_with_deps)
+        assert result.all_satisfied is False
 
     @patch("importlib.metadata.version")
     def test_loader_dependency_report(self, mock_version, temp_plugin_with_deps):
@@ -147,17 +148,16 @@ class TestDependencyResolverIntegration:
         services = AsyncMock()
         registry._services = services
 
-        # Load plugin with dependency checking
-        loader = PluginLoader(auto_install=False)
+        # Test dependency checking directly with resolver
+        resolver = PluginDependencyResolver(auto_install=False)
 
         # This would normally fail if dependencies weren't satisfied
-        success = loader._check_plugin_dependencies(temp_plugin_with_deps)
-        assert success is True
+        result = resolver.analyze_plugin_dependencies(temp_plugin_with_deps)
+        assert result.all_satisfied is True
 
-        # Load the plugin
-        plugin = loader.load_single_plugin(temp_plugin_with_deps)
-        assert plugin is not None
-        assert plugin.name == "test_plugin"
+        # Note: load_single_plugin is deprecated, plugins should use entry points
+        # For testing, we'll just verify the resolver works
+        assert result.dependencies[0].name == "requests"
 
     @patch("importlib.metadata.version")
     @pytest.mark.asyncio
