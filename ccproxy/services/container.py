@@ -210,9 +210,8 @@ class ServiceContainer:
         if not self._http_client:
             # Use pool manager for centralized management
             pool_manager = self.get_pool_manager()
-            import asyncio
-
-            self._http_client = asyncio.run(pool_manager.get_shared_client())
+            # Use synchronous version during initialization
+            self._http_client = pool_manager.get_shared_client_sync()
         return self._http_client
 
     def get_pool_manager(self) -> HTTPPoolManager:
