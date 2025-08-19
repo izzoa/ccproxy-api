@@ -16,8 +16,8 @@ from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.handler_config import HandlerConfig
+from ccproxy.services.interfaces import IPluginRegistry
 from ccproxy.services.mocking import MockResponseHandler
-from ccproxy.services.plugins import PluginManager
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
 
@@ -41,8 +41,7 @@ class ProxyService:
         auth_service: AuthenticationService,
         config: ProxyConfiguration,
         http_client: httpx.AsyncClient,  # Shared HTTP client for centralized management
-        plugin_manager: PluginManager
-        | None,  # Can be None initially to break circular dependency
+        plugin_registry: IPluginRegistry | None = None,  # Uses protocol interface
         metrics: PrometheusMetrics | None = None,
     ) -> None:
         """Initialize with all dependencies injected.
@@ -62,7 +61,7 @@ class ProxyService:
         self.streaming_handler = streaming_handler
         self.auth_service = auth_service
         self.config = config
-        self.plugin_manager = plugin_manager
+        self.plugin_registry = plugin_registry
         self.metrics = metrics
 
         # Shared HTTP client (injected for centralized management)
@@ -72,14 +71,14 @@ class ProxyService:
             "ProxyService initialized with injected services and shared HTTP client"
         )
 
-    def set_plugin_manager(self, plugin_manager: PluginManager) -> None:
-        """Set the plugin manager to break circular dependency.
+    def set_plugin_registry(self, plugin_registry: IPluginRegistry) -> None:
+        """Set the plugin registry.
 
-        This method is called by the ServiceContainer factory to complete
-        initialization after both ProxyService and PluginManager are created.
+        This method allows setting the plugin registry after initialization
+        if it wasn't available during construction.
         """
-        self.plugin_manager = plugin_manager
-        logger.debug("PluginManager set on ProxyService (circular dependency resolved)")
+        self.plugin_registry = plugin_registry
+        logger.debug("Plugin registry set on ProxyService")
 
     async def dispatch_request(
         self,
@@ -97,8 +96,8 @@ class ProxyService:
             handler_config: The processing configuration
             provider_name: The provider to route to (required since config no longer has it)
         """
-        # 1. Check plugin manager is available
-        if not self.plugin_manager:
+        # 1. Check plugin registry is available
+        if not self.plugin_registry:
             raise HTTPException(503, "Plugin manager not initialized")
 
         # 2. Prepare context
@@ -116,7 +115,7 @@ class ProxyService:
         if not provider_name:
             raise HTTPException(400, "Provider name required for dispatch")
 
-        adapter = self.plugin_manager.get_plugin_adapter(provider_name)
+        adapter = self.plugin_registry.get_adapter(provider_name)
         if not adapter:
             raise HTTPException(404, f"No adapter for {provider_name}")
 
@@ -129,17 +128,17 @@ class ProxyService:
     async def initialize_plugins(self, scheduler: Any | None = None) -> None:
         """Initialize plugin system at startup.
 
-        - Delegates to plugin_manager
+        - Delegates to plugin registry
         - Called once during app startup
         - Uses the shared HTTP client for centralized management
         """
-        if not self.plugin_manager:
+        if not self.plugin_registry:
             raise RuntimeError(
-                "Plugin manager not set - check ServiceContainer initialization"
+                "Plugin registry not set - check ServiceContainer initialization"
             )
 
         # Initialize plugins with the shared HTTP client
-        await self.plugin_manager.initialize_plugins(self.http_client, self, scheduler)
+        await self.plugin_registry.initialize_plugins(self.http_client, self, scheduler)
 
     async def close(self) -> None:
         """Clean up resources on shutdown.
@@ -149,9 +148,9 @@ class ProxyService:
         - Does NOT close HTTP client (managed by ServiceContainer)
         """
         try:
-            # Close plugin manager
-            if self.plugin_manager:
-                await self.plugin_manager.close()
+            # Close plugin registry if it has a close method
+            if self.plugin_registry and hasattr(self.plugin_registry, "close"):
+                await self.plugin_registry.close()
 
             # Close proxy client
             if hasattr(self.proxy_client, "close"):

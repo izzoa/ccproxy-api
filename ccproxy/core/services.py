@@ -11,7 +11,7 @@ from ccproxy.config.settings import Settings
 if TYPE_CHECKING:
     from ccproxy.plugins.registry import PluginRegistry
     from ccproxy.scheduler.core import Scheduler
-    from ccproxy.services.proxy_service import ProxyService
+    from ccproxy.services.interfaces import IRequestHandler
 
 
 class CoreServices:
@@ -24,7 +24,7 @@ class CoreServices:
         settings: Settings,
         scheduler: "Scheduler | None" = None,
         plugin_registry: "PluginRegistry | None" = None,
-        proxy_service: "ProxyService | None" = None,
+        proxy_service: "IRequestHandler | None" = None,
     ):
         """Initialize core services.
 
@@ -34,7 +34,7 @@ class CoreServices:
             settings: Application settings
             scheduler: Optional scheduler for plugin tasks
             plugin_registry: Optional plugin registry for config introspection
-            proxy_service: Optional proxy service reference for adapter initialization
+            proxy_service: Optional request handler reference for adapter initialization
         """
         self.http_client = http_client
         self.logger = logger

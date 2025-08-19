@@ -4,7 +4,7 @@ This module provides a clean, testable dependency injection container that
 manages service lifecycles and dependencies without singleton anti-patterns.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
@@ -17,12 +17,6 @@ from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.factories import ConcreteServiceFactory
-from ccproxy.services.interfaces import (
-    ServiceContainer as ServiceContainerInterface,
-)
-from ccproxy.services.interfaces import (
-    ServiceFactory,
-)
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.plugins import PluginManager
 from ccproxy.services.streaming import StreamingHandler
@@ -36,7 +30,7 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 
-class ServiceContainer(ServiceContainerInterface):
+class ServiceContainer:
     """Dependency injection container for all services.
 
     This container manages service lifecycles and dependencies using proper
@@ -51,9 +45,7 @@ class ServiceContainer(ServiceContainerInterface):
     - Supports dependency injection for better testability
     """
 
-    def __init__(
-        self, settings: Settings, service_factory: ServiceFactory | None = None
-    ) -> None:
+    def __init__(self, settings: Settings, service_factory: Any | None = None) -> None:
         """Initialize the service container.
 
         Args:
@@ -77,10 +69,10 @@ class ServiceContainer(ServiceContainerInterface):
     ) -> "ProxyService":
         """Factory method to create fully configured ProxyService.
 
-        This method breaks the circular dependency by:
-        1. Creating ProxyService without PluginManager first
-        2. Creating PluginManager with ProxyService reference
-        3. Setting the PluginManager on ProxyService
+        Uses dependency inversion with protocols to avoid circular dependencies:
+        - ProxyService depends on IPluginRegistry protocol
+        - PluginManager implements IPluginRegistry
+        - Clean dependency graph with no circles
 
         Args:
             proxy_client: HTTP proxy client
@@ -88,12 +80,19 @@ class ServiceContainer(ServiceContainerInterface):
             metrics: Optional metrics service
 
         Returns:
-            Ready-to-use ProxyService instance with no circular dependencies
+            Ready-to-use ProxyService instance with clean dependencies
         """
         # Import here to avoid circular dependency
         from ccproxy.services.proxy_service import ProxyService
 
-        # STEP 1: Create ProxyService without PluginManager first
+        # Create PluginManager first (it doesn't depend on ProxyService directly now)
+        plugin_registry = PluginRegistry()
+        plugin_manager = PluginManager(
+            plugin_registry=plugin_registry,
+            request_handler=None,  # Will be set to proxy_service after creation
+        )
+
+        # Create ProxyService with PluginManager as IPluginRegistry
         proxy_service = ProxyService(
             proxy_client=proxy_client,
             credentials_manager=credentials_manager,
@@ -104,16 +103,9 @@ class ServiceContainer(ServiceContainerInterface):
             auth_service=self.get_auth_service(credentials_manager),
             config=self.get_proxy_config(),
             http_client=self.get_http_client(),
-            plugin_manager=None,  # Will be set in step 3
+            plugin_registry=plugin_manager,  # PluginManager implements IPluginRegistry
             metrics=metrics,
         )
-
-        # STEP 2: Create PluginManager with ProxyService reference
-        plugin_registry = PluginRegistry()
-        plugin_manager = PluginManager(plugin_registry, proxy_service)
-
-        # STEP 3: Set PluginManager on ProxyService
-        proxy_service.set_plugin_manager(plugin_manager)
 
         logger.debug(
             "ProxyService created with all dependencies (no circular dependencies)"

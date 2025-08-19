@@ -11,6 +11,7 @@ from ccproxy.core.services import CoreServices
 from ccproxy.plugins.loader import PluginLoader
 from ccproxy.plugins.registry import PluginRegistry
 from ccproxy.services.adapters.base import BaseAdapter
+from ccproxy.services.interfaces import IRequestHandler
 from ccproxy.services.tracing.interfaces import RequestTracer
 
 
@@ -23,20 +24,20 @@ class PluginManager:
     def __init__(
         self,
         plugin_registry: PluginRegistry | None = None,
-        proxy_service: Any | None = None,
+        request_handler: IRequestHandler | None = None,
         auto_install_deps: bool = False,
         require_user_consent: bool = True,
     ) -> None:
-        """Initialize with plugin registry and optional proxy service reference.
+        """Initialize with plugin registry and optional request handler reference.
 
         - Wraps existing PluginRegistry
         - Maintains adapter cache
         - Tracks initialization state
-        - Stores proxy service reference to break circular dependency
+        - Uses protocol interface for request handler
 
         Args:
             plugin_registry: Optional plugin registry instance
-            proxy_service: Optional proxy service reference
+            request_handler: Optional request handler (following IRequestHandler protocol)
             auto_install_deps: Whether to automatically install missing dependencies
             require_user_consent: Whether to require user consent before installing
         """
@@ -48,14 +49,12 @@ class PluginManager:
         self.tracers: dict[str, RequestTracer] = {}
         self.initialized = False
         self._http_client: httpx.AsyncClient | None = None
-        self._proxy_service = (
-            proxy_service  # Store reference to break circular dependency
-        )
+        self._request_handler = request_handler  # Store reference using protocol
 
     async def initialize_plugins(
         self,
         http_client: httpx.AsyncClient,
-        proxy_service: Any,
+        proxy_service: IRequestHandler,
         scheduler: Any | None = None,
     ) -> None:
         """Discover and initialize all plugins.
@@ -83,7 +82,7 @@ class PluginManager:
                 settings=settings,
                 scheduler=scheduler,
                 plugin_registry=self.plugin_registry,
-                proxy_service=self._proxy_service,  # Pass proxy service reference
+                proxy_service=proxy_service,  # Pass proxy service reference from parameter
             )
 
             # Discover all plugins using loader (use registry's dependency settings)
@@ -200,7 +199,7 @@ class PluginManager:
             )
             raise
 
-    def get_plugin_adapter(self, name: str) -> BaseAdapter | None:
+    def get_adapter(self, name: str) -> BaseAdapter | None:
         """Retrieve plugin adapter by provider name.
 
         - Looks up in adapter cache
@@ -217,6 +216,21 @@ class PluginManager:
         # URL schemes use hyphens but Python identifiers use underscores
         name_with_underscores = name.replace("-", "_")
         return self.adapters.get(name_with_underscores)
+
+    def get_tracer(self, provider_name: str) -> RequestTracer | None:
+        """Get tracer for a specific provider.
+
+        Returns the request tracer registered for the given provider.
+        """
+        return self.tracers.get(provider_name)
+
+    def list_providers(self) -> list[str]:
+        """Get list of all registered provider names.
+
+        - Returns keys from adapter cache
+        - Includes only initialized plugins
+        """
+        return list(self.adapters.keys())
 
     def list_active_providers(self) -> list[str]:
         """Get list of all registered provider names.
