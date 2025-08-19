@@ -10,6 +10,12 @@ from fastapi import HTTPException, Request
 from starlette.responses import Response, StreamingResponse
 
 from ccproxy.auth.manager import AuthManager
+from ccproxy.config.constants import (
+    CODEX_API_BASE_URL,
+    CODEX_RESPONSES_ENDPOINT,
+    OPENAI_CHAT_COMPLETIONS_PATH,
+    OPENAI_COMPLETIONS_PATH,
+)
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.http_handler import PluginHTTPHandler
@@ -125,8 +131,8 @@ class CodexAdapter(BaseAdapter):
         # Check if format conversion is needed based on endpoint
         # OpenAI format endpoints need conversion to Codex format
         needs_conversion = endpoint.endswith(
-            "/v1/chat/completions"
-        ) or endpoint.endswith("/chat/completions")
+            OPENAI_CHAT_COMPLETIONS_PATH
+        ) or endpoint.endswith(OPENAI_COMPLETIONS_PATH)
 
         # Get authentication headers
         if not self._auth_manager:
@@ -141,7 +147,7 @@ class CodexAdapter(BaseAdapter):
             access_token = auth_headers["Authorization"].replace("Bearer ", "")
 
         # Build target URL
-        target_url = "https://chatgpt.com/backend-api/codex/responses"
+        target_url = f"{CODEX_API_BASE_URL}{CODEX_RESPONSES_ENDPOINT}"
 
         # Create simplified provider context
         context = HandlerConfig(

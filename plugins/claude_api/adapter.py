@@ -8,6 +8,11 @@ from fastapi import HTTPException, Request
 from httpx import AsyncClient
 from starlette.responses import Response, StreamingResponse
 
+from ccproxy.config.constants import (
+    CLAUDE_API_BASE_URL,
+    CLAUDE_MESSAGES_ENDPOINT,
+    OPENAI_CHAT_COMPLETIONS_PATH,
+)
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.http_handler import PluginHTTPHandler
@@ -117,13 +122,13 @@ class ClaudeAPIAdapter(BaseAdapter):
         access_token = auth_headers.get("x-api-key") if auth_headers else None
 
         # Determine target URL and format conversion needs
-        if endpoint.endswith("/v1/messages"):
+        if endpoint.endswith(CLAUDE_MESSAGES_ENDPOINT):
             # Native Anthropic format - no conversion needed
-            target_url = "https://api.anthropic.com/v1/messages"
+            target_url = f"{CLAUDE_API_BASE_URL}{CLAUDE_MESSAGES_ENDPOINT}"
             needs_conversion = False
-        elif endpoint.endswith("/v1/chat/completions"):
+        elif endpoint.endswith(OPENAI_CHAT_COMPLETIONS_PATH):
             # OpenAI format - needs conversion to Anthropic messages format
-            target_url = "https://api.anthropic.com/v1/messages"
+            target_url = f"{CLAUDE_API_BASE_URL}{CLAUDE_MESSAGES_ENDPOINT}"
             needs_conversion = True
         else:
             raise HTTPException(

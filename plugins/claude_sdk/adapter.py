@@ -125,7 +125,9 @@ class ClaudeSDKAdapter(BaseAdapter):
 
         # Check if format conversion is needed (OpenAI to Anthropic)
         # The endpoint will contain the path after the prefix, e.g., "/v1/chat/completions"
-        needs_conversion = endpoint.endswith("/v1/chat/completions")
+        from ccproxy.config.constants import OPENAI_CHAT_COMPLETIONS_PATH
+
+        needs_conversion = endpoint.endswith(OPENAI_CHAT_COMPLETIONS_PATH)
         if needs_conversion and self.format_adapter:
             request_data = await self.format_adapter.adapt_request(request_data)
 

@@ -6,6 +6,11 @@ from urllib.parse import urlparse
 import httpx
 import structlog
 
+from ccproxy.config.constants import (
+    DEFAULT_TASK_INTERVAL,
+    PLUGIN_SUMMARY_CACHE_SIZE,
+    PLUGIN_SUMMARY_CACHE_TTL,
+)
 from ccproxy.config.settings import get_settings
 from ccproxy.core.services import CoreServices
 from ccproxy.plugins.loader import PluginLoader
@@ -13,9 +18,7 @@ from ccproxy.plugins.registry import PluginRegistry
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.interfaces import IRequestHandler
 from ccproxy.services.tracing.interfaces import RequestTracer
-from ccproxy.utils.caching import (
-    TTLCache,
-)
+from ccproxy.utils.caching import TTLCache
 
 
 logger = structlog.get_logger(__name__)
@@ -48,7 +51,9 @@ class PluginManager:
         self._request_handler = request_handler  # Store reference using protocol
 
         # Add cache for plugin summaries (relatively stable data)
-        self._plugin_summary_cache = TTLCache(maxsize=32, ttl=300.0)  # 5 minute TTL
+        self._plugin_summary_cache = TTLCache(
+            maxsize=PLUGIN_SUMMARY_CACHE_SIZE, ttl=PLUGIN_SUMMARY_CACHE_TTL
+        )
 
     async def initialize_plugins(
         self,
@@ -170,7 +175,7 @@ class PluginManager:
                 logger.info(
                     "background_tasks_registered",
                     tasks=len(all_tasks),
-                    interval_seconds=3600,  # Standard interval for all detection tasks
+                    interval_seconds=DEFAULT_TASK_INTERVAL,
                     names=all_tasks,
                 )
 
@@ -352,8 +357,10 @@ class PluginManager:
         if cached_summary is not None:
             return cached_summary  # type: ignore[no-any-return]
 
-        # Get fresh summary
-        summary = await self.plugin_registry.get_plugin_summary_with_auth(plugin_name)
+        # Get fresh summary with auth details
+        summary = await self.plugin_registry.get_plugin_summary(
+            plugin_name, include_auth=True
+        )
 
         # Cache the result (even if None)
         self._plugin_summary_cache.set(cache_key, summary)

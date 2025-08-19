@@ -5,6 +5,7 @@ from typing import Any
 
 import structlog
 
+from ccproxy.config.constants import PLUGIN_HEALTH_CHECK_TIMEOUT
 from ccproxy.core.services import CoreServices
 from ccproxy.plugins.loader import PluginLoader
 from ccproxy.plugins.protocol import HealthCheckResult, ProviderPlugin
@@ -80,9 +81,7 @@ class PluginRegistry:
         """
         # Check if plugin is already registered
         if plugin.name in self._plugins:
-            logger.debug(
-                f"Plugin {plugin.name} already registered, skipping duplicate"
-            )
+            logger.debug(f"Plugin {plugin.name} already registered, skipping duplicate")
             return False
 
         # Basic validation
@@ -252,11 +251,14 @@ class PluginRegistry:
         if registered_tasks:
             self._plugin_tasks[plugin.name] = registered_tasks
 
-    def get_plugin_summary(self, plugin_name: str) -> dict[str, Any] | None:
+    async def get_plugin_summary(
+        self, plugin_name: str, include_auth: bool = True
+    ) -> dict[str, Any] | None:
         """Get consolidated summary information for a plugin.
 
         Args:
             plugin_name: Name of the plugin
+            include_auth: Whether to include detailed auth information (default: True)
 
         Returns:
             Dictionary with plugin summary data or None if plugin not found
@@ -267,45 +269,30 @@ class PluginRegistry:
         if not plugin or not adapter:
             return None
 
-        # Start with basic plugin info
-        summary = {
-            "plugin": plugin_name,
-            "status": "ready"
-            if plugin_name in self._initialized_plugins
-            else "not_ready",
-        }
+        # Build base summary
+        summary = self._build_base_summary(plugin_name, plugin)
 
-        # Let plugin provide its own summary if it has the method
-        if hasattr(plugin, "get_summary"):
-            plugin_summary = plugin.get_summary()
-            if isinstance(plugin_summary, dict):
-                summary.update(plugin_summary)
+        # Add auth details if requested
+        if include_auth:
+            await self._add_auth_details(summary, plugin, plugin_name)
 
-        # Add routes information if plugin has router
-        if hasattr(plugin, "router_prefix"):
-            routes_list: list[str] = [plugin.router_prefix]
-            summary["routes"] = routes_list  # type: ignore[assignment]
+        # Add routes information
+        self._add_routes_info(summary, plugin, plugin_name)
 
         return summary
 
-    async def get_plugin_summary_with_auth(
-        self, plugin_name: str
-    ) -> dict[str, Any] | None:
-        """Get consolidated summary information for a plugin including detailed auth status.
+    def _build_base_summary(
+        self, plugin_name: str, plugin: ProviderPlugin
+    ) -> dict[str, Any]:
+        """Build base summary for a plugin.
 
         Args:
             plugin_name: Name of the plugin
+            plugin: Plugin instance
 
         Returns:
-            Dictionary with plugin summary data including auth details or None if plugin not found
+            Dictionary with base summary data
         """
-        plugin = self._plugins.get(plugin_name)
-        adapter = self._adapters.get(plugin_name)
-
-        if not plugin or not adapter:
-            return None
-
-        # Start with basic plugin info
         summary = {
             "plugin": plugin_name,
             "status": "ready"
@@ -319,19 +306,23 @@ class PluginRegistry:
             if isinstance(plugin_summary, dict):
                 summary.update(plugin_summary)
 
-        # Get detailed auth information if plugin supports it
+        return summary
+
+    async def _add_auth_details(
+        self, summary: dict[str, Any], plugin: ProviderPlugin, plugin_name: str
+    ) -> None:
+        """Add auth details to plugin summary.
+
+        Args:
+            summary: Summary dictionary to update
+            plugin: Plugin instance
+            plugin_name: Name of the plugin
+        """
         if hasattr(plugin, "get_auth_summary"):
             try:
                 auth_summary = await plugin.get_auth_summary()
                 if isinstance(auth_summary, dict):
                     summary.update(auth_summary)
-            except AttributeError as e:
-                logger.debug(
-                    "plugin_auth_summary_missing_method",
-                    plugin=plugin_name,
-                    error=str(e),
-                    exc_info=e,
-                )
             except Exception as e:
                 logger.debug(
                     "plugin_auth_summary_failed",
@@ -340,25 +331,30 @@ class PluginRegistry:
                     exc_info=e,
                 )
 
-        # Add routes information if plugin has router
-        if hasattr(plugin, "get_routes"):
+    def _add_routes_info(
+        self, summary: dict[str, Any], plugin: ProviderPlugin, plugin_name: str
+    ) -> None:
+        """Add routes information to plugin summary.
+
+        Args:
+            summary: Summary dictionary to update
+            plugin: Plugin instance
+            plugin_name: Name of the plugin
+        """
+        routes_list: list[str] = []
+
+        # Try to get routes from multiple sources
+        if hasattr(plugin, "router_prefix"):
+            routes_list.append(plugin.router_prefix)
+        elif hasattr(plugin, "get_routes"):
             try:
                 router = plugin.get_routes()
                 if router and hasattr(router, "routes"):
-                    routes_list: list[str] = []
                     for route in router.routes:
                         if hasattr(route, "path"):
                             routes_list.append(route.path)
                         elif hasattr(route, "path_regex"):
                             routes_list.append(str(route.path_regex))
-                    summary["routes"] = routes_list  # type: ignore[assignment]
-            except AttributeError as e:
-                logger.debug(
-                    "plugin_routes_missing_method",
-                    plugin=plugin_name,
-                    error=str(e),
-                    exc_info=e,
-                )
             except Exception as e:
                 logger.debug(
                     "plugin_routes_failed",
@@ -367,7 +363,8 @@ class PluginRegistry:
                     exc_info=e,
                 )
 
-        return summary
+        if routes_list:
+            summary["routes"] = routes_list
 
     def get_all_registered_tasks(self) -> list[str]:
         """Get list of all registered task names across all plugins."""
@@ -473,7 +470,7 @@ class PluginRegistry:
         try:
             results = await asyncio.wait_for(
                 asyncio.gather(*health_tasks, return_exceptions=True),
-                timeout=10.0,  # 10 second total timeout
+                timeout=PLUGIN_HEALTH_CHECK_TIMEOUT,
             )
 
             health_results = {}
@@ -491,13 +488,15 @@ class PluginRegistry:
             return health_results
 
         except TimeoutError:
-            logger.warning("Plugin health checks timed out after 10 seconds")
+            logger.warning(
+                f"Plugin health checks timed out after {PLUGIN_HEALTH_CHECK_TIMEOUT} seconds"
+            )
             return {
                 "timeout": HealthCheckResult(
                     status="fail",
                     componentId="plugin-health",
                     componentType="system",
-                    output="Plugin health checks timed out after 10 seconds",
+                    output=f"Plugin health checks timed out after {PLUGIN_HEALTH_CHECK_TIMEOUT} seconds",
                 )
             }
 
