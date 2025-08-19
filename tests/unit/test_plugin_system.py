@@ -1,6 +1,5 @@
 """Unit tests for the plugin system."""
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -191,8 +190,7 @@ async def test_plugin_registry_discover_empty_dir():
     # Mock PluginLoader to return no plugins
     with patch("ccproxy.plugins.registry.PluginLoader") as mock_loader_class:
         mock_loader = MagicMock()
-        # Changed to load_plugins_with_paths to match new implementation
-        mock_loader.load_plugins_with_paths = MagicMock(return_value=[])
+        mock_loader.load_plugins = AsyncMock(return_value=[])
         mock_loader_class.return_value = mock_loader
 
         await registry.discover_and_initialize(mock_services)
@@ -212,10 +210,7 @@ async def test_plugin_registry_discover_with_plugin():
     with patch("ccproxy.plugins.registry.PluginLoader") as mock_loader_class:
         mock_loader = MagicMock()
         mock_plugin = MockPlugin()
-        # Changed to load_plugins_with_paths to match new implementation
-        mock_loader.load_plugins_with_paths = MagicMock(
-            return_value=[(mock_plugin, None)]
-        )
+        mock_loader.load_plugins = AsyncMock(return_value=[mock_plugin])
         mock_loader_class.return_value = mock_loader
 
         await registry.discover_and_initialize(mock_services)
@@ -241,10 +236,7 @@ async def test_plugin_registry_load_invalid_plugin():
     with patch("ccproxy.plugins.registry.PluginLoader") as mock_loader_class:
         mock_loader = MagicMock()
         bad_plugin = BadPlugin()
-        # Changed to load_plugins_with_paths to match new implementation
-        mock_loader.load_plugins_with_paths = MagicMock(
-            return_value=[(bad_plugin, None)]
-        )
+        mock_loader.load_plugins = AsyncMock(return_value=[bad_plugin])
         mock_loader_class.return_value = mock_loader
 
         # Should not raise, just log error
@@ -279,30 +271,3 @@ async def test_base_adapter_interface():
     response_data = {"response": "data"}
     transformed_response = await adapter.transform_response(response_data)
     assert transformed_response == response_data  # Default is no transformation
-
-
-@pytest.mark.asyncio
-async def test_plugin_registry_reload():
-    """Test reloading a plugin."""
-    registry = PluginRegistry()
-    plugin = MockPlugin()
-
-    # Register initial plugin
-    await registry.register_and_initialize(plugin)
-    assert "test_plugin" in registry.list_plugins()
-
-    # Store a mock path for the plugin
-    registry._plugin_paths["test_plugin"] = Path("/plugins/test_plugin/plugin.py")
-
-    # Mock the reload process - the reload_plugin method uses PluginLoader internally
-    with patch("ccproxy.plugins.registry.PluginLoader") as mock_loader_class:
-        mock_loader = MagicMock()
-        # Mock that no plugins are found during reload (simulating a failed reload)
-        mock_loader.load_single_plugin.return_value = None
-        mock_loader_class.return_value = mock_loader
-
-        result = await registry.reload_plugin("test_plugin")
-
-    # For this test, the plugin won't actually be re-registered
-    # because load_single_plugin returns None
-    assert result is False  # Not found after mock reload

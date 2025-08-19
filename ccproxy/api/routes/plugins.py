@@ -221,21 +221,12 @@ async def reload_plugin(
             detail=f"Plugin '{plugin_name}' not found",
         )
 
-    # Reload the plugin using the new efficient method
-    registry = proxy.plugin_registry.get_plugin_registry()
-    success = await registry.reload_plugin(plugin_name) if registry else False
-
-    if success:
-        return PluginReloadResponse(
-            status="success",
-            message=f"Plugin '{plugin_name}' reloaded successfully",
-            plugin=plugin_name,
-        )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to reload plugin '{plugin_name}'",
-        )
+    # Plugin reloading is deprecated - plugins are loaded from entry points
+    # and would require package reinstallation to truly reload
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Plugin reloading is no longer supported. Plugins are loaded from entry points and require package reinstallation.",
+    )
 
 
 @router.post("/discover", response_model=PluginListResponse)

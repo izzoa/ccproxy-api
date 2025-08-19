@@ -28,8 +28,6 @@ class PluginManager:
         self,
         plugin_registry: PluginRegistry | None = None,
         request_handler: IRequestHandler | None = None,
-        auto_install_deps: bool = False,
-        require_user_consent: bool = True,
     ) -> None:
         """Initialize with plugin registry and optional request handler reference.
 
@@ -41,13 +39,8 @@ class PluginManager:
         Args:
             plugin_registry: Optional plugin registry instance
             request_handler: Optional request handler (following IRequestHandler protocol)
-            auto_install_deps: Whether to automatically install missing dependencies
-            require_user_consent: Whether to require user consent before installing
         """
-        self.plugin_registry = plugin_registry or PluginRegistry(
-            auto_install_deps=auto_install_deps,
-            require_user_consent=require_user_consent,
-        )
+        self.plugin_registry = plugin_registry or PluginRegistry()
         self.adapters: dict[str, BaseAdapter] = {}
         self.tracers: dict[str, RequestTracer] = {}
         self.initialized = False
@@ -91,12 +84,9 @@ class PluginManager:
                 proxy_service=proxy_service,  # Pass proxy service reference from parameter
             )
 
-            # Discover all plugins using loader (use registry's dependency settings)
-            loader = PluginLoader(
-                auto_install=self.plugin_registry._auto_install_deps,
-                require_user_consent=self.plugin_registry._require_user_consent,
-            )
-            plugin_instances = await loader.discover_plugins()
+            # Discover all plugins using loader
+            loader = PluginLoader()
+            plugin_instances = await loader.load_plugins()
             logger.debug(f"Discovered {len(plugin_instances)} plugins")
 
             # Set services on registry so it can initialize plugins

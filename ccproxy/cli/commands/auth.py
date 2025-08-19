@@ -64,7 +64,7 @@ async def discover_oauth_providers() -> dict[str, tuple[str, str]]:
     oauth_providers = {}
 
     loader = PluginLoader()
-    plugins = await loader.discover_plugins()
+    plugins = await loader.load_plugins()
 
     for plugin in plugins:
         # Check if plugin supports OAuth
@@ -132,7 +132,7 @@ async def get_plugin_for_provider(provider: str) -> "ProviderPlugin":
         ValueError: If provider not found or doesn't support OAuth
     """
     loader = PluginLoader()
-    plugins = await loader.discover_plugins()
+    plugins = await loader.load_plugins()
 
     for plugin in plugins:
         if plugin.name == provider:
@@ -629,7 +629,7 @@ def status_command(
             """Get profile info from any plugin, not just OAuth ones."""
             try:
                 loader = PluginLoader()
-                plugins = await loader.discover_plugins()
+                plugins = await loader.load_plugins()
 
                 for plugin in plugins:
                     if plugin.name == provider:

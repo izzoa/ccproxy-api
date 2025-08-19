@@ -18,14 +18,16 @@ app = typer.Typer(name="plugins", help="Manage and inspect plugins.")
 def settings() -> None:
     """List all available plugin settings."""
     console = Console()
-    loader = PluginLoader()
-    plugins_with_paths = loader.load_plugins_with_paths()
+    import asyncio
 
-    if not plugins_with_paths:
+    loader = PluginLoader()
+    plugins = asyncio.run(loader.load_plugins())
+
+    if not plugins:
         console.print("No plugins found.")
         return
 
-    for plugin, _ in plugins_with_paths:
+    for plugin in plugins:
         table = Table(
             title=f"Plugin: [bold]{plugin.name}[/bold] v{plugin.version}",
             show_header=True,
@@ -77,7 +79,7 @@ def dependencies(
 
     async def _check_deps() -> None:
         console = Console()
-        loader = PluginLoader(auto_install=auto_install, require_user_consent=True)
+        loader = PluginLoader()
 
         # Get all plugin directories
         from pathlib import Path
@@ -99,96 +101,9 @@ def dependencies(
             console.print("[red]No plugin directories found[/red]")
             return
 
-        # Generate dependency report
-        report = loader.get_dependency_report(plugin_dirs)
-
-        # Display system checks
-        system_checks = report["system_checks"]
-
+        # Dependency report is deprecated
         console.print(
-            Panel.fit(
-                f"🔧 System Requirements\n"
-                f"Python: {system_checks['python_version']['version']} "
-                f"{'✅' if system_checks['python_version']['meets_minimum'] else '❌'}\n"
-                f"uv: {'✅' if system_checks['uv_available'] else '❌'} "
-                f"{system_checks.get('uv_version', 'Not available')}",
-                title="System Status",
-            )
+            "[yellow]Plugin dependency management is now handled at the package level via pyproject.toml[/yellow]"
         )
-
-        # Display summary
-        console.print(
-            Panel.fit(
-                f"📦 Plugin Summary\n"
-                f"Total plugins: {report['total_plugins']}\n"
-                f"With dependencies: {report['plugins_with_dependencies']}\n"
-                f"All satisfied: {report['plugins_satisfied']}\n"
-                f"With issues: {report['plugins_with_issues']}",
-                title="Dependencies Overview",
-            )
-        )
-
-        if detailed or report["plugins_with_issues"] > 0:
-            # Show detailed plugin information
-            for plugin_detail in report["plugin_details"]:
-                if not detailed and plugin_detail["all_satisfied"]:
-                    continue
-
-                tree = Tree(f"[bold]{plugin_detail['name']}[/bold]")
-
-                if plugin_detail["error"]:
-                    tree.add(f"[red]Error: {plugin_detail['error']}[/red]")
-                elif not plugin_detail["has_pyproject"]:
-                    tree.add("[dim]No pyproject.toml (no dependencies)[/dim]")
-                elif plugin_detail["total_dependencies"] == 0:
-                    tree.add("[dim]No dependencies specified[/dim]")
-                else:
-                    status = (
-                        "✅ All satisfied"
-                        if plugin_detail["all_satisfied"]
-                        else f"❌ {plugin_detail['missing_count']} missing"
-                    )
-                    tree.add(f"Status: {status}")
-
-                    if "dependencies" in plugin_detail:
-                        deps_tree = tree.add("Dependencies")
-                        for dep in plugin_detail["dependencies"]:
-                            status_icon = "✅" if dep["satisfied"] else "❌"
-                            version_info = (
-                                f" ({dep['version']})" if dep["version"] else ""
-                            )
-                            error_info = f" - {dep['error']}" if dep["error"] else ""
-                            deps_tree.add(
-                                f"{status_icon} {dep['name']}{version_info}{error_info}"
-                            )
-
-                console.print(tree)
-                console.print()
-
-        # Offer to install missing dependencies if any
-        if auto_install and report["plugins_with_issues"] > 0:
-            console.print(
-                "[yellow]Attempting to resolve missing dependencies...[/yellow]"
-            )
-
-            for plugin_detail in report["plugin_details"]:
-                if (
-                    not plugin_detail["all_satisfied"]
-                    and plugin_detail["has_pyproject"]
-                ):
-                    plugin_dir = Path(plugin_detail["path"])
-                    console.print(
-                        f"Resolving dependencies for {plugin_detail['name']}..."
-                    )
-
-                    success = await loader.resolve_plugin_dependencies(plugin_dir)
-                    if success:
-                        console.print(
-                            f"[green]✅ Resolved dependencies for {plugin_detail['name']}[/green]"
-                        )
-                    else:
-                        console.print(
-                            f"[red]❌ Failed to resolve dependencies for {plugin_detail['name']}[/red]"
-                        )
 
     asyncio.run(_check_deps())
