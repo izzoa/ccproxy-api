@@ -8,15 +8,15 @@ from typing import Any, TypeVar, cast
 import structlog
 from pydantic import BaseModel
 
-from ccproxy.adapters.sdk import models as sdk_models
-from ccproxy.adapters.sdk.models import SDKMessage
 from ccproxy.core.async_utils import patched_typing
 from ccproxy.core.errors import ClaudeProxyError, ServiceUnavailableError
 from ccproxy.observability import timed_operation
 
+from . import models as sdk_models
 from .config import ClaudeSDKSettings, SessionPoolSettings
 from .exceptions import ClaudeSDKError, StreamTimeoutError
 from .manager import SessionManager
+from .models import SDKMessage
 from .stream_handle import StreamHandle
 
 

@@ -1,11 +1,21 @@
-"""SDK adapter models for Claude Code SDK integration.
+"""SDK adapter models for Claude Code SDK integration - DEPRECATED.
 
-This module provides shared SDK models that can be used by multiple plugins
-without creating circular dependencies. Similar to the OpenAI adapter pattern,
-these models define common data structures for SDK communication.
+This module is deprecated. Import from plugins.claude_sdk.models instead.
+The models have been moved to the claude_sdk plugin for better plugin self-containment.
 """
 
-from .models import (
+import warnings
+
+
+warnings.warn(
+    "Importing from ccproxy.adapters.sdk is deprecated. "
+    "Use plugins.claude_sdk.models instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+# Temporary re-exports for backward compatibility
+from plugins.claude_sdk.models import (  # noqa: E402
     AssistantMessage,
     ContentBlock,
     ExtendedContentBlock,
