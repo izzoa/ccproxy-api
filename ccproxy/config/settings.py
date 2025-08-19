@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ccproxy.config.discovery import find_toml_config_file
@@ -38,6 +38,16 @@ class ConfigurationError(Exception):
     """Raised when configuration loading or validation fails."""
 
     pass
+
+
+class HooksSettings(BaseModel):
+    """Hook system configuration."""
+
+    enabled: bool = True
+    metrics_enabled: bool = True
+    logging_enabled: bool = True
+    analytics_enabled: bool = False
+    analytics_batch_size: int = 100
 
 
 # PoolSettings class removed - connection pooling functionality has been removed
@@ -135,6 +145,12 @@ class Settings(BaseSettings):
     plugins: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description="Plugin-specific configurations keyed by plugin name",
+    )
+
+    # Hook system settings
+    hooks: HooksSettings = Field(
+        default_factory=HooksSettings,
+        description="Hook system configuration settings",
     )
 
     # Redundant validators removed - Pydantic handles these automatically with default_factory

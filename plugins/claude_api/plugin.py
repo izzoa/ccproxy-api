@@ -60,6 +60,11 @@ class Plugin(ProviderPlugin):
         return self._version
 
     @property
+    def dependencies(self) -> list[str]:
+        """List of plugin names this plugin depends on."""
+        return []  # No dependencies
+
+    @property
     def router_prefix(self) -> str:
         """Unique route prefix for this plugin."""
         return self._router_prefix

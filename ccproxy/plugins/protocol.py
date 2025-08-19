@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ccproxy.core.services import CoreServices
+from ccproxy.hooks.base import Hook
 from ccproxy.models.provider import ProviderConfig
 from ccproxy.services.adapters.base import BaseAdapter
 
@@ -73,8 +74,8 @@ class ScheduledTaskDefinition(TypedDict, total=False):
 
 
 @runtime_checkable
-class ProviderPlugin(Protocol):
-    """Enhanced protocol for provider plugins."""
+class BasePlugin(Protocol):
+    """Base protocol for all plugins."""
 
     @property
     def name(self) -> str:
@@ -87,8 +88,13 @@ class ProviderPlugin(Protocol):
         ...
 
     @property
+    def dependencies(self) -> list[str]:
+        """List of plugin names this plugin depends on."""
+        ...
+
+    @property
     def router_prefix(self) -> str:
-        """Unique route prefix for this plugin (e.g., '/claude', '/codex')."""
+        """Unique route prefix for this plugin."""
         ...
 
     async def initialize(self, services: CoreServices) -> None:
@@ -97,14 +103,6 @@ class ProviderPlugin(Protocol):
 
     async def shutdown(self) -> None:
         """Perform graceful shutdown. Called once on app shutdown."""
-        ...
-
-    def create_adapter(self) -> BaseAdapter:
-        """Create adapter instance."""
-        ...
-
-    def create_config(self) -> ProviderConfig:
-        """Create provider configuration from settings."""
         ...
 
     async def validate(self) -> bool:
@@ -133,6 +131,44 @@ class ProviderPlugin(Protocol):
         Returns:
             Pydantic BaseModel class for plugin configuration or None if no configuration needed
         """
+        ...
+
+    def get_hooks(self) -> list[Hook] | None:
+        """Get hooks provided by this plugin (optional).
+
+        Returns:
+            List of hook instances or None if no hooks
+        """
+        ...
+
+
+@runtime_checkable
+class SystemPlugin(BasePlugin, Protocol):
+    """Protocol for system plugins (non-provider plugins).
+
+    System plugins inherit all methods from BasePlugin and don't add
+    any additional requirements. They don't proxy to external providers
+    and therefore don't need adapters or provider configurations.
+    """
+
+    # SystemPlugin has no additional methods beyond BasePlugin
+    pass
+
+
+@runtime_checkable
+class ProviderPlugin(BasePlugin, Protocol):
+    """Enhanced protocol for provider plugins.
+
+    Provider plugins proxy requests to external API providers and therefore
+    need additional methods for creating adapters and configurations.
+    """
+
+    def create_adapter(self) -> BaseAdapter:
+        """Create adapter instance for handling provider requests."""
+        ...
+
+    def create_config(self) -> ProviderConfig:
+        """Create provider configuration from settings."""
         ...
 
     async def get_oauth_client(self) -> OAuthClientProtocol | None:

@@ -21,6 +21,7 @@ from ccproxy.config.settings import get_settings
 from ccproxy.core.async_utils import get_claude_docker_home_dir
 from ccproxy.models.provider import ProviderConfig
 from ccproxy.plugins.loader import PluginLoader
+from ccproxy.plugins.protocol import ProviderPlugin
 from ccproxy.services.credentials import CredentialsManager
 
 
@@ -136,6 +137,10 @@ async def get_plugin_for_provider(provider: str) -> "ProviderPlugin":
 
     for plugin in plugins:
         if plugin.name == provider:
+            # Check if it's a ProviderPlugin
+            if not isinstance(plugin, ProviderPlugin):
+                raise ValueError(f"Plugin '{provider}' is not a provider plugin")
+
             try:
                 # Try to get config class and instantiate it directly
                 config_class = plugin.get_config_class()
@@ -633,6 +638,10 @@ def status_command(
 
                 for plugin in plugins:
                     if plugin.name == provider:
+                        # Check if it's a ProviderPlugin
+                        if not isinstance(plugin, ProviderPlugin):
+                            continue
+
                         # Initialize plugin with minimal CoreServices
                         import httpx
                         import structlog

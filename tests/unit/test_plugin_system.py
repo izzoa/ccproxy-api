@@ -37,6 +37,10 @@ class MockPlugin:
         return "1.0.0"
 
     @property
+    def dependencies(self) -> list[str]:
+        return []
+
+    @property
     def router_prefix(self) -> str:
         return "/test"
 
@@ -99,6 +103,10 @@ class MockPlugin:
     async def get_auth_summary(self):
         """Get authentication summary for the plugin."""
         return {"auth": "test", "description": "Test authentication"}
+
+    def get_hooks(self):
+        """Get hooks provided by this plugin (optional)."""
+        return None
 
 
 @pytest.mark.asyncio

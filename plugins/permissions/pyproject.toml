@@ -4,9 +4,7 @@ version = "1.0.0"
 description = "Permissions management plugin for CCProxy"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-    # Permissions plugin uses only core dependencies from the main package
-]
+dependencies = ["fastapi-mcp>=0.3.7"]
 
 [build-system]
 requires = ["hatchling"]

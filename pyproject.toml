@@ -24,7 +24,6 @@ dependencies = [
   "uvicorn>=0.34.0",
   "sqlmodel>=0.0.24",
   "duckdb-engine>=0.17.0",
-  "fastapi-mcp",
   "textual>=3.7.1",
   "packaging>=25.0",
   "h2>=4.2.0",
@@ -376,6 +375,3 @@ members = [
     "plugins/codex",
     "plugins/permissions",
 ]
-
-[tool.uv.sources]
-fastapi-mcp = { git = "https://github.com/tadata-org/fastapi_mcp", rev = "6fdbff6168b2c84b22966886741d1f24a584856c" }

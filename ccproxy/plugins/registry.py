@@ -8,7 +8,7 @@ import structlog
 from ccproxy.config.constants import PLUGIN_HEALTH_CHECK_TIMEOUT
 from ccproxy.core.services import CoreServices
 from ccproxy.plugins.loader import PluginLoader
-from ccproxy.plugins.protocol import HealthCheckResult, ProviderPlugin
+from ccproxy.plugins.protocol import BasePlugin, HealthCheckResult, ProviderPlugin
 from ccproxy.scheduler.registry import get_task_registry
 from ccproxy.services.adapters.base import BaseAdapter
 
@@ -21,7 +21,7 @@ class PluginRegistry:
 
     def __init__(self) -> None:
         """Initialize plugin registry."""
-        self._plugins: dict[str, ProviderPlugin] = {}
+        self._plugins: dict[str, BasePlugin] = {}
         self._adapters: dict[str, BaseAdapter] = {}
         self._initialized_plugins: set[str] = set()
         self._services: CoreServices | None = None
@@ -40,7 +40,7 @@ class PluginRegistry:
         for plugin in plugins:
             await self.register_and_initialize(plugin)
 
-    async def register_and_initialize(self, plugin: ProviderPlugin) -> None:
+    async def register_and_initialize(self, plugin: BasePlugin) -> None:
         """Register and initialize a plugin.
 
         Args:
@@ -57,8 +57,9 @@ class PluginRegistry:
             # Step 3: Initialize plugin
             await self._initialize_plugin(plugin)
 
-            # Step 4: Create and register adapter
-            self._create_and_register_adapter(plugin)
+            # Step 4: Create and register adapter (only for ProviderPlugin)
+            if isinstance(plugin, ProviderPlugin):
+                self._create_and_register_adapter(plugin)
 
             # Step 5: Register scheduled tasks
             await self._register_plugin_tasks(plugin)
@@ -70,7 +71,7 @@ class PluginRegistry:
         except (ValueError, AttributeError, Exception) as e:
             await self._handle_registration_error(plugin, e)
 
-    async def _validate_plugin(self, plugin: ProviderPlugin) -> bool:
+    async def _validate_plugin(self, plugin: BasePlugin) -> bool:
         """Validate a plugin before registration.
 
         Args:
@@ -91,7 +92,7 @@ class PluginRegistry:
 
         return True
 
-    def _register_plugin(self, plugin: ProviderPlugin) -> None:
+    def _register_plugin(self, plugin: BasePlugin) -> None:
         """Register a plugin in the registry.
 
         Args:
@@ -99,7 +100,7 @@ class PluginRegistry:
         """
         self._plugins[plugin.name] = plugin
 
-    async def _initialize_plugin(self, plugin: ProviderPlugin) -> None:
+    async def _initialize_plugin(self, plugin: BasePlugin) -> None:
         """Initialize a plugin with core services.
 
         Args:
@@ -110,16 +111,16 @@ class PluginRegistry:
             self._initialized_plugins.add(plugin.name)
 
     def _create_and_register_adapter(self, plugin: ProviderPlugin) -> None:
-        """Create and register an adapter for a plugin.
+        """Create and register an adapter for a provider plugin.
 
         Args:
-            plugin: Plugin to create adapter for
+            plugin: Provider plugin to create adapter for
         """
         adapter = plugin.create_adapter()
         self._adapters[plugin.name] = adapter
 
     async def _handle_registration_error(
-        self, plugin: ProviderPlugin, error: Exception
+        self, plugin: BasePlugin, error: Exception
     ) -> None:
         """Handle errors during plugin registration.
 
@@ -145,7 +146,7 @@ class PluginRegistry:
         self._adapters.pop(plugin.name, None)
         self._initialized_plugins.discard(plugin.name)
 
-    async def _register_plugin_tasks(self, plugin: ProviderPlugin) -> None:
+    async def _register_plugin_tasks(self, plugin: BasePlugin) -> None:
         """Register scheduled tasks for a plugin if available.
 
         Args:
@@ -282,7 +283,7 @@ class PluginRegistry:
         return summary
 
     def _build_base_summary(
-        self, plugin_name: str, plugin: ProviderPlugin
+        self, plugin_name: str, plugin: BasePlugin
     ) -> dict[str, Any]:
         """Build base summary for a plugin.
 
@@ -309,7 +310,7 @@ class PluginRegistry:
         return summary
 
     async def _add_auth_details(
-        self, summary: dict[str, Any], plugin: ProviderPlugin, plugin_name: str
+        self, summary: dict[str, Any], plugin: BasePlugin, plugin_name: str
     ) -> None:
         """Add auth details to plugin summary.
 
@@ -332,7 +333,7 @@ class PluginRegistry:
                 )
 
     def _add_routes_info(
-        self, summary: dict[str, Any], plugin: ProviderPlugin, plugin_name: str
+        self, summary: dict[str, Any], plugin: BasePlugin, plugin_name: str
     ) -> None:
         """Add routes information to plugin summary.
 
@@ -429,7 +430,7 @@ class PluginRegistry:
 
         self._plugin_tasks.clear()
 
-    async def _shutdown_plugin(self, plugin: ProviderPlugin) -> None:
+    async def _shutdown_plugin(self, plugin: BasePlugin) -> None:
         """Shutdown a single plugin.
 
         Args:
@@ -511,7 +512,7 @@ class PluginRegistry:
         """
         return self._adapters.get(name)
 
-    def get_plugin(self, name: str) -> ProviderPlugin | None:
+    def get_plugin(self, name: str) -> BasePlugin | None:
         """Get plugin by name.
 
         Args:
@@ -522,7 +523,7 @@ class PluginRegistry:
         """
         return self._plugins.get(name)
 
-    def get_all_plugins(self) -> list[ProviderPlugin]:
+    def get_all_plugins(self) -> list[BasePlugin]:
         """Get all registered plugins.
 
         Returns:

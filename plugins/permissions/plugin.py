@@ -7,9 +7,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ccproxy.core.services import CoreServices
-from ccproxy.models.provider import ProviderConfig
-from ccproxy.plugins.protocol import HealthCheckResult, ProviderPlugin
-from ccproxy.services.adapters.base import BaseAdapter
+from ccproxy.plugins.protocol import HealthCheckResult, SystemPlugin
 
 from .config import PermissionsConfig
 from .mcp import mcp_router
@@ -20,11 +18,10 @@ from .service import get_permission_service
 logger = structlog.get_logger(__name__)
 
 
-class Plugin(ProviderPlugin):
+class Plugin(SystemPlugin):
     """Permissions plugin providing authorization services.
 
-    This is a system plugin that provides permission management,
-    not a provider plugin, so many provider-specific methods return None.
+    This is a system plugin that provides permission management.
     """
 
     def __init__(self) -> None:
@@ -45,6 +42,11 @@ class Plugin(ProviderPlugin):
     def version(self) -> str:
         """Plugin version."""
         return self._version
+
+    @property
+    def dependencies(self) -> list[str]:
+        """List of plugin names this plugin depends on."""
+        return []  # No dependencies
 
     @property
     def router_prefix(self) -> str:
@@ -88,33 +90,6 @@ class Plugin(ProviderPlugin):
         await self._service.stop()
 
         self._logger.info("permissions_plugin_shutdown_complete")
-
-    def create_adapter(self) -> BaseAdapter:
-        """Permissions plugin doesn't need an adapter."""
-        # This is a system plugin, not a provider plugin
-        # Return a dummy adapter to satisfy the protocol
-        from ccproxy.services.adapters.base import BaseAdapter
-
-        class DummyAdapter(BaseAdapter):
-            async def handle_request(self, *args: Any, **kwargs: Any) -> Any:
-                pass
-
-            async def handle_streaming(self, *args: Any, **kwargs: Any) -> Any:
-                pass
-
-            async def cleanup(self) -> None:
-                """Cleanup dummy adapter resources."""
-                pass
-
-        return DummyAdapter()
-
-    def create_config(self) -> ProviderConfig:
-        """Permissions plugin doesn't need provider config."""
-        # Return minimal config to satisfy protocol
-        return ProviderConfig(
-            name=self.name,
-            base_url="",  # No external URL
-        )
 
     async def validate(self) -> bool:
         """Validate plugin is ready."""
@@ -171,26 +146,3 @@ class Plugin(ProviderPlugin):
     def get_config_class(self) -> type[BaseModel] | None:
         """Get configuration class."""
         return PermissionsConfig
-
-    async def get_oauth_client(self) -> Any | None:
-        """Permissions plugin doesn't use OAuth."""
-        return None
-
-    async def get_profile_info(self) -> dict[str, Any] | None:
-        """Permissions plugin doesn't have profile info."""
-        return None
-
-    def get_auth_commands(self) -> list[Any] | None:
-        """Permissions plugin doesn't have auth commands."""
-        return None
-
-    async def get_auth_summary(self) -> dict[str, Any]:
-        """Get authentication summary for the plugin.
-
-        Returns:
-            Dictionary with auth status (not applicable for permissions plugin)
-        """
-        return {
-            "auth": "not_applicable",
-            "description": "Permissions plugin does not require authentication",
-        }

@@ -106,10 +106,8 @@ from ccproxy.core.middleware import (
     NextMiddleware,
 )
 from ccproxy.core.proxy import (
-    BaseProxy,
     HTTPProxy,
     ProxyProtocol,
-    WebSocketProxy,
 )
 from ccproxy.core.transformers import (
     BaseTransformer,
@@ -147,7 +145,7 @@ from ccproxy.core.validators import (
 
 __all__ = [
     # Proxy abstractions
-    "BaseProxy",
+    "ProxyProtocol",
     "HTTPProxy",
     "WebSocketProxy",
     "ProxyProtocol",

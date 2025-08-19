@@ -257,7 +257,6 @@ dependencies = [
     { name = "duckdb" },
     { name = "duckdb-engine" },
     { name = "fastapi", extra = ["standard"] },
-    { name = "fastapi-mcp" },
     { name = "h2" },
     { name = "httpx" },
     { name = "jsonschema" },
@@ -328,7 +327,6 @@ requires-dist = [
     { name = "duckdb", specifier = ">=1.1.0" },
     { name = "duckdb-engine", specifier = ">=0.17.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.14" },
-    { name = "fastapi-mcp", git = "https://github.com/tadata-org/fastapi_mcp?rev=6fdbff6168b2c84b22966886741d1f24a584856c" },
     { name = "h2", specifier = ">=4.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsonschema", specifier = ">=4.23.0" },
@@ -431,6 +429,12 @@ requires-dist = [{ name = "openai", specifier = ">=1.93.0" }]
 name = "ccproxy-permissions"
 version = "1.0.0"
 source = { editable = "plugins/permissions" }
+dependencies = [
+    { name = "fastapi-mcp" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "fastapi-mcp", specifier = ">=0.3.7" }]
 
 [[package]]
 name = "certifi"
@@ -875,7 +879,7 @@ wheels = [
 [[package]]
 name = "fastapi-mcp"
 version = "0.3.7"
-source = { git = "https://github.com/tadata-org/fastapi_mcp?rev=6fdbff6168b2c84b22966886741d1f24a584856c#6fdbff6168b2c84b22966886741d1f24a584856c" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
@@ -887,6 +891,10 @@ dependencies = [
     { name = "tomli" },
     { name = "typer" },
     { name = "uvicorn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f3/b6/dbad5a717d909562905a24fa78551b899df582276ff9b5f88c5494c9acf6/fastapi_mcp-0.3.7.tar.gz", hash = "sha256:35de3333355e4d0f44116a4fe70613afecd5e5428bb6ddbaa041b39b33781af8", size = 165767, upload-time = "2025-07-14T16:19:51.196Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1f/4f/d622aa42273f79719a986caf585f956b6c70008a1d8ac45081274e3e5690/fastapi_mcp-0.3.7-py3-none-any.whl", hash = "sha256:1d4561959d4cd6df0ed8836d380b74fd9969fd9400cb6f7ed5cbd2db2f39090c", size = 23278, upload-time = "2025-07-14T16:19:49.994Z" },
 ]
 
 [[package]]
