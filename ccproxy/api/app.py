@@ -97,16 +97,20 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
         proxy_service = app.state.proxy_service
 
         # Check if plugins are already initialized (from startup_helpers)
-        if not proxy_service.plugin_manager.initialized:
+        # plugin_registry is actually a PluginManager instance
+        plugin_manager = proxy_service.plugin_registry
+        if plugin_manager and hasattr(plugin_manager, 'initialized') and not plugin_manager.initialized:
             # Pass scheduler if available
             scheduler = getattr(app.state, "scheduler", None)
             await proxy_service.initialize_plugins(scheduler=scheduler)
 
         # Register plugin routes (this should always happen)
-        for plugin_name in proxy_service.plugin_manager.plugin_registry.list_plugins():
-            plugin = proxy_service.plugin_manager.plugin_registry.get_plugin(
-                plugin_name
-            )
+        if plugin_manager and hasattr(plugin_manager, 'plugin_registry'):
+            # Access the internal PluginRegistry from PluginManager
+            for plugin_name in plugin_manager.plugin_registry.list_plugins():
+                plugin = plugin_manager.plugin_registry.get_plugin(
+                    plugin_name
+                )
             if plugin and hasattr(plugin, "get_routes"):
                 routes = plugin.get_routes()
 
@@ -139,7 +143,7 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
 
         logger.info(
             "plugins_initialization_completed",
-            providers=len(proxy_service.plugin_manager.list_active_providers()),
+            providers=len(plugin_manager.list_active_providers()) if hasattr(plugin_manager, 'list_active_providers') else 0,
         )
 
 
