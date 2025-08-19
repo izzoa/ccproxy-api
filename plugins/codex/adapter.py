@@ -267,4 +267,23 @@ class CodexAdapter(BaseAdapter):
 
     async def cleanup(self) -> None:
         """Cleanup resources when shutting down."""
-        self.logger.debug("codex_adapter_cleaned_up")
+        try:
+            # Cleanup HTTP handler if it exists
+            if self._http_handler:
+                if hasattr(self._http_handler, "cleanup"):
+                    await self._http_handler.cleanup()
+                self._http_handler = None
+
+            # Clear references to prevent memory leaks
+            self.proxy_service = None
+            self.request_transformer = None
+            self.response_transformer = None
+
+            self.logger.debug("codex_adapter_cleanup_completed")
+
+        except Exception as e:
+            self.logger.error(
+                "codex_adapter_cleanup_failed",
+                error=str(e),
+                exc_info=e,
+            )

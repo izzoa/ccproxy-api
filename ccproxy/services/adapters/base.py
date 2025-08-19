@@ -78,3 +78,13 @@ class BaseAdapter(ABC):
             Transformed response data
         """
         return response_data
+
+    @abstractmethod
+    async def cleanup(self) -> None:
+        """Cleanup adapter resources.
+
+        This method should be overridden by concrete adapters to clean up
+        any resources like HTTP clients, sessions, or background tasks.
+        Called during application shutdown.
+        """
+        ...

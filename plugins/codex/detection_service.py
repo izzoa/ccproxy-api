@@ -20,6 +20,7 @@ from ccproxy.models.detection import (
     CodexInstructionsData,
 )
 from ccproxy.services.cli_detection import CLIDetectionService
+from ccproxy.utils.caching import async_ttl_cache
 
 
 logger = structlog.get_logger(__name__)
@@ -87,7 +88,7 @@ class CodexDetectionService:
         return data.codex_version if data else "unknown"
 
     def get_cli_path(self) -> list[str] | None:
-        """Get the Codex CLI command.
+        """Get the Codex CLI command with caching.
 
         Returns:
             Command list to execute Codex CLI if found, None otherwise
@@ -99,8 +100,9 @@ class CodexDetectionService:
         """Alias for get_cli_path for backward compatibility."""
         return self.get_cli_path()
 
+    @async_ttl_cache(maxsize=16, ttl=900.0)  # 15 minute cache for version
     async def _get_codex_version(self) -> str:
-        """Get Codex CLI version."""
+        """Get Codex CLI version with caching."""
         try:
             # Custom parser for Codex version format
             def parse_codex_version(output: str) -> str:
@@ -284,3 +286,10 @@ class CodexDetectionService:
         with package_data_file.open("r") as f:
             fallback_data_dict = json.load(f)
             return CodexCacheData.model_validate(fallback_data_dict)
+
+    def invalidate_cache(self) -> None:
+        """Clear all cached detection data."""
+        # Clear the async cache for _get_codex_version
+        if hasattr(self._get_codex_version, "cache_clear"):
+            self._get_codex_version.cache_clear()
+        logger.debug("codex_detection_cache_cleared")

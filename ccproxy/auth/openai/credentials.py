@@ -14,6 +14,7 @@ from ccproxy.auth.exceptions import (
     CredentialsStorageError,
 )
 from ccproxy.auth.models import ClaudeCredentials, OAuthToken, UserProfile
+from ccproxy.utils.caching import AuthStatusCache, async_ttl_cache
 
 from .storage import OpenAITokenStorage
 
@@ -123,6 +124,7 @@ class OpenAITokenManager:
             device_id: Optional device ID for OpenAI requests.
         """
         self.storage = storage or OpenAITokenStorage()
+        self._auth_cache = AuthStatusCache(ttl=60.0)  # 1 minute TTL for auth status
 
     async def load_credentials(self) -> OpenAICredentials | None:
         """Load credentials from storage."""
@@ -258,15 +260,29 @@ class OpenAITokenManager:
         return ClaudeCredentials(claudeAiOauth=oauth_token)
 
     async def is_authenticated(self) -> bool:
-        """Check if current authentication is valid.
+        """Check if current authentication is valid with caching.
 
         Returns:
             True if authenticated, False otherwise
         """
+        # Check cache first
+        cached_result = self._auth_cache.get_auth_status("openai-codex")
+        if cached_result is not None:
+            logger.debug("auth_status_cache_hit", authenticated=cached_result)
+            return cached_result
+
         try:
             token = await self.get_valid_token()
-            return bool(token)
+            result = bool(token)
+
+            # Cache the result
+            self._auth_cache.set_auth_status("openai-codex", result)
+            logger.debug("auth_status_cached", authenticated=result)
+
+            return result
         except (AuthenticationError, CredentialsStorageError, CredentialsInvalidError):
+            # Cache negative result too (shorter TTL handled by AuthStatusCache)
+            self._auth_cache.set_auth_status("openai-codex", False)
             return False
         except Exception as e:
             logger.debug("unexpected_is_authenticated_error", error=str(e), exc_info=e)
@@ -302,17 +318,9 @@ class OpenAITokenManager:
         }
 
     async def validate_credentials(self) -> bool:
-        """Check if we have valid OpenAI credentials."""
-        try:
-            token = await self.get_valid_token()
-            return bool(token)
-        except (AuthenticationError, CredentialsStorageError, CredentialsInvalidError):
-            return False
-        except Exception as e:
-            logger.debug(
-                "unexpected_validate_credentials_error", error=str(e), exc_info=e
-            )
-            return False
+        """Check if we have valid OpenAI credentials with caching."""
+        # Reuse the cached is_authenticated method
+        return await self.is_authenticated()
 
     def get_provider_name(self) -> str:
         """Get the provider name for logging."""
@@ -335,8 +343,9 @@ class OpenAITokenManager:
             return account_id[:8] + "..."
         return account_id
 
+    @async_ttl_cache(maxsize=8, ttl=120.0)  # 2 minute cache for expensive auth status
     async def get_auth_status(self) -> dict[str, Any]:
-        """Get detailed authentication status information.
+        """Get detailed authentication status information with caching.
 
         Returns:
             Dictionary with auth status details including token info,
@@ -435,3 +444,15 @@ class OpenAITokenManager:
             status["auth_error"] = str(e)
 
         return status
+
+    def invalidate_auth_cache(self) -> None:
+        """Clear all cached authentication data."""
+        self._auth_cache.clear()
+        if hasattr(self.get_auth_status, "cache_clear"):
+            self.get_auth_status.cache_clear()
+        logger.debug("openai_auth_cache_cleared")
+
+    def invalidate_auth_status(self) -> None:
+        """Specifically invalidate auth status for this provider."""
+        self._auth_cache.invalidate_auth_status("openai-codex")
+        logger.debug("openai_auth_status_invalidated")

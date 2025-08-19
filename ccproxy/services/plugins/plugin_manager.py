@@ -13,6 +13,9 @@ from ccproxy.plugins.registry import PluginRegistry
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.interfaces import IRequestHandler
 from ccproxy.services.tracing.interfaces import RequestTracer
+from ccproxy.utils.caching import (
+    TTLCache,
+)
 
 
 logger = structlog.get_logger(__name__)
@@ -50,6 +53,9 @@ class PluginManager:
         self.initialized = False
         self._http_client: httpx.AsyncClient | None = None
         self._request_handler = request_handler  # Store reference using protocol
+
+        # Add cache for plugin summaries (relatively stable data)
+        self._plugin_summary_cache = TTLCache(maxsize=32, ttl=300.0)  # 5 minute TTL
 
     async def initialize_plugins(
         self,
@@ -162,11 +168,9 @@ class PluginManager:
                 cli_info["cache_used"] = True  # Most detection uses cache
                 logger.info("cli_detection_completed", **cli_info)
 
-            # Log consolidated plugin information with auth details
+            # Log consolidated plugin information with auth details (with caching)
             for plugin_name in self.adapters:
-                summary = await self.plugin_registry.get_plugin_summary_with_auth(
-                    plugin_name
-                )
+                summary = await self._get_cached_plugin_summary(plugin_name)
                 if summary:
                     logger.info("plugin_initialized", **summary)
 
@@ -200,7 +204,7 @@ class PluginManager:
             raise
 
     def get_adapter(self, name: str) -> BaseAdapter | None:
-        """Retrieve plugin adapter by provider name.
+        """Retrieve plugin adapter by provider name with caching.
 
         - Looks up in adapter cache
         - Handles scheme-to-name mapping for URL schemes with hyphens
@@ -301,26 +305,85 @@ class PluginManager:
 
     async def close(self) -> None:
         """Clean up plugin resources on shutdown."""
-        # Close any plugin-specific resources
-        for adapter in self.adapters.values():
-            if hasattr(adapter, "close"):
+        try:
+            # Shutdown plugin registry first (which shutdowns plugins)
+            if self.plugin_registry:
+                await self.plugin_registry.shutdown_all()
+
+            # Close any plugin-specific resources
+            for adapter_name, adapter in list(self.adapters.items()):
                 try:
-                    await adapter.close()
-                except AttributeError as e:
-                    logger.error(
-                        "adapter_close_missing_method",
+                    # Try cleanup first (preferred method)
+                    if hasattr(adapter, "cleanup"):
+                        await adapter.cleanup()
+                    # Fall back to close for backward compatibility
+                    elif hasattr(adapter, "close"):
+                        await adapter.close()
+
+                    logger.debug(
+                        "adapter_cleaned_up",
                         adapter=type(adapter).__name__,
-                        error=str(e),
-                        exc_info=e,
+                        plugin=adapter_name,
                     )
+
                 except Exception as e:
                     logger.error(
-                        "adapter_close_failed",
+                        "adapter_cleanup_failed",
                         adapter=type(adapter).__name__,
+                        plugin=adapter_name,
                         error=str(e),
                         exc_info=e,
                     )
 
-        self.adapters.clear()
-        self.tracers.clear()
-        self.initialized = False
+            # Clear references
+            self.adapters.clear()
+            self.tracers.clear()
+            self._http_client = None
+            self._request_handler = None
+            self.initialized = False
+
+            logger.info("plugin_manager_shutdown_completed")
+
+        except Exception as e:
+            logger.error(
+                "plugin_manager_shutdown_failed",
+                error=str(e),
+                exc_info=e,
+            )
+
+    async def _get_cached_plugin_summary(
+        self, plugin_name: str
+    ) -> dict[str, Any] | None:
+        """Get plugin summary with caching."""
+        cache_key = f"plugin_summary:{plugin_name}"
+
+        # Check cache first
+        cached_summary = self._plugin_summary_cache.get(cache_key)
+        if cached_summary is not None:
+            return cached_summary  # type: ignore[no-any-return]
+
+        # Get fresh summary
+        summary = await self.plugin_registry.get_plugin_summary_with_auth(plugin_name)
+
+        # Cache the result (even if None)
+        self._plugin_summary_cache.set(cache_key, summary)
+
+        return summary
+
+    def clear_plugin_caches(self) -> None:
+        """Clear all plugin-related caches."""
+        # No LRU caches to clear anymore (removed to avoid memory leaks)
+
+        # Clear TTL cache
+        self._plugin_summary_cache.clear()
+
+        logger.debug("plugin_manager_caches_cleared")
+
+    def invalidate_plugin_cache(self, plugin_name: str) -> None:
+        """Invalidate cache for a specific plugin."""
+        cache_key = f"plugin_summary:{plugin_name}"
+        self._plugin_summary_cache.delete(cache_key)
+
+        # No LRU caches to clear anymore (removed to avoid memory leaks)
+
+        logger.debug("plugin_cache_invalidated", plugin=plugin_name)

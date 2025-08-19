@@ -14,6 +14,7 @@ import structlog
 from ccproxy.config.discovery import get_ccproxy_cache_dir
 from ccproxy.config.settings import Settings
 from ccproxy.utils.binary_resolver import BinaryResolver, CLIInfo
+from ccproxy.utils.caching import TTLCache
 
 
 logger = structlog.get_logger(__name__)
@@ -55,8 +56,11 @@ class CLIDetectionService:
         # Create resolver from settings
         self.resolver = BinaryResolver.from_settings(settings)
 
-        # Cache for detection results
-        self._detection_cache: dict[str, CLIDetectionResult] = {}
+        # Enhanced TTL cache for detection results (10 minute TTL)
+        self._detection_cache = TTLCache(maxsize=64, ttl=600.0)
+
+        # Separate cache for version info (longer TTL since versions change infrequently)
+        self._version_cache = TTLCache(maxsize=32, ttl=1800.0)  # 30 minutes
 
     async def detect_cli(
         self,
@@ -82,16 +86,17 @@ class CLIDetectionService:
         """
         cache_key = cache_key or binary_name
 
-        # Check memory cache first
-        if cache_key in self._detection_cache:
-            cached_result = self._detection_cache[cache_key]
+        # Check TTL cache first
+        cached_result = self._detection_cache.get(cache_key)
+        if cached_result is not None:
             logger.debug(
                 "cli_detection_cached",
                 binary=binary_name,
                 version=cached_result.version,
                 available=cached_result.is_available,
+                cache_hit=True,
             )
-            return cached_result
+            return cached_result  # type: ignore[no-any-return]
 
         # Try to detect the binary
         result = self.resolver.find_binary(binary_name, package_name)
@@ -160,8 +165,8 @@ class CLIDetectionService:
                 package=package_name,
             )
 
-        # Cache the result
-        self._detection_cache[cache_key] = detection_result
+        # Cache the result with TTL
+        self._detection_cache.set(cache_key, detection_result)
 
         return detection_result
 
@@ -171,7 +176,7 @@ class CLIDetectionService:
         version_flag: str,
         version_parser: Any | None = None,
     ) -> str | None:
-        """Get CLI version by executing version command.
+        """Get CLI version by executing version command with caching.
 
         Args:
             cli_command: Command list to execute CLI
@@ -181,6 +186,20 @@ class CLIDetectionService:
         Returns:
             Version string if successful, None otherwise
         """
+        # Create cache key from command and flag
+        cache_key = f"version:{':'.join(cli_command)}:{version_flag}"
+
+        # Check version cache first (longer TTL since versions change infrequently)
+        cached_version = self._version_cache.get(cache_key)
+        if cached_version is not None:
+            logger.debug(
+                "cli_version_cached",
+                command=cli_command[0],
+                version=cached_version,
+                cache_hit=True,
+            )
+            return cached_version  # type: ignore[no-any-return]
+
         try:
             # Prepare command with version flag
             cmd = cli_command + [version_flag]
@@ -194,32 +213,48 @@ class CLIDetectionService:
 
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5.0)
 
+            version = None
             if process.returncode == 0 and stdout:
                 version_output = stdout.decode().strip()
 
                 # Use custom parser if provided
                 if version_parser:
                     parsed = version_parser(version_output)
-                    return str(parsed) if parsed is not None else None
-
-                # Default parsing logic
-                return self._parse_version_output(version_output)
+                    version = str(parsed) if parsed is not None else None
+                else:
+                    # Default parsing logic
+                    version = self._parse_version_output(version_output)
 
             # Try stderr as some CLIs output version there
-            if stderr:
+            if not version and stderr:
                 version_output = stderr.decode().strip()
                 if version_parser:
                     parsed = version_parser(version_output)
-                    return str(parsed) if parsed is not None else None
-                return self._parse_version_output(version_output)
+                    version = str(parsed) if parsed is not None else None
+                else:
+                    version = self._parse_version_output(version_output)
 
-            return None
+            # Cache the version result (even if None)
+            self._version_cache.set(cache_key, version)
+
+            logger.debug(
+                "cli_version_detected",
+                command=cli_command[0],
+                version=version,
+                cached=True,
+            )
+
+            return version
 
         except TimeoutError:
             logger.debug("cli_version_timeout", command=cli_command)
+            # Cache timeout result briefly to avoid repeated attempts
+            self._version_cache.set(cache_key, None)
             return None
         except Exception as e:
             logger.debug("cli_version_error", command=cli_command, error=str(e))
+            # Cache error result briefly to avoid repeated attempts
+            self._version_cache.set(cache_key, None)
             return None
 
     def _parse_version_output(self, output: str) -> str:
@@ -318,16 +353,16 @@ class CLIDetectionService:
             CLIInfo dictionary with structured information
         """
         # Check if we have cached detection result
-        if binary_name in self._detection_cache:
-            result = self._detection_cache[binary_name]
+        cached_result = self._detection_cache.get(binary_name)
+        if cached_result is not None:
             return CLIInfo(
-                name=result.name,
-                version=result.version,
-                source=result.source,
-                path=result.command[0] if result.command else None,
-                command=result.command or [],
-                package_manager=result.package_manager,
-                is_available=result.is_available,
+                name=cached_result.name,
+                version=cached_result.version,
+                source=cached_result.source,
+                path=cached_result.command[0] if cached_result.command else None,
+                command=cached_result.command or [],
+                package_manager=cached_result.package_manager,
+                is_available=cached_result.is_available,
             )
 
         # Fall back to resolver
@@ -336,6 +371,7 @@ class CLIDetectionService:
     def clear_cache(self) -> None:
         """Clear all detection caches."""
         self._detection_cache.clear()
+        self._version_cache.clear()
         self.resolver.clear_cache()
         logger.debug("cli_detection_cache_cleared")
 
@@ -345,7 +381,13 @@ class CLIDetectionService:
         Returns:
             Dictionary of binary name to detection result
         """
-        return self._detection_cache.copy()
+        # Extract all cached results from TTLCache
+        results: dict[str, CLIDetectionResult] = {}
+        if hasattr(self._detection_cache, "_cache"):
+            for key, (result, _) in self._detection_cache._cache.items():
+                if isinstance(key, str) and isinstance(result, CLIDetectionResult):
+                    results[key] = result
+        return results
 
     async def detect_multiple(
         self,

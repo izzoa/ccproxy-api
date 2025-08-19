@@ -341,3 +341,27 @@ class PluginHTTPHandler:
                 )
 
         return transformed_body, headers, is_streaming
+
+    async def cleanup(self) -> None:
+        """Cleanup HTTP handler resources.
+
+        Note: This handler primarily uses shared HTTP clients that are managed
+        by the ServiceContainer. We don't close them here to avoid conflicts.
+        Only clears references to prevent memory leaks.
+        """
+        try:
+            # Clear references but don't close shared client
+            if self._http_client:
+                self._http_client = None
+
+            # Clear config
+            self.client_config.clear()
+
+            self.logger.debug("http_handler_cleanup_completed")
+
+        except Exception as e:
+            self.logger.error(
+                "http_handler_cleanup_failed",
+                error=str(e),
+                exc_info=e,
+            )

@@ -6,6 +6,7 @@ import structlog
 
 from ccproxy.config.settings import Settings
 from ccproxy.services.cli_detection import CLIDetectionService
+from ccproxy.utils.caching import async_ttl_cache
 
 
 logger = structlog.get_logger(__name__)
@@ -22,9 +23,10 @@ class ClaudeDetectionData(NamedTuple):
 class ClaudeSDKDetectionService:
     """Service for detecting Claude CLI availability.
 
-    This is a simplified detection service that only checks if the Claude CLI
-    exists. Unlike the Claude API plugin, this doesn't support fallback mode
-    as the SDK requires the actual CLI to be present.
+    This detection service checks if the Claude CLI exists either as a direct
+    binary in PATH or via package manager execution (e.g., bunx). Unlike the
+    Claude API plugin, this doesn't support fallback mode as the SDK requires
+    the actual CLI to be present.
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -39,8 +41,9 @@ class ClaudeSDKDetectionService:
         self._cli_command: list[str] | None = None
         self._is_available = False
 
+    @async_ttl_cache(maxsize=16, ttl=600.0)  # 10 minute cache for CLI detection
     async def initialize_detection(self) -> ClaudeDetectionData:
-        """Initialize Claude CLI detection.
+        """Initialize Claude CLI detection with caching.
 
         Returns:
             ClaudeDetectionData with detection results
@@ -64,8 +67,8 @@ class ClaudeSDKDetectionService:
                 cache_key="claude_sdk",
             )
 
-            # Only accept direct binary, not package manager execution
-            if result.is_available and result.source == "path":
+            # Accept both direct binary and package manager execution
+            if result.is_available:
                 self._version = result.version
                 self._cli_command = result.command
                 self._is_available = True
@@ -73,19 +76,15 @@ class ClaudeSDKDetectionService:
                     "claude_sdk_detection_success",
                     cli_command=self._cli_command,
                     version=self._version,
+                    source=result.source,
+                    cached=hasattr(result, "cached") and result.cached,
                 )
             else:
                 self._is_available = False
-                if result.source == "package_manager":
-                    logger.error(
-                        "claude_sdk_detection_failed",
-                        message="Claude SDK requires installed CLI, not package manager execution",
-                    )
-                else:
-                    logger.error(
-                        "claude_sdk_detection_failed",
-                        message="Claude CLI not found - SDK plugin cannot function without CLI",
-                    )
+                logger.error(
+                    "claude_sdk_detection_failed",
+                    message="Claude CLI not found - SDK plugin cannot function without CLI",
+                )
         finally:
             # Restore original fallback setting
             self._cli_service.resolver.fallback_enabled = original_fallback
@@ -119,3 +118,10 @@ class ClaudeSDKDetectionService:
             True if Claude CLI was detected, False otherwise
         """
         return self._is_available
+
+    def invalidate_cache(self) -> None:
+        """Clear all cached detection data."""
+        # Clear the async cache for initialize_detection
+        if hasattr(self.initialize_detection, "cache_clear"):
+            self.initialize_detection.cache_clear()
+        logger.debug("claude_sdk_detection_cache_cleared")

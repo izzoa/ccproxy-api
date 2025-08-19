@@ -122,6 +122,10 @@ class MockAdapter(BaseAdapter):
             media_type="text/event-stream",
         )
 
+    async def cleanup(self) -> None:
+        """Cleanup mock adapter resources."""
+        pass
+
 
 class MockPluginRegistry:
     """Mock plugin registry for testing."""

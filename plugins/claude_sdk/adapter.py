@@ -75,7 +75,9 @@ class ClaudeSDKAdapter(BaseAdapter):
             )
 
         self.session_manager = session_manager
-        self.handler = ClaudeSDKHandler(config=config, session_manager=session_manager)
+        self.handler: ClaudeSDKHandler | None = ClaudeSDKHandler(
+            config=config, session_manager=session_manager
+        )
         self.format_adapter = ClaudeSDKFormatAdapter()
         self.request_transformer = ClaudeSDKRequestTransformer()
         # Initialize response transformer with CORS settings
@@ -466,11 +468,35 @@ class ClaudeSDKAdapter(BaseAdapter):
 
         return result
 
-    async def close(self) -> None:
+    async def cleanup(self) -> None:
         """Cleanup resources when shutting down."""
-        if self.session_manager:
-            await self.session_manager.shutdown()
-        if self.handler:
-            await self.handler.close()
-        self._initialized = False
-        self.logger.debug("claude_sdk_adapter_cleanup_completed")
+        try:
+            # Shutdown session manager first
+            if self.session_manager:
+                await self.session_manager.shutdown()
+                self.session_manager = None
+
+            # Close handler
+            if self.handler:
+                await self.handler.close()
+                self.handler = None
+
+            # Clear references to prevent memory leaks
+            self.proxy_service = None
+            self._detection_service = None
+
+            # Mark as not initialized
+            self._initialized = False
+
+            self.logger.debug("claude_sdk_adapter_cleanup_completed")
+
+        except Exception as e:
+            self.logger.error(
+                "claude_sdk_adapter_cleanup_failed",
+                error=str(e),
+                exc_info=e,
+            )
+
+    async def close(self) -> None:
+        """Compatibility method - delegates to cleanup()."""
+        await self.cleanup()

@@ -20,6 +20,7 @@ from ccproxy.models.detection import (
     SystemPromptData,
 )
 from ccproxy.services.cli_detection import CLIDetectionService
+from ccproxy.utils.caching import async_ttl_cache
 
 
 logger = structlog.get_logger(__name__)
@@ -84,7 +85,7 @@ class ClaudeAPIDetectionService:
         return None
 
     def get_cli_path(self) -> list[str] | None:
-        """Get the Claude CLI command.
+        """Get the Claude CLI command with caching.
 
         Returns:
             Command list to execute Claude CLI if found, None otherwise
@@ -96,8 +97,9 @@ class ClaudeAPIDetectionService:
         """Alias for get_cli_path for consistency with Codex."""
         return self.get_cli_path()
 
+    @async_ttl_cache(maxsize=16, ttl=900.0)  # 15 minute cache for version
     async def _get_claude_version(self) -> str:
-        """Get Claude CLI version."""
+        """Get Claude CLI version with caching."""
         try:
             # Use centralized CLI detection
             result = await self._cli_service.detect_cli(
@@ -262,3 +264,10 @@ class ClaudeAPIDetectionService:
         with package_data_file.open("r") as f:
             fallback_data_dict = json.load(f)
             return ClaudeCacheData.model_validate(fallback_data_dict)
+
+    def invalidate_cache(self) -> None:
+        """Clear all cached detection data."""
+        # Clear the async cache for _get_claude_version
+        if hasattr(self._get_claude_version, "cache_clear"):
+            self._get_claude_version.cache_clear()
+        logger.debug("claude_api_detection_cache_cleared")

@@ -248,4 +248,35 @@ class ClaudeAPIAdapter(BaseAdapter):
 
     async def cleanup(self) -> None:
         """Cleanup resources when shutting down."""
-        self.logger.debug("claude_api_adapter_cleanup_completed")
+        try:
+            # Cleanup HTTP handler if it exists
+            if self._http_handler:
+                if hasattr(self._http_handler, "cleanup"):
+                    await self._http_handler.cleanup()
+                self._http_handler = None
+
+            # Close any dedicated HTTP client if we're using one
+            if self.http_client:
+                try:
+                    await self.http_client.aclose()
+                    self.http_client = None
+                except Exception as e:
+                    self.logger.warning(
+                        "claude_api_http_client_close_failed",
+                        error=str(e),
+                        exc_info=e,
+                    )
+
+            # Clear references to prevent memory leaks
+            self.proxy_service = None
+            self._request_transformer = None
+            self._response_transformer = None
+
+            self.logger.debug("claude_api_adapter_cleanup_completed")
+
+        except Exception as e:
+            self.logger.error(
+                "claude_api_adapter_cleanup_failed",
+                error=str(e),
+                exc_info=e,
+            )

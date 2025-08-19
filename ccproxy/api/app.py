@@ -86,6 +86,22 @@ async def setup_http_client_shutdown(app: FastAPI) -> None:
     logger.debug("shared_http_client_shutdown_completed")
 
 
+async def setup_proxy_service_shutdown(app: FastAPI) -> None:
+    """Close the proxy service and its resources."""
+    if hasattr(app.state, "proxy_service"):
+        proxy_service = app.state.proxy_service
+        if hasattr(proxy_service, "close"):
+            try:
+                await proxy_service.close()
+                logger.debug("proxy_service_shutdown_completed")
+            except Exception as e:
+                logger.error(
+                    "proxy_service_shutdown_failed",
+                    error=str(e),
+                    exc_info=e,
+                )
+
+
 async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
     """Initialize plugins during startup."""
     if not settings.enable_plugins:
@@ -191,7 +207,7 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
     {
         "name": "Proxy Service",
         "startup": initialize_proxy_service_startup,
-        "shutdown": None,  # Cleaned up with app shutdown
+        "shutdown": setup_proxy_service_shutdown,
     },
 ]
 

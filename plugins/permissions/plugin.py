@@ -102,6 +102,10 @@ class Plugin(ProviderPlugin):
             async def handle_streaming(self, *args: Any, **kwargs: Any) -> Any:
                 pass
 
+            async def cleanup(self) -> None:
+                """Cleanup dummy adapter resources."""
+                pass
+
         return DummyAdapter()
 
     def create_config(self) -> ProviderConfig:

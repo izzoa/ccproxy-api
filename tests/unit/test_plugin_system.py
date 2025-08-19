@@ -21,6 +21,10 @@ class MockAdapter(BaseAdapter):
     async def handle_streaming(self, request, endpoint, **kwargs):
         return MagicMock()
 
+    async def cleanup(self) -> None:
+        """Cleanup mock adapter resources."""
+        pass
+
 
 class MockPlugin:
     """Mock plugin for testing."""

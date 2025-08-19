@@ -5,6 +5,8 @@ for the application's needs, addressing Issue #9 from the code review.
 """
 
 import os
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -132,6 +134,42 @@ class HTTPClientFactory:
             max_connections=50,
             **kwargs,
         )
+
+    @staticmethod
+    @asynccontextmanager
+    async def managed_client(
+        settings: Settings | None = None, **kwargs: Any
+    ) -> AsyncGenerator[httpx.AsyncClient, None]:
+        """Create a managed HTTP client with automatic cleanup.
+
+        This context manager ensures proper cleanup of HTTP clients
+        in error cases and provides a clean resource management pattern.
+
+        Args:
+            settings: Optional settings for configuration
+            **kwargs: Additional client configuration
+
+        Yields:
+            Configured httpx.AsyncClient instance
+
+        Example:
+            async with HTTPClientFactory.managed_client() as client:
+                response = await client.get("https://api.example.com")
+        """
+        client = HTTPClientFactory.create_client(settings=settings, **kwargs)
+        try:
+            logger.debug("managed_http_client_created")
+            yield client
+        finally:
+            try:
+                await client.aclose()
+                logger.debug("managed_http_client_closed")
+            except Exception as e:
+                logger.warning(
+                    "managed_http_client_close_failed",
+                    error=str(e),
+                    exc_info=e,
+                )
 
 
 def _get_proxy_url() -> str | None:
