@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from ccproxy.api.app import create_app
+from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
 from ccproxy.observability.context import RequestContext
 
 
@@ -39,6 +40,20 @@ from ccproxy.docker.adapter import DockerAdapter
 from ccproxy.docker.docker_path import DockerPath, DockerPathSet
 from ccproxy.docker.models import DockerUserContext
 from ccproxy.docker.stream_process import DefaultOutputMiddleware
+
+
+# Global fixture for task manager (needed by many async tests)
+@pytest.fixture(autouse=True)
+async def task_manager_fixture():
+    """Start and stop the global task manager for each test.
+    
+    This fixture ensures the AsyncTaskManager is properly started before
+    tests that use managed tasks (like PermissionService, scheduler, etc.)
+    and properly cleaned up afterwards.
+    """
+    await start_task_manager()
+    yield
+    await stop_task_manager()
 
 
 # Import organized fixture modules
