@@ -53,7 +53,7 @@ class ClaudeAPIAdapter(BaseAdapter):
 
         self.openai_adapter = OpenAIAdapter()
 
-        # Initialize HTTP handler and transformers (will be completed in set_proxy_service if needed)
+        # Initialize HTTP handler and transformers
         self._http_handler: PluginHTTPHandler | None = None
         self._request_transformer: ClaudeAPIRequestTransformer | None = None
         self._response_transformer: ClaudeAPIResponseTransformer | None = None
@@ -87,20 +87,6 @@ class ClaudeAPIAdapter(BaseAdapter):
         # Initialize response transformer with CORS settings
         cors_settings = getattr(self.proxy_service.config, "cors", None)
         self._response_transformer = ClaudeAPIResponseTransformer(cors_settings)
-
-    def set_proxy_service(self, proxy_service: Any) -> None:
-        """Set the proxy service and complete initialization.
-
-        DEPRECATED: This method is deprecated. ProxyService should be passed
-        to the constructor instead to avoid the anti-pattern of delayed initialization.
-
-        Args:
-            proxy_service: ProxyService instance for handling requests
-        """
-        if self.proxy_service is None:
-            self.proxy_service = proxy_service
-            self._complete_initialization()
-        # If already set via constructor, ignore this call
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any

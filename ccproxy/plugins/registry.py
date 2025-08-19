@@ -46,70 +46,105 @@ class PluginRegistry:
             plugin: Plugin to register and initialize
         """
         try:
-            # Check if plugin is already registered
-            if plugin.name in self._plugins:
-                logger.debug(
-                    f"Plugin {plugin.name} already registered, skipping duplicate"
-                )
+            # Step 1: Validate plugin
+            if not await self._validate_plugin(plugin):
                 return
 
-            # Basic validation first
-            if not await plugin.validate():
-                logger.warning(f"Plugin {plugin.name} failed validation")
-                return
+            # Step 2: Register plugin
+            self._register_plugin(plugin)
 
-            # Register plugin
-            self._plugins[plugin.name] = plugin
+            # Step 3: Initialize plugin
+            await self._initialize_plugin(plugin)
 
-            # Initialize plugin if services available
-            if self._services and hasattr(plugin, "initialize"):
-                await plugin.initialize(self._services)
-                self._initialized_plugins.add(plugin.name)
+            # Step 4: Create and register adapter
+            self._create_and_register_adapter(plugin)
 
-            # Create adapter after initialization (with proxy service if available)
-            adapter = self._create_adapter_with_proxy_service(plugin)
-            self._adapters[plugin.name] = adapter
-
-            # Register scheduled tasks if plugin has them and scheduler is available
+            # Step 5: Register scheduled tasks
             await self._register_plugin_tasks(plugin)
 
             logger.debug(
                 f"Registered and initialized plugin: {plugin.name} v{plugin.version}"
             )
 
-        except ValueError as e:
-            logger.error(
-                "plugin_registration_validation_failed",
-                plugin=plugin.name,
-                error=str(e),
-                exc_info=e,
+        except (ValueError, AttributeError, Exception) as e:
+            await self._handle_registration_error(plugin, e)
+
+    async def _validate_plugin(self, plugin: ProviderPlugin) -> bool:
+        """Validate a plugin before registration.
+
+        Args:
+            plugin: Plugin to validate
+
+        Returns:
+            True if valid, False otherwise
+        """
+        # Check if plugin is already registered
+        if plugin.name in self._plugins:
+            logger.debug(
+                f"Plugin {plugin.name} already registered, skipping duplicate"
             )
-            # Remove from registry if registration failed
-            self._plugins.pop(plugin.name, None)
-            self._adapters.pop(plugin.name, None)
-            self._initialized_plugins.discard(plugin.name)
-        except AttributeError as e:
-            logger.error(
-                "plugin_registration_missing_attribute",
-                plugin=plugin.name,
-                error=str(e),
-                exc_info=e,
-            )
-            # Remove from registry if registration failed
-            self._plugins.pop(plugin.name, None)
-            self._adapters.pop(plugin.name, None)
-            self._initialized_plugins.discard(plugin.name)
-        except Exception as e:
-            logger.error(
-                "plugin_registration_failed",
-                plugin=plugin.name,
-                error=str(e),
-                exc_info=e,
-            )
-            # Remove from registry if registration failed
-            self._plugins.pop(plugin.name, None)
-            self._adapters.pop(plugin.name, None)
-            self._initialized_plugins.discard(plugin.name)
+            return False
+
+        # Basic validation
+        if not await plugin.validate():
+            logger.warning(f"Plugin {plugin.name} failed validation")
+            return False
+
+        return True
+
+    def _register_plugin(self, plugin: ProviderPlugin) -> None:
+        """Register a plugin in the registry.
+
+        Args:
+            plugin: Plugin to register
+        """
+        self._plugins[plugin.name] = plugin
+
+    async def _initialize_plugin(self, plugin: ProviderPlugin) -> None:
+        """Initialize a plugin with core services.
+
+        Args:
+            plugin: Plugin to initialize
+        """
+        if self._services and hasattr(plugin, "initialize"):
+            await plugin.initialize(self._services)
+            self._initialized_plugins.add(plugin.name)
+
+    def _create_and_register_adapter(self, plugin: ProviderPlugin) -> None:
+        """Create and register an adapter for a plugin.
+
+        Args:
+            plugin: Plugin to create adapter for
+        """
+        adapter = plugin.create_adapter()
+        self._adapters[plugin.name] = adapter
+
+    async def _handle_registration_error(
+        self, plugin: ProviderPlugin, error: Exception
+    ) -> None:
+        """Handle errors during plugin registration.
+
+        Args:
+            plugin: Plugin that failed registration
+            error: Exception that occurred
+        """
+        error_type = "plugin_registration_failed"
+        if isinstance(error, ValueError):
+            error_type = "plugin_registration_validation_failed"
+        elif isinstance(error, AttributeError):
+            error_type = "plugin_registration_missing_attribute"
+
+        logger.error(
+            error_type,
+            plugin=plugin.name,
+            error=str(error),
+            exc_info=error,
+        )
+
+        # Remove from registry if registration failed
+        self._plugins.pop(plugin.name, None)
+        self._adapters.pop(plugin.name, None)
+        self._initialized_plugins.discard(plugin.name)
 
     async def _register_plugin_tasks(self, plugin: ProviderPlugin) -> None:
         """Register scheduled tasks for a plugin if available.
@@ -216,39 +251,6 @@ class PluginRegistry:
         # Track tasks for this plugin for cleanup
         if registered_tasks:
             self._plugin_tasks[plugin.name] = registered_tasks
-
-    def _create_adapter_with_proxy_service(self, plugin: ProviderPlugin) -> BaseAdapter:
-        """Create adapter with ProxyService reference to avoid set_proxy_service anti-pattern.
-
-        Since plugins now receive ProxyService via CoreServices during initialization,
-        adapters should be fully initialized when created. This factory method
-        is kept for backward compatibility but should no longer need special handling.
-
-        Args:
-            plugin: Plugin instance to create adapter for
-
-        Returns:
-            Properly initialized adapter with ProxyService reference
-        """
-        # The plugin should have created the adapter with all dependencies
-        # via the ProxyService reference in CoreServices during initialization
-        adapter = plugin.create_adapter()
-
-        # Legacy support: If adapter still has set_proxy_service and wasn't properly initialized
-        if (
-            hasattr(adapter, "set_proxy_service")
-            and self._services
-            and hasattr(self._services, "proxy_service")
-            and self._services.proxy_service
-            and (not hasattr(adapter, "proxy_service") or adapter.proxy_service is None)
-        ):
-            logger.warning(
-                f"Adapter {type(adapter).__name__} still using deprecated set_proxy_service pattern",
-                plugin=plugin.name,
-            )
-            adapter.set_proxy_service(self._services.proxy_service)
-
-        return adapter
 
     def get_plugin_summary(self, plugin_name: str) -> dict[str, Any] | None:
         """Get consolidated summary information for a plugin.
