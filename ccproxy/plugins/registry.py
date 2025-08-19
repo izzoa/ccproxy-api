@@ -65,6 +65,13 @@ class PluginRegistry:
             plugin_path: Optional path to the plugin file for reloading
         """
         try:
+            # Check if plugin is already registered
+            if plugin.name in self._plugins:
+                logger.debug(
+                    f"Plugin {plugin.name} already registered, skipping duplicate"
+                )
+                return
+
             # Basic validation first
             if not await plugin.validate():
                 logger.warning(f"Plugin {plugin.name} failed validation")

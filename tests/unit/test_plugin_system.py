@@ -93,6 +93,10 @@ class MockPlugin:
         """Get provider-specific auth command extensions."""
         return None
 
+    async def get_auth_summary(self):
+        """Get authentication summary for the plugin."""
+        return {"auth": "test", "description": "Test authentication"}
+
 
 @pytest.mark.asyncio
 async def test_plugin_protocol():

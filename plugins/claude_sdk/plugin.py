@@ -244,6 +244,25 @@ class Plugin(ProviderPlugin):
         """
         return claude_sdk_router
 
+    async def get_auth_summary(self) -> dict[str, Any]:
+        """Get authentication summary for the plugin.
+
+        Returns:
+            Dictionary containing authentication status and details
+        """
+        cli_available = False
+        cli_version = None
+        if self._detection_service:
+            cli_available = self._detection_service.is_claude_available()
+            cli_version = self._detection_service.get_version()
+
+        return {
+            "auth": "sdk",
+            "description": "Using Claude SDK authentication",
+            "cli_available": cli_available,
+            "cli_version": cli_version,
+        }
+
     async def health_check(self) -> HealthCheckResult:
         """Perform health check for Claude SDK plugin.
 

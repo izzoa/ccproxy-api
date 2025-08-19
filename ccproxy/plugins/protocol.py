@@ -158,3 +158,11 @@ class ProviderPlugin(Protocol):
             List of auth command definitions or None if no custom commands
         """
         ...
+
+    async def get_auth_summary(self) -> dict[str, Any]:
+        """Get authentication summary for the plugin.
+
+        Returns:
+            Dictionary containing authentication status and details
+        """
+        ...
