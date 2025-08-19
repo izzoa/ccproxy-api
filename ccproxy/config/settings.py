@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ccproxy.config.discovery import find_toml_config_file
@@ -137,126 +137,7 @@ class Settings(BaseSettings):
         description="Plugin-specific configurations keyed by plugin name",
     )
 
-    @field_validator("server", mode="before")
-    @classmethod
-    def validate_server(cls, v: Any) -> Any:
-        """Validate and convert server settings."""
-        if v is None:
-            return ServerSettings()
-        if isinstance(v, ServerSettings):
-            return v
-        if isinstance(v, dict):
-            return ServerSettings(**v)
-        return v
-
-    @field_validator("security", mode="before")
-    @classmethod
-    def validate_security(cls, v: Any) -> Any:
-        """Validate and convert security settings."""
-        if v is None:
-            return SecuritySettings()
-        if isinstance(v, SecuritySettings):
-            return v
-        if isinstance(v, dict):
-            return SecuritySettings(**v)
-        return v
-
-    @field_validator("cors", mode="before")
-    @classmethod
-    def validate_cors(cls, v: Any) -> Any:
-        """Validate and convert CORS settings."""
-        if v is None:
-            return CORSSettings()
-        if isinstance(v, CORSSettings):
-            return v
-        if isinstance(v, dict):
-            return CORSSettings(**v)
-        return v
-
-    @field_validator("reverse_proxy", mode="before")
-    @classmethod
-    def validate_reverse_proxy(cls, v: Any) -> Any:
-        """Validate and convert reverse proxy settings."""
-        if v is None:
-            return ReverseProxySettings()
-        if isinstance(v, ReverseProxySettings):
-            return v
-        if isinstance(v, dict):
-            return ReverseProxySettings(**v)
-        return v
-
-    @field_validator("auth", mode="before")
-    @classmethod
-    def validate_auth(cls, v: Any) -> Any:
-        """Validate and convert auth settings."""
-        if v is None:
-            return AuthSettings()
-        if isinstance(v, AuthSettings):
-            return v
-        if isinstance(v, dict):
-            return AuthSettings(**v)
-        return v
-
-    @field_validator("docker", mode="before")
-    @classmethod
-    def validate_docker_settings(cls, v: Any) -> Any:
-        """Validate and convert Docker settings."""
-        if v is None:
-            return DockerSettings()
-
-        # If it's already a DockerSettings instance, return as-is
-        if isinstance(v, DockerSettings):
-            return v
-
-        # If it's a dict, create DockerSettings from it
-        if isinstance(v, dict):
-            return DockerSettings(**v)
-
-        # Try to convert to dict if possible
-        if hasattr(v, "model_dump"):
-            return DockerSettings(**v.model_dump())
-        elif hasattr(v, "__dict__"):
-            return DockerSettings(**v.__dict__)
-
-        return v
-
-    @field_validator("observability", mode="before")
-    @classmethod
-    def validate_observability(cls, v: Any) -> Any:
-        """Validate and convert observability settings."""
-        if v is None:
-            return ObservabilitySettings()
-        if isinstance(v, ObservabilitySettings):
-            return v
-        if isinstance(v, dict):
-            return ObservabilitySettings(**v)
-        return v
-
-    @field_validator("scheduler", mode="before")
-    @classmethod
-    def validate_scheduler(cls, v: Any) -> Any:
-        """Validate and convert scheduler settings."""
-        if v is None:
-            return SchedulerSettings()
-        if isinstance(v, SchedulerSettings):
-            return v
-        if isinstance(v, dict):
-            return SchedulerSettings(**v)
-        return v
-
-    @field_validator("pricing", mode="before")
-    @classmethod
-    def validate_pricing(cls, v: Any) -> Any:
-        """Validate and convert pricing settings."""
-        if v is None:
-            return PricingSettings()
-        if isinstance(v, PricingSettings):
-            return v
-        if isinstance(v, dict):
-            return PricingSettings(**v)
-        return v
-
-    # validate_pool_settings method removed - connection pooling functionality has been removed
+    # Redundant validators removed - Pydantic handles these automatically with default_factory
 
     @property
     def server_url(self) -> str:
