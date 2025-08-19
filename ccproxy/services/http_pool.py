@@ -99,9 +99,10 @@ class HTTPPoolManager:
             # Merge with any additional kwargs
             client_config.update(kwargs)
 
-            # Create the client using the factory
+            # Create the client using the factory with HTTP/2 enabled for better multiplexing
             client = HTTPClientFactory.create_client(
                 settings=self.settings,
+                http2=True,  # Enable HTTP/2 for connection multiplexing
                 **client_config,
             )
 
@@ -121,8 +122,9 @@ class HTTPPoolManager:
         async with self._lock:
             if self._shared_client is None:
                 logger.info("creating_shared_client")
-                self._shared_client = HTTPClientFactory.create_shared_client(
-                    self.settings
+                self._shared_client = HTTPClientFactory.create_client(
+                    settings=self.settings,
+                    http2=True,  # Enable HTTP/2 for shared client
                 )
             return self._shared_client
 
@@ -138,7 +140,10 @@ class HTTPPoolManager:
         """
         if self._shared_client is None:
             logger.info("creating_shared_client_sync")
-            self._shared_client = HTTPClientFactory.create_shared_client(self.settings)
+            self._shared_client = HTTPClientFactory.create_client(
+                settings=self.settings,
+                http2=True,  # Enable HTTP/2 for shared client
+            )
         return self._shared_client
 
     def get_pool_client(self, base_url: str) -> httpx.AsyncClient | None:

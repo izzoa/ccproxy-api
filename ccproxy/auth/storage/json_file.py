@@ -1,8 +1,10 @@
 """JSON file storage implementation for token storage."""
 
+import asyncio
 import contextlib
 import json
 from pathlib import Path
+from typing import Any
 
 from pydantic import ValidationError
 from structlog import get_logger
@@ -47,9 +49,13 @@ class JsonFileTokenStorage(TokenStorage):
             logger.debug(
                 "credentials_load_start", source="file", path=str(self.file_path)
             )
-            with self.file_path.open() as f:
-                data = json.load(f)
 
+            # Run file I/O in thread pool to avoid blocking
+            def read_file() -> dict[str, Any]:
+                with self.file_path.open() as f:
+                    return json.load(f)  # type: ignore[no-any-return]
+
+            data = await asyncio.to_thread(read_file)
             credentials = ClaudeCredentials.model_validate(data)
             logger.debug("credentials_load_completed", source="file")
 
@@ -127,22 +133,27 @@ class JsonFileTokenStorage(TokenStorage):
             # Convert to dict with proper aliases
             data = credentials.model_dump(by_alias=True, mode="json")
 
-            # Always save to file as well
-            # Ensure parent directory exists
-            self.file_path.parent.mkdir(parents=True, exist_ok=True)
+            # Ensure parent directory exists - run in thread pool
+            await asyncio.to_thread(
+                self.file_path.parent.mkdir, parents=True, exist_ok=True
+            )
 
             # Use atomic write: write to temp file then rename
             temp_path = self.file_path.with_suffix(".tmp")
 
             try:
-                with temp_path.open("w") as f:
-                    json.dump(data, f, indent=2)
+                # Run file I/O operations in thread pool to avoid blocking
+                def write_file() -> None:
+                    with temp_path.open("w") as f:
+                        json.dump(data, f, indent=2)
 
-                # Set appropriate file permissions (read/write for owner only)
-                temp_path.chmod(0o600)
+                    # Set appropriate file permissions (read/write for owner only)
+                    temp_path.chmod(0o600)
 
-                # Atomically replace the original file
-                Path.replace(temp_path, self.file_path)
+                    # Atomically replace the original file
+                    Path.replace(temp_path, self.file_path)
+
+                await asyncio.to_thread(write_file)
 
                 logger.debug(
                     "credentials_save_completed",
@@ -240,7 +251,11 @@ class JsonFileTokenStorage(TokenStorage):
         Returns:
             True if file exists, False otherwise
         """
-        return self.file_path.exists() and self.file_path.is_file()
+        # File system operations are typically fast enough not to warrant async handling,
+        # but for consistency, we can run in thread pool if needed
+        return await asyncio.to_thread(
+            lambda: self.file_path.exists() and self.file_path.is_file()
+        )
 
     async def delete(self) -> bool:
         """Delete credentials from both keyring and file.
@@ -256,7 +271,8 @@ class JsonFileTokenStorage(TokenStorage):
         # Delete from file
         try:
             if await self.exists():
-                self.file_path.unlink()
+                # Run file deletion in thread pool to avoid blocking
+                await asyncio.to_thread(self.file_path.unlink)
                 logger.debug(
                     "credentials_delete_completed",
                     source="file",

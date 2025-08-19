@@ -1,5 +1,6 @@
 """JSON file storage for OpenAI credentials using Codex format."""
 
+import asyncio
 import contextlib
 import json
 from datetime import UTC, datetime
@@ -33,12 +34,16 @@ class OpenAITokenStorage:
 
     async def load(self) -> "OpenAICredentials | None":
         """Load credentials from Codex JSON file."""
-        if not self.file_path.exists():
+        if not await asyncio.to_thread(self.file_path.exists):
             return None
 
         try:
-            with self.file_path.open("r") as f:
-                data = json.load(f)
+            # Run file I/O in thread pool to avoid blocking
+            def read_file() -> dict[str, Any]:
+                with self.file_path.open("r") as f:
+                    return json.load(f)  # type: ignore[no-any-return]
+
+            data = await asyncio.to_thread(read_file)
 
             # Extract tokens section
             tokens = data.get("tokens", {})
@@ -137,15 +142,21 @@ class OpenAITokenStorage:
     async def save(self, credentials: "OpenAICredentials") -> bool:
         """Save credentials to Codex JSON file."""
         try:
-            # Create directory if it doesn't exist
-            self.file_path.parent.mkdir(parents=True, exist_ok=True)
+            # Create directory if it doesn't exist - run in thread pool
+            await asyncio.to_thread(
+                self.file_path.parent.mkdir, parents=True, exist_ok=True
+            )
 
             # Load existing file or create new structure
             existing_data: dict[str, Any] = {}
-            if self.file_path.exists():
+            if await asyncio.to_thread(self.file_path.exists):
                 try:
-                    with self.file_path.open("r") as f:
-                        existing_data = json.load(f)
+                    # Run file reading in thread pool
+                    def read_existing() -> dict[str, Any]:
+                        with self.file_path.open("r") as f:
+                            return json.load(f)  # type: ignore[no-any-return]
+
+                    existing_data = await asyncio.to_thread(read_existing)
                 except json.JSONDecodeError as e:
                     logger.warning(
                         "existing_file_parse_failed", error=str(e), exc_info=e
@@ -167,17 +178,20 @@ class OpenAITokenStorage:
                 "last_refresh": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             }
 
-            # Write atomically by writing to temp file then renaming
+            # Write atomically by writing to temp file then renaming - run in thread pool
             temp_file = self.file_path.with_suffix(f"{self.file_path.suffix}.tmp")
 
-            with temp_file.open("w") as f:
-                json.dump(codex_data, f, indent=2)
+            def write_file() -> None:
+                with temp_file.open("w") as f:
+                    json.dump(codex_data, f, indent=2)
 
-            # Set restrictive permissions (readable only by owner)
-            temp_file.chmod(0o600)
+                # Set restrictive permissions (readable only by owner)
+                temp_file.chmod(0o600)
 
-            # Atomic rename
-            temp_file.replace(self.file_path)
+                # Atomic rename
+                temp_file.replace(self.file_path)
+
+            await asyncio.to_thread(write_file)
 
             logger.info(
                 "Saved OpenAI credentials to Codex auth file",
@@ -253,14 +267,18 @@ class OpenAITokenStorage:
 
     async def exists(self) -> bool:
         """Check if credentials file exists."""
-        if not self.file_path.exists():
+        if not await asyncio.to_thread(self.file_path.exists):
             return False
 
         try:
-            with self.file_path.open("r") as f:
-                data = json.load(f)
-            tokens = data.get("tokens", {})
-            return bool(tokens.get("access_token"))
+            # Run file reading in thread pool
+            def read_and_check() -> bool:
+                with self.file_path.open("r") as f:
+                    data = json.load(f)
+                tokens = data.get("tokens", {})
+                return bool(tokens.get("access_token"))
+
+            return await asyncio.to_thread(read_and_check)
         except json.JSONDecodeError:
             return False
         except (OSError, PermissionError):
@@ -277,8 +295,8 @@ class OpenAITokenStorage:
     async def delete(self) -> bool:
         """Delete credentials file."""
         try:
-            if self.file_path.exists():
-                self.file_path.unlink()
+            if await asyncio.to_thread(self.file_path.exists):
+                await asyncio.to_thread(self.file_path.unlink)
                 logger.info("Deleted Codex auth file", file_path=str(self.file_path))
             return True
         except (OSError, PermissionError) as e:

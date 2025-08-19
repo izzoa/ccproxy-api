@@ -27,6 +27,7 @@ dependencies = [
   "fastapi-mcp",
   "textual>=3.7.1",
   "packaging>=25.0",
+  "h2>=4.2.0",
 ]
 
 [build-system]

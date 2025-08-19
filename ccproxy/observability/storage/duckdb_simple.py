@@ -506,24 +506,10 @@ class SimpleDuckDBStorage:
             return []
 
         try:
-            with Session(self._engine) as session:
-                # Use SQLModel with parameterized query - safe from SQL injection
-                statement = (
-                    select(AccessLog.model, func.count().label("request_count"))
-                    .where(AccessLog.timestamp >= start_time)
-                    .where(AccessLog.timestamp <= end_time)
-                    .group_by(AccessLog.model)
-                    .order_by(desc(func.count()))
-                    .limit(limit)
-                )
-
-                results = session.exec(statement).all()
-
-                # Convert to dict format
-                return [
-                    {"model": result[0], "request_count": result[1]}
-                    for result in results
-                ]
+            # Run the synchronous database operation in a thread pool
+            return await asyncio.to_thread(
+                self._query_top_model_sync, start_time, end_time, limit
+            )
 
         except SQLAlchemyError as e:
             logger.error(
@@ -535,6 +521,31 @@ class SimpleDuckDBStorage:
                 "simple_duckdb_query_top_model_error", error=str(e), exc_info=e
             )
             return []
+
+    def _query_top_model_sync(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Synchronous version of query_top_model for thread pool execution."""
+        with Session(self._engine) as session:
+            # Use SQLModel with parameterized query - safe from SQL injection
+            statement = (
+                select(AccessLog.model, func.count().label("request_count"))
+                .where(AccessLog.timestamp >= start_time)
+                .where(AccessLog.timestamp <= end_time)
+                .group_by(AccessLog.model)
+                .order_by(desc(func.count()))
+                .limit(limit)
+            )
+
+            results = session.exec(statement).all()
+
+            # Convert to dict format
+            return [
+                {"model": result[0], "request_count": result[1]} for result in results
+            ]
 
     async def get_recent_requests(self, limit: int = 100) -> list[dict[str, Any]]:
         """Get recent requests for debugging/monitoring.
@@ -549,18 +560,23 @@ class SimpleDuckDBStorage:
             return []
 
         try:
-            with Session(self._engine) as session:
-                statement = (
-                    select(AccessLog).order_by(desc(AccessLog.timestamp)).limit(limit)
-                )
-                results = session.exec(statement).all()
-                return [log.dict() for log in results]
+            # Run the synchronous database operation in a thread pool
+            return await asyncio.to_thread(self._get_recent_requests_sync, limit)
         except SQLAlchemyError as e:
             logger.error("sqlmodel_query_db_error", error=str(e), exc_info=e)
             return []
         except Exception as e:
             logger.error("sqlmodel_query_error", error=str(e), exc_info=e)
             return []
+
+    def _get_recent_requests_sync(self, limit: int) -> list[dict[str, Any]]:
+        """Synchronous version of get_recent_requests for thread pool execution."""
+        with Session(self._engine) as session:
+            statement = (
+                select(AccessLog).order_by(desc(AccessLog.timestamp)).limit(limit)
+            )
+            results = session.exec(statement).all()
+            return [log.dict() for log in results]
 
     async def get_analytics(
         self,
@@ -584,75 +600,10 @@ class SimpleDuckDBStorage:
             return {}
 
         try:
-            with Session(self._engine) as session:
-                # Build base query
-                statement = select(AccessLog)
-
-                # Add filters - convert Unix timestamps to datetime
-                if start_time:
-                    start_dt = datetime.fromtimestamp(start_time)
-                    statement = statement.where(AccessLog.timestamp >= start_dt)
-                if end_time:
-                    end_dt = datetime.fromtimestamp(end_time)
-                    statement = statement.where(AccessLog.timestamp <= end_dt)
-                if model:
-                    statement = statement.where(AccessLog.model == model)
-                if service_type:
-                    statement = statement.where(AccessLog.service_type == service_type)
-
-                # Get summary statistics using individual queries to avoid overload issues
-                base_where_conditions = []
-                if start_time:
-                    start_dt = datetime.fromtimestamp(start_time)
-                    base_where_conditions.append(AccessLog.timestamp >= start_dt)
-                if end_time:
-                    end_dt = datetime.fromtimestamp(end_time)
-                    base_where_conditions.append(AccessLog.timestamp <= end_dt)
-                if model:
-                    base_where_conditions.append(AccessLog.model == model)
-                if service_type:
-                    base_where_conditions.append(AccessLog.service_type == service_type)
-
-                total_requests = session.exec(
-                    select(func.count())
-                    .select_from(AccessLog)
-                    .where(*base_where_conditions)
-                ).first()
-
-                avg_duration = session.exec(
-                    select(func.avg(AccessLog.duration_ms))
-                    .select_from(AccessLog)
-                    .where(*base_where_conditions)
-                ).first()
-
-                total_cost = session.exec(
-                    select(func.sum(AccessLog.cost_usd))
-                    .select_from(AccessLog)
-                    .where(*base_where_conditions)
-                ).first()
-
-                total_tokens_input = session.exec(
-                    select(func.sum(AccessLog.tokens_input))
-                    .select_from(AccessLog)
-                    .where(*base_where_conditions)
-                ).first()
-
-                total_tokens_output = session.exec(
-                    select(func.sum(AccessLog.tokens_output))
-                    .select_from(AccessLog)
-                    .where(*base_where_conditions)
-                ).first()
-
-                return {
-                    "summary": {
-                        "total_requests": total_requests or 0,
-                        "avg_duration_ms": avg_duration or 0,
-                        "total_cost_usd": total_cost or 0,
-                        "total_tokens_input": total_tokens_input or 0,
-                        "total_tokens_output": total_tokens_output or 0,
-                    },
-                    "query_time": time.time(),
-                }
+            # Run the synchronous database operations in a thread pool
+            return await asyncio.to_thread(
+                self._get_analytics_sync, start_time, end_time, model, service_type
+            )
 
         except SQLAlchemyError as e:
             logger.error("sqlmodel_analytics_db_error", error=str(e), exc_info=e)
@@ -660,6 +611,69 @@ class SimpleDuckDBStorage:
         except Exception as e:
             logger.error("sqlmodel_analytics_error", error=str(e), exc_info=e)
             return {}
+
+    def _get_analytics_sync(
+        self,
+        start_time: float | None,
+        end_time: float | None,
+        model: str | None,
+        service_type: str | None,
+    ) -> dict[str, Any]:
+        """Synchronous version of get_analytics for thread pool execution."""
+        with Session(self._engine) as session:
+            # Get summary statistics using individual queries to avoid overload issues
+            base_where_conditions = []
+            if start_time:
+                start_dt = datetime.fromtimestamp(start_time)
+                base_where_conditions.append(AccessLog.timestamp >= start_dt)
+            if end_time:
+                end_dt = datetime.fromtimestamp(end_time)
+                base_where_conditions.append(AccessLog.timestamp <= end_dt)
+            if model:
+                base_where_conditions.append(AccessLog.model == model)
+            if service_type:
+                base_where_conditions.append(AccessLog.service_type == service_type)
+
+            total_requests = session.exec(
+                select(func.count())
+                .select_from(AccessLog)
+                .where(*base_where_conditions)
+            ).first()
+
+            avg_duration = session.exec(
+                select(func.avg(AccessLog.duration_ms))
+                .select_from(AccessLog)
+                .where(*base_where_conditions)
+            ).first()
+
+            total_cost = session.exec(
+                select(func.sum(AccessLog.cost_usd))
+                .select_from(AccessLog)
+                .where(*base_where_conditions)
+            ).first()
+
+            total_tokens_input = session.exec(
+                select(func.sum(AccessLog.tokens_input))
+                .select_from(AccessLog)
+                .where(*base_where_conditions)
+            ).first()
+
+            total_tokens_output = session.exec(
+                select(func.sum(AccessLog.tokens_output))
+                .select_from(AccessLog)
+                .where(*base_where_conditions)
+            ).first()
+
+            return {
+                "summary": {
+                    "total_requests": total_requests or 0,
+                    "avg_duration_ms": avg_duration or 0,
+                    "total_cost_usd": total_cost or 0,
+                    "total_tokens_input": total_tokens_input or 0,
+                    "total_tokens_output": total_tokens_output or 0,
+                },
+                "query_time": time.time(),
+            }
 
     async def close(self) -> None:
         """Close the database connection and stop background worker."""
@@ -718,17 +732,16 @@ class SimpleDuckDBStorage:
 
         try:
             if self._engine:
-                with Session(self._engine) as session:
-                    statement = select(func.count()).select_from(AccessLog)
-                    access_log_count = session.exec(statement).first()
+                # Run the synchronous database operation in a thread pool
+                access_log_count = await asyncio.to_thread(self._health_check_sync)
 
-                    return {
-                        "status": "healthy",
-                        "enabled": True,
-                        "database_path": str(self.database_path),
-                        "access_log_count": access_log_count,
-                        "backend": "sqlmodel",
-                    }
+                return {
+                    "status": "healthy",
+                    "enabled": True,
+                    "database_path": str(self.database_path),
+                    "access_log_count": access_log_count,
+                    "backend": "sqlmodel",
+                }
             else:
                 return {
                     "status": "no_connection",
@@ -749,6 +762,12 @@ class SimpleDuckDBStorage:
                 "error": str(e),
                 "error_type": "unknown",
             }
+
+    def _health_check_sync(self) -> int:
+        """Synchronous version of health check for thread pool execution."""
+        with Session(self._engine) as session:
+            statement = select(func.count()).select_from(AccessLog)
+            return session.exec(statement).first() or 0
 
     async def reset_data(self) -> bool:
         """Reset all data in the storage (useful for testing/debugging).

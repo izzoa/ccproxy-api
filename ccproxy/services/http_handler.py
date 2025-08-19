@@ -22,16 +22,22 @@ class PluginHTTPHandler:
     """Handles HTTP requests for plugin adapters.
 
     This handler is used by plugin adapters to make direct HTTP requests
-    to their target APIs, avoiding circular dependencies with ProxyService.
+    to their target APIs, using the shared HTTP connection pool for better performance.
     """
 
-    def __init__(self, client_config: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        client_config: dict[str, Any] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+    ):
         """Initialize the HTTP handler.
 
         Args:
-            client_config: Optional HTTPX client configuration
+            client_config: Optional HTTPX client configuration (legacy)
+            http_client: Shared HTTP client instance (preferred)
         """
         self.client_config = client_config or {}
+        self._http_client = http_client
         self.logger = logger
 
     async def handle_request(
@@ -105,7 +111,9 @@ class PluginHTTPHandler:
             Response object
         """
         try:
-            async with httpx.AsyncClient(**self.client_config) as client:
+            # Use shared HTTP client if available, otherwise create temporary client
+            if self._http_client:
+                client = self._http_client
                 response = await client.request(
                     method=method,
                     url=url,
@@ -113,85 +121,91 @@ class PluginHTTPHandler:
                     content=body,
                     timeout=httpx.Timeout(120.0),
                 )
+            else:
+                # Fallback to temporary client for backward compatibility
+                async with httpx.AsyncClient(**self.client_config) as client:
+                    response = await client.request(
+                        method=method,
+                        url=url,
+                        headers=headers,
+                        content=body,
+                        timeout=httpx.Timeout(120.0),
+                    )
 
-                # Read response body
-                response_body = response.content
-                response_headers = dict(response.headers)
+            # Read response body
+            response_body = response.content
+            response_headers = dict(response.headers)
 
-                # Apply response adapter if needed
-                if handler_config.response_adapter and response.status_code < 400:
+            # Apply response adapter if needed
+            if handler_config.response_adapter and response.status_code < 400:
+                try:
+                    response_data = json.loads(response_body)
+                    adapted_data = await handler_config.response_adapter.adapt_response(
+                        response_data
+                    )
+                    response_body = json.dumps(adapted_data).encode()
+                except json.JSONDecodeError as e:
+                    self.logger.warning(
+                        "response_adaptation_json_decode_error",
+                        error=str(e),
+                        exc_info=e,
+                    )
+                except UnicodeDecodeError as e:
+                    self.logger.warning(
+                        "response_adaptation_unicode_decode_error",
+                        error=str(e),
+                        exc_info=e,
+                    )
+                except (TypeError, AttributeError) as e:
+                    self.logger.warning(
+                        "response_adaptation_type_error",
+                        error=str(e),
+                        exc_info=e,
+                    )
+                except Exception as e:
+                    self.logger.warning(
+                        "response_adaptation_unexpected_error",
+                        error=str(e),
+                        exc_info=e,
+                    )
+
+            # Apply response transformer if provided
+            if handler_config.response_transformer:
+                if hasattr(handler_config.response_transformer, "transform_headers"):
+                    # It's a transformer object with methods
+                    transformed_headers = (
+                        handler_config.response_transformer.transform_headers(
+                            response_headers
+                        )
+                    )
+                    if transformed_headers:
+                        response_headers = transformed_headers
+                elif callable(handler_config.response_transformer):
+                    # It's a callable function
                     try:
-                        response_data = json.loads(response_body)
-                        adapted_data = (
-                            await handler_config.response_adapter.adapt_response(
-                                response_data
-                            )
+                        transformed_headers = handler_config.response_transformer(
+                            response_headers
                         )
-                        response_body = json.dumps(adapted_data).encode()
-                    except json.JSONDecodeError as e:
-                        self.logger.warning(
-                            "response_adaptation_json_decode_error",
-                            error=str(e),
-                            exc_info=e,
-                        )
-                    except UnicodeDecodeError as e:
-                        self.logger.warning(
-                            "response_adaptation_unicode_decode_error",
-                            error=str(e),
-                            exc_info=e,
-                        )
+                        if transformed_headers:
+                            response_headers = transformed_headers
                     except (TypeError, AttributeError) as e:
                         self.logger.warning(
-                            "response_adaptation_type_error",
+                            "response_header_transform_type_error",
                             error=str(e),
                             exc_info=e,
                         )
                     except Exception as e:
                         self.logger.warning(
-                            "response_adaptation_unexpected_error",
+                            "response_header_transform_unexpected_error",
                             error=str(e),
                             exc_info=e,
                         )
 
-                # Apply response transformer if provided
-                if handler_config.response_transformer:
-                    if hasattr(
-                        handler_config.response_transformer, "transform_headers"
-                    ):
-                        # It's a transformer object with methods
-                        transformed_headers = (
-                            handler_config.response_transformer.transform_headers(
-                                response_headers
-                            )
-                        )
-                        if transformed_headers:
-                            response_headers = transformed_headers
-                    elif callable(handler_config.response_transformer):
-                        # It's a callable function
-                        try:
-                            transformed_headers = handler_config.response_transformer(
-                                response_headers
-                            )
-                            if transformed_headers:
-                                response_headers = transformed_headers
-                        except (TypeError, AttributeError) as e:
-                            self.logger.warning(
-                                "response_header_transform_type_error",
-                                error=str(e),
-                                exc_info=e,
-                            )
-                        except Exception as e:
-                            self.logger.warning(
-                                "response_header_transform_unexpected_error",
-                                error=str(e),
-                                exc_info=e,
-                            )
-
-                return Response(
-                    content=response_body,
-                    status_code=response.status_code,
-                    headers=response_headers,
-                )
+            return Response(
+                content=response_body,
+                status_code=response.status_code,
+                headers=response_headers,
+            )
 
         except httpx.TimeoutException as e:
             self.logger.error("http_request_timeout", url=url, error=str(e), exc_info=e)

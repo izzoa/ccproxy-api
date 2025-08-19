@@ -76,9 +76,14 @@ class CodexAdapter(BaseAdapter):
         from ccproxy.services.proxy_service import ProxyService
 
         if isinstance(self.proxy_service, ProxyService):
-            # Initialize HTTP handler with client config from proxy service
-            client_config = self.proxy_service.config.get_httpx_client_config()
-            self._http_handler = PluginHTTPHandler(client_config)
+            # Initialize HTTP handler with shared HTTP client from proxy service
+            shared_client = getattr(self.proxy_service, "http_client", None)
+            if shared_client:
+                self._http_handler = PluginHTTPHandler(http_client=shared_client)
+            else:
+                # Fallback to legacy config-based client
+                client_config = self.proxy_service.config.get_httpx_client_config()
+                self._http_handler = PluginHTTPHandler(client_config)
 
             # Initialize transformers
             self.request_transformer = CodexRequestTransformer(self._detection_service)

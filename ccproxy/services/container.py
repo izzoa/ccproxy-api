@@ -234,17 +234,19 @@ class ServiceContainer:
         This method properly cleans up all resources managed by the container,
         ensuring graceful shutdown and preventing resource leaks.
         """
-        # Close pool manager (which closes all HTTP clients)
+        # Close pool manager (which closes all HTTP clients including the shared client)
         if self._pool_manager:
             await self._pool_manager.close_all()
             self._pool_manager = None
-            logger.debug("Closed HTTP pool manager")
+            # Clear the HTTP client reference since it's closed by pool manager
+            self._http_client = None
+            logger.debug("Closed HTTP pool manager and all clients")
 
-        # Close HTTP client if it was created separately
-        if self._http_client:
+        # Close HTTP client if it was created separately (should not happen normally)
+        elif self._http_client:
             await self._http_client.aclose()
             self._http_client = None
-            logger.debug("Closed shared HTTP client")
+            logger.debug("Closed shared HTTP client directly")
 
         # Clear service cache
         self._services.clear()

@@ -126,6 +126,7 @@ class BinaryResolver:
 
         # First, try direct binary lookup in PATH
         direct_path = shutil.which(binary_name)
+        logger.debug("checking_direct_path", binary=binary_name, path=direct_path)
         if direct_path:
             logger.debug("binary_found_directly", binary=binary_name, path=direct_path)
             return BinaryCommand(command=[direct_path], is_direct=True, is_in_path=True)
@@ -245,7 +246,7 @@ class BinaryResolver:
         """
         paths = [
             # User-specific locations
-            # Path.home() / ".cache" / ".bun" / "bin" / binary_name,
+            Path.home() / ".cache" / ".bun" / "bin" / binary_name,
             Path.home() / ".local" / "bin" / binary_name,
             Path.home() / ".local" / "share" / "nvim" / "mason" / "bin" / binary_name,
             Path.home() / ".npm-global" / "bin" / binary_name,
