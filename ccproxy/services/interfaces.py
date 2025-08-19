@@ -2,11 +2,7 @@
 
 from typing import Any, Protocol
 
-from fastapi import Request
-from fastapi.responses import Response, StreamingResponse
-
 from ccproxy.services.adapters.base import BaseAdapter
-from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.tracing.interfaces import RequestTracer
 
 

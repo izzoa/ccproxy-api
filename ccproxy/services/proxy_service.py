@@ -11,7 +11,6 @@ from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.credentials.manager import CredentialsManager
-from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.interfaces import IPluginRegistry
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler

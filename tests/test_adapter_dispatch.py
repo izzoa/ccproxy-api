@@ -5,17 +5,15 @@ This replaces the deprecated dispatch_request tests with direct adapter testing.
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import SecretStr
 
-from ccproxy.adapters.base import APIAdapter
 from ccproxy.auth.manager import AuthManager
 from ccproxy.services.adapters.base import BaseAdapter
-from ccproxy.services.handler_config import HandlerConfig
 
 
 class MockAuthManager(AuthManager):

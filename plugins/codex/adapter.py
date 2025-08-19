@@ -17,7 +17,7 @@ from ccproxy.services.interfaces import IRequestHandler
 
 
 if TYPE_CHECKING:
-    from ccproxy.services.proxy_service import ProxyService
+    pass
 
 from .format_adapter import CodexFormatAdapter
 from .transformers import CodexRequestTransformer, CodexResponseTransformer

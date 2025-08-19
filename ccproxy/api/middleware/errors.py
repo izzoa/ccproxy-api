@@ -1,7 +1,6 @@
 """Error handling middleware for CCProxy API Server."""
 
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse

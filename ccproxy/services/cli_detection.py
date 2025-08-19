@@ -7,7 +7,6 @@ It eliminates duplicate CLI detection logic by consolidating common patterns.
 
 import asyncio
 import json
-from pathlib import Path
 from typing import Any, NamedTuple
 
 import structlog

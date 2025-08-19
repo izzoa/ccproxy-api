@@ -39,7 +39,7 @@ class HTTPPoolManager:
         self._pools: dict[str, httpx.AsyncClient] = {}
         self._shared_client: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()
-        
+
         logger.debug("http_pool_manager_initialized")
 
     async def get_client(
@@ -67,7 +67,7 @@ class HTTPPoolManager:
 
         # Normalize the base URL to use as a key
         pool_key = self._normalize_base_url(base_url)
-        
+
         async with self._lock:
             # Check if we already have a client for this base URL
             if pool_key in self._pools:
@@ -84,30 +84,30 @@ class HTTPPoolManager:
                 base_url=base_url,
                 pool_key=pool_key,
             )
-            
+
             # Build client configuration
             client_config: dict[str, Any] = {
                 "base_url": base_url,
             }
-            
+
             if headers:
                 client_config["headers"] = headers
-            
+
             if timeout is not None:
                 client_config["timeout_read"] = timeout
-            
+
             # Merge with any additional kwargs
             client_config.update(kwargs)
-            
+
             # Create the client using the factory
             client = HTTPClientFactory.create_client(
                 settings=self.settings,
                 **client_config,
             )
-            
+
             # Store in the pool
             self._pools[pool_key] = client
-            
+
             return client
 
     async def get_shared_client(self) -> httpx.AsyncClient:
@@ -159,7 +159,7 @@ class HTTPPoolManager:
             base_url: The base URL of the pool to close
         """
         pool_key = self._normalize_base_url(base_url)
-        
+
         async with self._lock:
             if pool_key in self._pools:
                 client = self._pools.pop(pool_key)
@@ -188,9 +188,9 @@ class HTTPPoolManager:
                         error=str(e),
                         exc_info=e,
                     )
-            
+
             self._pools.clear()
-            
+
             # Close the shared client
             if self._shared_client:
                 try:
@@ -203,7 +203,7 @@ class HTTPPoolManager:
                         exc_info=e,
                     )
                 self._shared_client = None
-            
+
             logger.info("all_pools_closed")
 
     def get_pool_stats(self) -> dict[str, Any]:
@@ -233,11 +233,11 @@ def get_pool_manager(settings: Settings | None = None) -> HTTPPoolManager:
         The global HTTPPoolManager instance
     """
     global _global_pool_manager
-    
+
     if _global_pool_manager is None:
         _global_pool_manager = HTTPPoolManager(settings)
         logger.info("global_pool_manager_created")
-    
+
     return _global_pool_manager
 
 
@@ -247,7 +247,7 @@ async def close_global_pool_manager() -> None:
     This should be called during application shutdown.
     """
     global _global_pool_manager
-    
+
     if _global_pool_manager is not None:
         await _global_pool_manager.close_all()
         _global_pool_manager = None
