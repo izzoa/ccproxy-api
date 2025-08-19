@@ -1,17 +1,13 @@
 """Refactored ProxyService - orchestrates proxy requests using injected services."""
 
-import uuid
 from typing import Any
 
 import httpx
 import structlog
-from fastapi import HTTPException, Request
-from fastapi.responses import Response, StreamingResponse
 
 from ccproxy.config.settings import Settings
 from ccproxy.core.http import BaseProxyClient
 from ccproxy.observability.metrics import PrometheusMetrics
-from ccproxy.services.adapters.mock_adapter import MockAdapter
 from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.credentials.manager import CredentialsManager
@@ -80,50 +76,8 @@ class ProxyService:
         self.plugin_registry = plugin_registry
         logger.debug("Plugin registry set on ProxyService")
 
-    async def dispatch_request(
-        self,
-        request: Request,
-        handler_config: HandlerConfig,
-        provider_name: str | None = None,
-    ) -> Response | StreamingResponse:
-        """Pure delegation to adapters.
-
-        DEPRECATED: This method is not used in production. The routing happens
-        at the FastAPI level with plugin routers. Kept for test compatibility.
-
-        Args:
-            request: The incoming request
-            handler_config: The processing configuration
-            provider_name: The provider to route to (required since config no longer has it)
-        """
-        # 1. Check plugin registry is available
-        if not self.plugin_registry:
-            raise HTTPException(503, "Plugin manager not initialized")
-
-        # 2. Prepare context
-        request_id = str(uuid.uuid4())
-        body = await request.body()
-
-        # 3. Check bypass mode first
-        if self.settings.server.bypass_mode:
-            mock_adapter = MockAdapter(self.mock_handler)
-            return await mock_adapter.handle_request(
-                request, str(request.url.path), request.method, request_id=request_id
-            )
-
-        # 4. Get provider adapter - provider_name must be passed explicitly now
-        if not provider_name:
-            raise HTTPException(400, "Provider name required for dispatch")
-
-        adapter = self.plugin_registry.get_adapter(provider_name)
-        if not adapter:
-            raise HTTPException(404, f"No adapter for {provider_name}")
-
-        # 5. Adapters should already have ProxyService reference (no set_proxy_service needed)
-        # 6. Delegate everything
-        return await adapter.handle_request(
-            request, str(request.url.path), request.method
-        )
+    # Note: The dispatch_request method has been removed.
+    # Use plugin adapters' handle_request() method directly.
 
     async def initialize_plugins(self, scheduler: Any | None = None) -> None:
         """Initialize plugin system at startup.

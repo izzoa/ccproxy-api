@@ -11,16 +11,13 @@ from ccproxy.services.tracing.interfaces import RequestTracer
 
 
 class IRequestHandler(Protocol):
-    """Protocol for request handling functionality."""
+    """Protocol for request handling functionality.
 
-    async def dispatch_request(
-        self,
-        request: Request,
-        handler_config: HandlerConfig,
-        provider_name: str | None = None,
-    ) -> Response | StreamingResponse:
-        """Handle a proxy request."""
-        ...
+    Note: The dispatch_request method has been removed in favor of
+    using plugin adapters' handle_request() method directly.
+    """
+
+    pass
 
 
 class IPluginRegistry(Protocol):
