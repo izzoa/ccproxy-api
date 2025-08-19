@@ -46,7 +46,7 @@ from ccproxy.docker.stream_process import DefaultOutputMiddleware
 @pytest.fixture(autouse=True)
 async def task_manager_fixture():
     """Start and stop the global task manager for each test.
-    
+
     This fixture ensures the AsyncTaskManager is properly started before
     tests that use managed tasks (like PermissionService, scheduler, etc.)
     and properly cleaned up afterwards.
