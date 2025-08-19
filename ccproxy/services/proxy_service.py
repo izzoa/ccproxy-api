@@ -1,12 +1,17 @@
 """Refactored ProxyService - orchestrates proxy requests using injected services."""
 
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
 import structlog
+from fastapi import Request
+from starlette.responses import Response, StreamingResponse
 
 from ccproxy.config.settings import Settings
 from ccproxy.core.http import BaseProxyClient
+from ccproxy.hooks import HookEvent, HookManager
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.cache import ResponseCache
@@ -42,6 +47,7 @@ class ProxyService:
         metrics: PrometheusMetrics | None = None,
         response_cache: ResponseCache | None = None,
         connection_pool_manager: ConnectionPoolManager | None = None,
+        hook_manager: HookManager | None = None,
     ) -> None:
         """Initialize with all dependencies injected.
 
@@ -72,6 +78,9 @@ class ProxyService:
         # Shared HTTP client (injected for centralized management)
         self.http_client = http_client
 
+        # Hook system
+        self.hook_manager = hook_manager
+
         logger.debug(
             "ProxyService initialized with injected services and performance optimizations"
         )
@@ -85,8 +94,86 @@ class ProxyService:
         self.plugin_registry = plugin_registry
         logger.debug("Plugin registry set on ProxyService")
 
-    # Note: The dispatch_request method has been removed.
-    # Use plugin adapters' handle_request() method directly.
+    def set_hook_manager(self, hook_manager: HookManager) -> None:
+        """Set the hook manager.
+
+        This method allows setting the hook manager after initialization
+        since the hook system is initialized after the proxy service.
+        """
+        self.hook_manager = hook_manager
+        logger.debug("Hook manager set on ProxyService")
+
+    async def handle_request(
+        self,
+        request: Request,
+        endpoint: str,
+        method: str,
+        provider: str,
+        plugin_name: str,
+        adapter_handler: Callable[..., Awaitable[Response | StreamingResponse]],
+        **kwargs: Any,
+    ) -> Response | StreamingResponse:
+        """Handle proxy request with hooks.
+
+        This method provides a central point for all provider requests with hook emission.
+
+        Args:
+            request: FastAPI request object
+            endpoint: Target endpoint path
+            method: HTTP method
+            provider: Provider name (e.g., 'claude_api', 'codex')
+            plugin_name: Plugin name for context
+            adapter_handler: The adapter's handle_request method to delegate to
+            **kwargs: Additional arguments to pass to adapter
+
+        Returns:
+            Response or StreamingResponse from the adapter
+        """
+        start_time = time.time()
+
+        # Emit request started hook
+        if self.hook_manager:
+            await self.hook_manager.emit(
+                HookEvent.REQUEST_STARTED,
+                request=request,
+                provider=provider,
+                plugin=plugin_name,
+                data={"endpoint": endpoint, "method": method},
+            )
+
+        try:
+            # Delegate to the adapter's handle_request method
+            response = await adapter_handler(request, endpoint, method, **kwargs)
+
+            # Calculate duration and extract status
+            duration = time.time() - start_time
+            status = getattr(response, "status_code", 200)
+
+            # Emit request completed hook
+            if self.hook_manager:
+                await self.hook_manager.emit(
+                    HookEvent.REQUEST_COMPLETED,
+                    data={"duration": duration, "status": status},
+                    request=request,
+                    response=response,
+                    provider=provider,
+                    plugin=plugin_name,
+                )
+
+            return response
+
+        except Exception as e:
+            # Emit request failed hook
+            if self.hook_manager:
+                await self.hook_manager.emit(
+                    HookEvent.REQUEST_FAILED,
+                    error=e,
+                    request=request,
+                    provider=provider,
+                    plugin=plugin_name,
+                    data={"endpoint": endpoint, "method": method},
+                )
+            raise
 
     async def initialize_plugins(self, scheduler: Any | None = None) -> None:
         """Initialize plugin system at startup.

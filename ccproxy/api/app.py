@@ -32,6 +32,10 @@ from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
 from ccproxy.core.http_client import close_shared_http_client
 from ccproxy.core.logging import setup_logging
+from ccproxy.hooks import HookManager, HookRegistry
+from ccproxy.hooks.events import HookEvent
+from ccproxy.hooks.implementations import AnalyticsHook, LoggingHook, MetricsHook
+from ccproxy.observability import get_metrics
 from ccproxy.utils.models_provider import get_models_list
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
@@ -167,6 +171,113 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
         )
 
 
+async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
+    """Initialize hook system during startup."""
+    if not settings.hooks.enabled:
+        logger.info("hook_system_disabled")
+        return
+
+    # Create hook system
+    hook_registry = HookRegistry()
+    hook_manager = HookManager(hook_registry)
+
+    # Register built-in hooks based on settings
+    if settings.hooks.metrics_enabled:
+        try:
+            prometheus_metrics = get_metrics()
+            metrics_hook = MetricsHook(prometheus_metrics)
+            hook_registry.register(metrics_hook)
+            logger.debug("metrics_hook_registered")
+        except Exception as e:
+            logger.error(
+                "metrics_hook_registration_failed",
+                error=str(e),
+                exc_info=e,
+            )
+
+    if settings.hooks.logging_enabled:
+        try:
+            logging_hook = LoggingHook()
+            hook_registry.register(logging_hook)
+            logger.debug("logging_hook_registered")
+        except Exception as e:
+            logger.error(
+                "logging_hook_registration_failed",
+                error=str(e),
+                exc_info=e,
+            )
+
+    if settings.hooks.analytics_enabled:
+        try:
+            analytics_hook = AnalyticsHook(
+                batch_size=settings.hooks.analytics_batch_size
+            )
+            hook_registry.register(analytics_hook)
+            logger.debug("analytics_hook_registered")
+        except Exception as e:
+            logger.error(
+                "analytics_hook_registration_failed",
+                error=str(e),
+                exc_info=e,
+            )
+
+    # Load plugin hooks from plugin registry
+    if hasattr(app.state, "proxy_service"):
+        proxy_service = app.state.proxy_service
+        if hasattr(proxy_service, "plugin_registry"):
+            plugin_manager = proxy_service.plugin_registry
+            if plugin_manager and hasattr(plugin_manager, "plugin_registry"):
+                # Access the internal PluginRegistry from PluginManager
+                for plugin_name in plugin_manager.plugin_registry.list_plugins():
+                    plugin = plugin_manager.plugin_registry.get_plugin(plugin_name)
+                    if plugin and hasattr(plugin, "get_hooks"):
+                        try:
+                            hooks = plugin.get_hooks()
+                            if hooks:
+                                for hook in hooks:
+                                    hook_registry.register(hook)
+                                    logger.debug(
+                                        "plugin_hook_registered",
+                                        plugin_name=plugin.name,
+                                        hook_name=hook.name,
+                                    )
+                        except Exception as e:
+                            logger.error(
+                                "plugin_hook_registration_failed",
+                                plugin_name=plugin.name,
+                                error=str(e),
+                                exc_info=e,
+                            )
+
+    # Emit APP_STARTUP event
+    try:
+        await hook_manager.emit(HookEvent.APP_STARTUP)
+        logger.debug("app_startup_event_emitted")
+    except Exception as e:
+        logger.error(
+            "app_startup_event_failed",
+            error=str(e),
+            exc_info=e,
+        )
+
+    # Store hook_manager in app.state for FastAPI
+    app.state.hook_manager = hook_manager
+
+    # Set hook_manager on ProxyService if available
+    if hasattr(app.state, "proxy_service"):
+        proxy_service = app.state.proxy_service
+        if hasattr(proxy_service, "set_hook_manager"):
+            proxy_service.set_hook_manager(hook_manager)
+            logger.debug("hook_manager_set_on_proxy_service")
+
+    logger.info(
+        "hook_system_initialization_completed",
+        metrics_enabled=settings.hooks.metrics_enabled,
+        logging_enabled=settings.hooks.logging_enabled,
+        analytics_enabled=settings.hooks.analytics_enabled,
+    )
+
+
 # Define lifecycle components for startup/shutdown organization
 LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
     {
@@ -218,6 +329,15 @@ LIFECYCLE_COMPONENTS.append(
         "name": "Plugin System",
         "startup": initialize_plugins_startup,
         "shutdown": None,  # Plugins cleaned up with proxy service
+    }
+)
+
+# Add hook system initialization after plugins
+LIFECYCLE_COMPONENTS.append(
+    {
+        "name": "Hook System",
+        "startup": initialize_hooks_startup,
+        "shutdown": None,  # Hook system cleaned up automatically
     }
 )
 

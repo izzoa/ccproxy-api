@@ -17,7 +17,9 @@ from claude_code_sdk import ToolResultBlock as SDKToolResultBlock
 from claude_code_sdk import ToolUseBlock as SDKToolUseBlock
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ccproxy.models.messages import MessageContentBlock
 from ccproxy.models.requests import Usage
+from ccproxy.models.types import StopReason
 
 
 # Type variables for generic functions
@@ -337,6 +339,51 @@ SDKContentBlock = Annotated[
 # Extended content block type that includes both SDK and custom blocks
 ExtendedContentBlock = SDKContentBlock
 
+# Union definition moved after imports
+
+
+# Plugin-specific content block union that includes core and SDK-specific types
+# Note: We only include SDK-specific types to avoid discriminator conflicts
+# with core types that have the same discriminator values
+CCProxyContentBlock = Annotated[
+    MessageContentBlock
+    | SDKMessageMode
+    | ToolUseSDKBlock
+    | ToolResultSDKBlock
+    | ResultMessageBlock,
+    Field(discriminator="type"),
+]
+
+
+# Plugin-specific MessageResponse that uses the extended content block types
+class MessageResponse(BaseModel):
+    """Plugin-specific response model that supports both core and SDK content blocks."""
+
+    id: Annotated[str, Field(description="Unique identifier for the message")]
+    type: Annotated[Literal["message"], Field(description="Response type")] = "message"
+    role: Annotated[Literal["assistant"], Field(description="Message role")] = (
+        "assistant"
+    )
+    content: Annotated[
+        list[CCProxyContentBlock],
+        Field(description="Array of content blocks in the response"),
+    ]
+    model: Annotated[str, Field(description="The model used for the response")]
+    stop_reason: Annotated[
+        StopReason | None, Field(description="Reason why the model stopped generating")
+    ] = None
+    stop_sequence: Annotated[
+        str | None,
+        Field(description="The stop sequence that triggered stopping (if applicable)"),
+    ] = None
+    usage: Annotated[Usage, Field(description="Token usage information")]
+    container: Annotated[
+        dict[str, Any] | None,
+        Field(description="Information about container used in the request"),
+    ] = None
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
 
 # SDK Query Message Types
 class SDKMessageContent(BaseModel):
@@ -468,6 +515,8 @@ __all__ = [
     "ResultMessageBlock",
     "SDKContentBlock",
     "ExtendedContentBlock",
+    "CCProxyContentBlock",
+    "MessageResponse",
     # Conversion functions
     "convert_sdk_text_block",
     "convert_sdk_tool_use_block",

@@ -8,10 +8,10 @@ from typing import Any
 import structlog
 
 from ccproxy.core.async_utils import patched_typing
-from ccproxy.models.messages import MessageResponse
 
 from . import models as sdk_models
 from .config import SDKMessageMode
+from .models import MessageResponse
 
 
 logger = structlog.get_logger(__name__)

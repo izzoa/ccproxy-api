@@ -13,7 +13,7 @@ from claude_code_sdk import ClaudeCodeOptions
 
 from ccproxy.auth.manager import AuthManager
 from ccproxy.core.errors import ClaudeProxyError, ServiceUnavailableError
-from ccproxy.models.messages import MessageResponse
+from ccproxy.models.messages import TextContentBlock
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.utils.model_mapping import map_model_to_claude
@@ -26,7 +26,7 @@ from . import models as sdk_models
 from .client import ClaudeSDKClient
 from .config import ClaudeSDKSettings, SDKMessageMode
 from .converter import MessageConverter
-from .models import SDKMessage, create_sdk_message
+from .models import MessageResponse, SDKMessage, create_sdk_message
 from .streaming import ClaudeStreamProcessor
 
 
@@ -315,8 +315,11 @@ class ClaudeSDKHandler:
                             )
                         else:
                             if content_block.get("type") == "text":
+                                # Convert SDK TextBlock to core TextContentBlock
                                 response.content.append(
-                                    sdk_models.TextBlock.model_validate(content_block)
+                                    TextContentBlock(
+                                        type="text", text=content_block["text"]
+                                    )
                                 )
                             else:
                                 logger.warning(
@@ -326,7 +329,16 @@ class ClaudeSDKHandler:
                 elif isinstance(message, sdk_models.UserMessage):
                     for block in message.content:
                         if isinstance(block, sdk_models.ToolResultBlock):
-                            response.content.append(block)
+                            # Convert SDK ToolResultBlock to ToolResultSDKBlock
+                            response.content.append(
+                                sdk_models.ToolResultSDKBlock(
+                                    type="tool_result_sdk",
+                                    tool_use_id=block.tool_use_id,
+                                    content=block.content,
+                                    is_error=block.is_error,
+                                    source="claude_code_sdk",
+                                )
+                            )
 
         cost_usd = result_message.total_cost_usd
         usage = result_message.usage_model

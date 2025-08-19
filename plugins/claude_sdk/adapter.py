@@ -335,7 +335,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                 )
             else:
                 # Convert MessageResponse to dict for JSON response
-                from ccproxy.models.messages import MessageResponse
+                from .models import MessageResponse
 
                 if isinstance(result, MessageResponse):
                     response_data = result.model_dump()

@@ -9,6 +9,7 @@ from starlette.responses import Response, StreamingResponse
 from ccproxy.api.dependencies import (
     CodexAdapterDep,
     CodexDetectionDep,
+    ProxyServiceDep,
 )
 from ccproxy.auth.conditional import ConditionalAuthDep
 
@@ -42,6 +43,7 @@ def codex_path_transformer(path: str) -> str:
 async def codex_responses(
     request: Request,
     adapter: CodexAdapterDep,
+    proxy_service: ProxyServiceDep,
     detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
@@ -53,9 +55,15 @@ async def codex_responses(
     header_session_id = request.headers.get("session_id")
     session_id = header_session_id or str(uuid.uuid4())
 
-    # Delegate to adapter which will handle the request properly
-    return await adapter.handle_request(
-        request, "/responses", request.method, session_id=session_id
+    # Use ProxyService.handle_request to enable hook emissions
+    return await proxy_service.handle_request(
+        request=request,
+        endpoint="/responses",
+        method=request.method,
+        provider="codex",
+        plugin_name="codex",
+        adapter_handler=adapter.handle_request,
+        session_id=session_id,
     )
 
 
@@ -64,6 +72,7 @@ async def codex_responses_with_session(
     session_id: str,
     request: Request,
     adapter: CodexAdapterDep,
+    proxy_service: ProxyServiceDep,
     detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
@@ -71,9 +80,15 @@ async def codex_responses_with_session(
 
     Delegates to the adapter which will handle the request properly.
     """
-    # Delegate to adapter which will handle the request properly
-    return await adapter.handle_request(
-        request, "/{session_id}/responses", request.method, session_id=session_id
+    # Use ProxyService.handle_request to enable hook emissions
+    return await proxy_service.handle_request(
+        request=request,
+        endpoint="/{session_id}/responses",
+        method=request.method,
+        provider="codex",
+        plugin_name="codex",
+        adapter_handler=adapter.handle_request,
+        session_id=session_id,
     )
 
 
@@ -81,6 +96,7 @@ async def codex_responses_with_session(
 async def codex_chat_completions(
     request: Request,
     adapter: CodexAdapterDep,
+    proxy_service: ProxyServiceDep,
     detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
@@ -93,9 +109,15 @@ async def codex_chat_completions(
     header_session_id = request.headers.get("session_id")
     session_id = header_session_id or str(uuid.uuid4())
 
-    # Delegate to adapter which will handle the request properly
-    return await adapter.handle_request(
-        request, "/chat/completions", request.method, session_id=session_id
+    # Use ProxyService.handle_request to enable hook emissions
+    return await proxy_service.handle_request(
+        request=request,
+        endpoint="/chat/completions",
+        method=request.method,
+        provider="codex",
+        plugin_name="codex",
+        adapter_handler=adapter.handle_request,
+        session_id=session_id,
     )
 
 
@@ -104,6 +126,7 @@ async def codex_chat_completions_with_session(
     session_id: str,
     request: Request,
     adapter: CodexAdapterDep,
+    proxy_service: ProxyServiceDep,
     detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
@@ -111,9 +134,15 @@ async def codex_chat_completions_with_session(
 
     This endpoint handles OpenAI format requests with a specific session_id.
     """
-    # Delegate to adapter which will handle the request properly
-    return await adapter.handle_request(
-        request, "/{session_id}/chat/completions", request.method, session_id=session_id
+    # Use ProxyService.handle_request to enable hook emissions
+    return await proxy_service.handle_request(
+        request=request,
+        endpoint="/{session_id}/chat/completions",
+        method=request.method,
+        provider="codex",
+        plugin_name="codex",
+        adapter_handler=adapter.handle_request,
+        session_id=session_id,
     )
 
 
@@ -121,6 +150,7 @@ async def codex_chat_completions_with_session(
 async def codex_v1_chat_completions(
     request: Request,
     adapter: CodexAdapterDep,
+    proxy_service: ProxyServiceDep,
     detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> StreamingResponse | Response:
@@ -128,7 +158,9 @@ async def codex_v1_chat_completions(
 
     Maps to the standard chat completions handler.
     """
-    return await codex_chat_completions(request, adapter, detection_service, auth)
+    return await codex_chat_completions(
+        request, adapter, proxy_service, detection_service, auth
+    )
 
 
 @router.get("/v1/models", response_model=None)

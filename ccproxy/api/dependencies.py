@@ -11,6 +11,7 @@ from structlog import get_logger
 from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.http import BaseProxyClient
 from ccproxy.core.http_client import get_shared_http_client
+from ccproxy.hooks import HookManager
 from ccproxy.observability import PrometheusMetrics, get_metrics
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
 from ccproxy.services.credentials.manager import CredentialsManager
@@ -166,6 +167,18 @@ async def get_duckdb_storage(request: Request) -> SimpleDuckDBStorage | None:
     return storage
 
 
+def get_hook_manager(request: Request) -> HookManager | None:
+    """Get hook manager from app state.
+
+    Args:
+        request: FastAPI request object
+
+    Returns:
+        HookManager instance if available, None otherwise
+    """
+    return getattr(request.app.state, "hook_manager", None)
+
+
 # Plugin adapter dependencies
 def get_claude_api_adapter(proxy_service: ProxyService) -> ClaudeAPIAdapter:
     """Get Claude API adapter instance.
@@ -305,6 +318,7 @@ ObservabilityMetricsDep = Annotated[
 ]
 LogStorageDep = Annotated[SimpleDuckDBStorage | None, Depends(get_log_storage)]
 DuckDBStorageDep = Annotated[SimpleDuckDBStorage | None, Depends(get_duckdb_storage)]
+HookManagerDep = Annotated[HookManager | None, Depends(get_hook_manager)]
 
 # Type aliases for plugin dependencies
 ClaudeAPIAdapterDep = Annotated[
