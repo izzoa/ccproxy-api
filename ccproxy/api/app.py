@@ -113,35 +113,35 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
             # Access the internal PluginRegistry from PluginManager
             for plugin_name in plugin_manager.plugin_registry.list_plugins():
                 plugin = plugin_manager.plugin_registry.get_plugin(plugin_name)
-            if plugin and hasattr(plugin, "get_routes"):
-                routes = plugin.get_routes()
+                if plugin and hasattr(plugin, "get_routes"):
+                    routes = plugin.get_routes()
 
-                if isinstance(routes, dict):
-                    # New format: dictionary mapping paths to routers
-                    for prefix, router in routes.items():
-                        if router:
-                            app.include_router(
-                                router,
-                                prefix=prefix,
-                                tags=[f"plugin-{plugin.name}"],
-                            )
-                            logger.debug(
-                                "plugin_routes_registered",
-                                plugin_name=plugin.name,
-                                router_prefix=prefix,
-                            )
-                elif routes:
-                    # Backward compatibility: single router
-                    app.include_router(
-                        routes,
-                        prefix=plugin.router_prefix,
-                        tags=[f"plugin-{plugin.name}"],
-                    )
-                    logger.debug(
-                        "plugin_routes_registered",
-                        plugin_name=plugin.name,
-                        router_prefix=plugin.router_prefix,
-                    )
+                    if isinstance(routes, dict):
+                        # New format: dictionary mapping paths to routers
+                        for prefix, router in routes.items():
+                            if router:
+                                app.include_router(
+                                    router,
+                                    prefix=prefix,
+                                    tags=[f"plugin-{plugin.name}"],
+                                )
+                                logger.debug(
+                                    "plugin_routes_registered",
+                                    plugin_name=plugin.name,
+                                    router_prefix=prefix,
+                                )
+                    elif routes:
+                        # Backward compatibility: single router
+                        app.include_router(
+                            routes,
+                            prefix=plugin.router_prefix,
+                            tags=[f"plugin-{plugin.name}"],
+                        )
+                        logger.debug(
+                            "plugin_routes_registered",
+                            plugin_name=plugin.name,
+                            router_prefix=plugin.router_prefix,
+                        )
 
         logger.info(
             "plugins_initialization_completed",

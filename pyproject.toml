@@ -74,6 +74,7 @@ ccproxy-perm = "ccproxy.cli.commands.permission:main"
 claude_api = "plugins.claude_api.plugin:Plugin"
 claude_sdk = "plugins.claude_sdk.plugin:Plugin"
 codex = "plugins.codex.plugin:Plugin"
+permissions = "plugins.permissions.plugin:Plugin"
 
 [dependency-groups]
 dev = [
