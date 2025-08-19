@@ -46,3 +46,11 @@ class IPluginRegistry(Protocol):
     ) -> None:
         """Initialize all plugins."""
         ...
+
+    def get_plugin_registry(self) -> Any:
+        """Get the internal plugin registry for admin operations."""
+        ...
+
+    def get_adapters_dict(self) -> dict[str, BaseAdapter]:
+        """Get the adapters dictionary for admin operations."""
+        ...

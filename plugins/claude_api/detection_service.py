@@ -1,4 +1,4 @@
-"""Claude API plugin detection service for automatically detecting Claude CLI headers."""
+"""Claude API plugin detection service using centralized detection."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import socket
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +19,7 @@ from ccproxy.models.detection import (
     ClaudeCodeHeaders,
     SystemPromptData,
 )
-from ccproxy.utils.binary_resolver import BinaryResolver
+from ccproxy.services.cli_detection import CLIDetectionService
 
 
 logger = structlog.get_logger(__name__)
@@ -35,6 +34,7 @@ class ClaudeAPIDetectionService:
         self.cache_dir = get_ccproxy_cache_dir()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._cached_data: ClaudeCacheData | None = None
+        self._cli_service = CLIDetectionService(settings)
 
     async def initialize_detection(self) -> ClaudeCacheData:
         """Initialize Claude detection at startup."""
@@ -89,15 +89,8 @@ class ClaudeAPIDetectionService:
         Returns:
             Command list to execute Claude CLI if found, None otherwise
         """
-        try:
-            resolver = BinaryResolver()
-            result = resolver.find_binary("claude", "@anthropic-ai/claude-code")
-            if result:
-                # Always return as command list for consistency
-                return result.command
-            return None
-        except Exception:
-            return None
+        info = self._cli_service.get_cli_info("claude")
+        return info["command"] if info["is_available"] else None
 
     def get_binary_path(self) -> list[str] | None:
         """Alias for get_cli_path for consistency with Codex."""
@@ -106,38 +99,20 @@ class ClaudeAPIDetectionService:
     async def _get_claude_version(self) -> str:
         """Get Claude CLI version."""
         try:
-            # Try to find claude command
-            resolver = BinaryResolver()
-            result = resolver.find_binary("claude", "@anthropic-ai/claude-code")
+            # Use centralized CLI detection
+            result = await self._cli_service.detect_cli(
+                binary_name="claude",
+                package_name="@anthropic-ai/claude-code",
+                version_flag="--version",
+                cache_key="claude_api_version",
+            )
 
-            if not result:
+            if result.is_available and result.version:
+                return result.version
+            else:
                 raise FileNotFoundError("Claude CLI not found")
 
-            # Prepare command based on result type
-            cmd = result.command + ["--version"]
-
-            proc_result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if proc_result.returncode == 0:
-                # Extract version from output like "1.0.60 (Claude Code)"
-                version_line = proc_result.stdout.strip()
-                if "/" in version_line:
-                    # Handle "claude-cli/1.0.60" format
-                    version_line = version_line.split("/")[-1]
-                if "(" in version_line:
-                    # Handle "1.0.60 (Claude Code)" format - extract just the version number
-                    return version_line.split("(")[0].strip()
-                return version_line
-            else:
-                raise RuntimeError(
-                    f"Claude version command failed: {proc_result.stderr}"
-                )
-
-        except (subprocess.TimeoutExpired, FileNotFoundError, RuntimeError) as e:
+        except Exception as e:
             logger.warning("claude_version_detection_failed", error=str(e))
             return "unknown"
 
@@ -182,15 +157,13 @@ class ClaudeAPIDetectionService:
             # Execute Claude CLI with proxy
             env = {**dict(os.environ), "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}"}
 
-            # Find claude command
-            resolver = BinaryResolver()
-            result = resolver.find_binary("claude", "@anthropic-ai/claude-code")
-
-            if not result:
+            # Get claude command from CLI service
+            cli_info = self._cli_service.get_cli_info("claude")
+            if not cli_info["is_available"] or not cli_info["command"]:
                 raise FileNotFoundError("Claude CLI not found for header detection")
 
             # Prepare command
-            cmd = result.command + ["test"]
+            cmd = cli_info["command"] + ["test"]
 
             process = await asyncio.create_subprocess_exec(
                 *cmd,

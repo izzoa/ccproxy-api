@@ -1,4 +1,4 @@
-"""Service for automatically detecting Codex CLI headers at startup."""
+"""Service for detecting Codex CLI using centralized detection."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import socket
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +19,7 @@ from ccproxy.models.detection import (
     CodexHeaders,
     CodexInstructionsData,
 )
-from ccproxy.utils.binary_resolver import BinaryResolver
+from ccproxy.services.cli_detection import CLIDetectionService
 
 
 logger = structlog.get_logger(__name__)
@@ -35,6 +34,7 @@ class CodexDetectionService:
         self.cache_dir = get_ccproxy_cache_dir()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._cached_data: CodexCacheData | None = None
+        self._cli_service = CLIDetectionService(settings)
 
     async def initialize_detection(self) -> CodexCacheData:
         """Initialize Codex detection at startup."""
@@ -92,15 +92,8 @@ class CodexDetectionService:
         Returns:
             Command list to execute Codex CLI if found, None otherwise
         """
-        try:
-            resolver = BinaryResolver()
-            result = resolver.find_binary("codex", "@openai/codex")
-            if result:
-                # Always return as command list for consistency
-                return result.command
-            return None
-        except Exception:
-            return None
+        info = self._cli_service.get_cli_info("codex")
+        return info["command"] if info["is_available"] else None
 
     def get_binary_path(self) -> list[str] | None:
         """Alias for get_cli_path for backward compatibility."""
@@ -109,35 +102,28 @@ class CodexDetectionService:
     async def _get_codex_version(self) -> str:
         """Get Codex CLI version."""
         try:
-            # Try to find codex command
-            resolver = BinaryResolver()
-            result = resolver.find_binary("codex", "@openai/codex")
+            # Custom parser for Codex version format
+            def parse_codex_version(output: str) -> str:
+                # Handle "codex 0.21.0" format
+                if " " in output:
+                    return output.split()[-1]
+                return output
 
-            if not result:
+            # Use centralized CLI detection
+            result = await self._cli_service.detect_cli(
+                binary_name="codex",
+                package_name="@openai/codex",
+                version_flag="--version",
+                version_parser=parse_codex_version,
+                cache_key="codex_version",
+            )
+
+            if result.is_available and result.version:
+                return result.version
+            else:
                 raise FileNotFoundError("Codex CLI not found")
 
-            # Prepare command based on result type
-            cmd = result.command + ["--version"]
-
-            proc_result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if proc_result.returncode == 0:
-                # Extract version from output like "codex 0.21.0"
-                version_line = proc_result.stdout.strip()
-                if " " in version_line:
-                    # Handle "codex 0.21.0" format - extract just the version number
-                    return version_line.split()[-1]
-                return version_line
-            else:
-                raise RuntimeError(
-                    f"Codex version command failed: {proc_result.stderr}"
-                )
-
-        except (subprocess.TimeoutExpired, FileNotFoundError, RuntimeError) as e:
+        except Exception as e:
             logger.warning("codex_version_detection_failed", error=str(e))
             return "unknown"
 
@@ -186,15 +172,13 @@ class CodexDetectionService:
                 "OPENAI_BASE_URL": f"http://127.0.0.1:{port}/backend-api/codex",
             }
 
-            # Find codex command
-            resolver = BinaryResolver()
-            result = resolver.find_binary("codex", "@openai/codex")
-
-            if not result:
+            # Get codex command from CLI service
+            cli_info = self._cli_service.get_cli_info("codex")
+            if not cli_info["is_available"] or not cli_info["command"]:
                 raise FileNotFoundError("Codex CLI not found for header detection")
 
             # Prepare command
-            cmd = result.command + ["exec", "test"]
+            cmd = cli_info["command"] + ["exec", "test"]
 
             process = await asyncio.create_subprocess_exec(
                 *cmd,

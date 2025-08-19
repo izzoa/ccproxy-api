@@ -3,7 +3,7 @@
 import contextlib
 import json
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from fastapi import HTTPException, Request
@@ -13,7 +13,11 @@ from ccproxy.auth.manager import AuthManager
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.http_handler import PluginHTTPHandler
-from ccproxy.services.proxy_service import ProxyService
+from ccproxy.services.interfaces import IRequestHandler
+
+
+if TYPE_CHECKING:
+    from ccproxy.services.proxy_service import ProxyService
 
 from .format_adapter import CodexFormatAdapter
 from .transformers import CodexRequestTransformer, CodexResponseTransformer
@@ -31,7 +35,7 @@ class CodexAdapter(BaseAdapter):
 
     def __init__(
         self,
-        proxy_service: ProxyService | None,
+        proxy_service: IRequestHandler | None,
         auth_manager: AuthManager,
         detection_service: Any,
         http_client: Any | None = None,
@@ -40,7 +44,7 @@ class CodexAdapter(BaseAdapter):
         """Initialize the Codex adapter.
 
         Args:
-            proxy_service: ProxyService instance for handling requests (can be None, will be set later)
+            proxy_service: Request handler for processing requests (can be None, will be set later)
             auth_manager: Authentication manager for credentials
             detection_service: Detection service for Codex CLI detection
             http_client: Not used directly (for interface compatibility)
@@ -68,22 +72,31 @@ class CodexAdapter(BaseAdapter):
         if not self.proxy_service:
             return
 
-        # Initialize HTTP handler with client config from proxy service
-        client_config = self.proxy_service.config.get_httpx_client_config()
-        self._http_handler = PluginHTTPHandler(client_config)
+        # Type check for ProxyService specific attributes
+        from ccproxy.services.proxy_service import ProxyService
 
-        # Initialize transformers
-        self.request_transformer = CodexRequestTransformer(self._detection_service)
+        if isinstance(self.proxy_service, ProxyService):
+            # Initialize HTTP handler with client config from proxy service
+            client_config = self.proxy_service.config.get_httpx_client_config()
+            self._http_handler = PluginHTTPHandler(client_config)
 
-        # Initialize response transformer with CORS settings
-        cors_settings = (
-            getattr(self.proxy_service.config, "cors", None)
-            if self.proxy_service
-            else None
-        )
-        self.response_transformer = CodexResponseTransformer(cors_settings)
+            # Initialize transformers
+            self.request_transformer = CodexRequestTransformer(self._detection_service)
 
-    def set_proxy_service(self, proxy_service: ProxyService) -> None:
+            # Initialize response transformer with CORS settings
+            cors_settings = (
+                getattr(self.proxy_service.config, "cors", None)
+                if self.proxy_service
+                else None
+            )
+            self.response_transformer = CodexResponseTransformer(cors_settings)
+        else:
+            # Fallback: use default config if not ProxyService
+            self._http_handler = PluginHTTPHandler({})
+            self.request_transformer = CodexRequestTransformer(self._detection_service)
+            self.response_transformer = CodexResponseTransformer(None)
+
+    def set_proxy_service(self, proxy_service: IRequestHandler) -> None:
         """Set the proxy service and complete initialization.
 
         DEPRECATED: This method is deprecated. ProxyService should be passed
@@ -178,6 +191,13 @@ class CodexAdapter(BaseAdapter):
         if not self.proxy_service:
             raise HTTPException(status_code=503, detail="Proxy service not available")
 
+        # Get streaming handler if available
+        from ccproxy.services.proxy_service import ProxyService
+
+        streaming_handler = None
+        if is_streaming and isinstance(self.proxy_service, ProxyService):
+            streaming_handler = self.proxy_service.streaming_handler
+
         return await self._http_handler.handle_request(
             method=method,
             url=target_url,
@@ -185,9 +205,7 @@ class CodexAdapter(BaseAdapter):
             body=transformed_body,
             handler_config=context,
             is_streaming=is_streaming,
-            streaming_handler=self.proxy_service.streaming_handler
-            if is_streaming
-            else None,
+            streaming_handler=streaming_handler,
             request_context={},
         )
 

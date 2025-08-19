@@ -202,6 +202,7 @@ def get_claude_api_detection_service(proxy_service: ProxyService) -> Any | None:
         return None
     # Access PluginManager's internal registry
     from ccproxy.services.plugins import PluginManager
+
     if isinstance(proxy_service.plugin_registry, PluginManager):
         plugin = proxy_service.plugin_registry.plugin_registry.get_plugin("claude_api")
         if plugin and hasattr(plugin, "_detection_service"):
@@ -244,6 +245,7 @@ def get_claude_sdk_detection_service(proxy_service: ProxyService) -> Any | None:
         return None
     # Access PluginManager's internal registry
     from ccproxy.services.plugins import PluginManager
+
     if isinstance(proxy_service.plugin_registry, PluginManager):
         plugin = proxy_service.plugin_registry.plugin_registry.get_plugin("claude_sdk")
         if plugin and hasattr(plugin, "_detection_service"):
@@ -286,6 +288,7 @@ def get_codex_detection_service(proxy_service: ProxyService) -> Any | None:
         return None
     # Access PluginManager's internal registry
     from ccproxy.services.plugins import PluginManager
+
     if isinstance(proxy_service.plugin_registry, PluginManager):
         plugin = proxy_service.plugin_registry.plugin_registry.get_plugin("codex")
         if plugin and hasattr(plugin, "_detection_service"):

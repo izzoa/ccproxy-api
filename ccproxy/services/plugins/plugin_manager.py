@@ -283,6 +283,22 @@ class PluginManager:
         """
         return self.tracers.get(provider_name)
 
+    def get_plugin_registry(self) -> Any:
+        """Get the internal plugin registry for admin operations.
+
+        This method is part of the IPluginRegistry protocol and allows
+        admin routes to access the internal registry for management tasks.
+        """
+        return self.plugin_registry
+
+    def get_adapters_dict(self) -> dict[str, BaseAdapter]:
+        """Get the adapters dictionary for admin operations.
+
+        This method is part of the IPluginRegistry protocol and allows
+        admin routes to access and modify the adapters dict.
+        """
+        return self.adapters
+
     async def close(self) -> None:
         """Clean up plugin resources on shutdown."""
         # Close any plugin-specific resources

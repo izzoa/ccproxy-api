@@ -1,12 +1,11 @@
-"""Claude SDK CLI detection service - simplified version."""
+"""Claude SDK CLI detection service using centralized detection."""
 
-import asyncio
 from typing import NamedTuple
 
 import structlog
 
 from ccproxy.config.settings import Settings
-from ccproxy.utils.binary_resolver import BinaryResolver
+from ccproxy.services.cli_detection import CLIDetectionService
 
 
 logger = structlog.get_logger(__name__)
@@ -35,6 +34,7 @@ class ClaudeSDKDetectionService:
             settings: Application settings
         """
         self.settings = settings
+        self._cli_service = CLIDetectionService(settings)
         self._version: str | None = None
         self._cli_command: list[str] | None = None
         self._is_available = False
@@ -50,96 +50,51 @@ class ClaudeSDKDetectionService:
         """
         logger.debug("claude_sdk_detection_starting")
 
-        # Try to find Claude CLI
-        self._cli_command = self._find_claude_cli()
+        # Use centralized CLI detection service
+        # For SDK, we don't want fallback - require actual CLI
+        original_fallback = self._cli_service.resolver.fallback_enabled
+        self._cli_service.resolver.fallback_enabled = False
 
-        if self._cli_command:
-            self._version = await self._get_claude_version(self._cli_command)
-            self._is_available = True
-            logger.debug(
-                "claude_sdk_detection_success",
-                cli_command=self._cli_command,
-                version=self._version,
+        try:
+            result = await self._cli_service.detect_cli(
+                binary_name="claude",
+                package_name="@anthropic-ai/claude-code",
+                version_flag="--version",
+                fallback_data=None,  # No fallback for SDK
+                cache_key="claude_sdk",
             )
-        else:
-            self._is_available = False
-            logger.error(
-                "claude_sdk_detection_failed",
-                message="Claude CLI not found - SDK plugin cannot function without CLI",
-            )
+
+            # Only accept direct binary, not package manager execution
+            if result.is_available and result.source == "path":
+                self._version = result.version
+                self._cli_command = result.command
+                self._is_available = True
+                logger.debug(
+                    "claude_sdk_detection_success",
+                    cli_command=self._cli_command,
+                    version=self._version,
+                )
+            else:
+                self._is_available = False
+                if result.source == "package_manager":
+                    logger.error(
+                        "claude_sdk_detection_failed",
+                        message="Claude SDK requires installed CLI, not package manager execution",
+                    )
+                else:
+                    logger.error(
+                        "claude_sdk_detection_failed",
+                        message="Claude CLI not found - SDK plugin cannot function without CLI",
+                    )
+        finally:
+            # Restore original fallback setting
+            self._cli_service.resolver.fallback_enabled = original_fallback
 
         return ClaudeDetectionData(
             claude_version=self._version,
             cli_command=self._cli_command,
             is_available=self._is_available,
         )
-
-    def _find_claude_cli(self) -> list[str] | None:
-        """Find Claude CLI using binary resolver.
-
-        Returns:
-            Command list to execute Claude CLI if found, None otherwise
-        """
-        try:
-            # For claude_sdk, we want only installed binaries, not package manager execution
-            resolver = BinaryResolver()
-            result = resolver.find_binary(
-                "claude",
-                "@anthropic-ai/claude-code",
-                package_manager_only=False,
-                fallback_enabled=False,
-            )
-            if result and result.is_direct:
-                logger.debug(
-                    "claude_cli_found",
-                    command=result.command,
-                    is_in_path=result.is_in_path,
-                )
-                # Always return as command list for consistency
-                return result.command
-        except Exception as e:
-            logger.debug("binary_resolver_failed", error=str(e), exc_info=e)
-
-        return None
-
-    async def _get_claude_version(self, cli_command: list[str]) -> str | None:
-        """Get Claude CLI version.
-
-        Args:
-            cli_command: Command list to execute Claude CLI
-
-        Returns:
-            Version string if successful, None otherwise
-        """
-        try:
-            # Prepare command with --version flag
-            cmd = cli_command + ["--version"]
-
-            # Run claude --version with timeout
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5.0)
-
-            if process.returncode == 0 and stdout:
-                version_output = stdout.decode().strip()
-                # Handle various version output formats
-                if "/" in version_output:
-                    # Handle "claude-cli/1.0.60" format
-                    version_output = version_output.split("/")[-1]
-                if "(" in version_output:
-                    # Handle "1.0.60 (Claude Code)" format
-                    version_output = version_output.split("(")[0].strip()
-                return version_output
-
-            return None
-
-        except (TimeoutError, Exception) as e:
-            logger.debug("claude_version_check_failed", error=str(e))
-            return None
 
     def get_version(self) -> str | None:
         """Get the detected Claude CLI version.

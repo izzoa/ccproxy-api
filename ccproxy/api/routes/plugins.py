@@ -86,11 +86,11 @@ async def list_plugins(
     if not proxy.plugin_registry:
         return PluginListResponse(plugins=plugins, total=0)
 
-    # Plugin providers - access internal registry for PluginManager
-    from ccproxy.services.plugins import PluginManager
-    if isinstance(proxy.plugin_registry, PluginManager):
-        for name in proxy.plugin_registry.plugin_registry.list_plugins():
-            plugin = proxy.plugin_registry.plugin_registry.get_plugin(name)
+    # Plugin providers - access internal registry
+    registry = proxy.plugin_registry.get_plugin_registry()
+    if registry:
+        for name in registry.list_plugins():
+            plugin = registry.get_plugin(name)
             plugins.append(
                 PluginInfo(
                     name=name,
@@ -126,7 +126,8 @@ async def plugin_health(
     adapter = proxy.plugin_registry.get_adapter(plugin_name)
     if adapter:
         # Get the plugin and run its health check if available
-        plugin = proxy.plugin_registry.plugin_registry.get_plugin(plugin_name)
+        registry = proxy.plugin_registry.get_plugin_registry()
+        plugin = registry.get_plugin(plugin_name) if registry else None
         if plugin and hasattr(plugin, "health_check"):
             try:
                 health_result = await plugin.health_check()
@@ -213,14 +214,16 @@ async def reload_plugin(
     # Check if plugin exists
     if not proxy.plugin_registry:
         raise HTTPException(status_code=503, detail="Plugin manager not initialized")
-    if plugin_name not in proxy.plugin_registry.plugin_registry.list_plugins():
+    registry = proxy.plugin_registry.get_plugin_registry()
+    if not registry or plugin_name not in registry.list_plugins():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Plugin '{plugin_name}' not found",
         )
 
     # Reload the plugin using the new efficient method
-    success = await proxy.plugin_registry.plugin_registry.reload_plugin(plugin_name)
+    registry = proxy.plugin_registry.get_plugin_registry()
+    success = await registry.reload_plugin(plugin_name) if registry else False
 
     if success:
         return PluginReloadResponse(
@@ -249,8 +252,7 @@ async def discover_plugins(
         Updated list of all plugins
     """
     # Re-initialize plugins
-    if proxy.plugin_registry:
-        proxy.plugin_registry.initialized = False
+    # Re-initialize plugins by calling proxy's initialize method
     await proxy.initialize_plugins()
 
     # Return updated list
@@ -278,12 +280,14 @@ async def unregister_plugin(
     # Unregister the plugin
     if not proxy.plugin_registry:
         raise HTTPException(status_code=503, detail="Plugin manager not initialized")
-    success = await proxy.plugin_registry.plugin_registry.unregister(plugin_name)
+    registry = proxy.plugin_registry.get_plugin_registry()
+    success = await registry.unregister(plugin_name) if registry else False
 
     if success:
         # Also remove from proxy's adapter list
-        if plugin_name in proxy.plugin_registry.adapters:
-            del proxy.plugin_registry.adapters[plugin_name]
+        adapters = proxy.plugin_registry.get_adapters_dict()
+        if plugin_name in adapters:
+            del adapters[plugin_name]
 
         return {
             "status": "success",
