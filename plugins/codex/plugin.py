@@ -61,19 +61,9 @@ class Plugin(ProviderPlugin):
         self._services = services
 
         # Load plugin-specific configuration from plugins dictionary
-        plugin_config = getattr(services.settings, "plugins", {}).get(self.name, {})
+        plugin_config = services.get_plugin_config(self.name)
 
-        # If no config provided, use defaults from CodexSettings
-        if not plugin_config:
-            plugin_config = {
-                "name": self.name,
-                "base_url": "https://chatgpt.com/backend-api/codex",
-                "supports_streaming": True,
-                "requires_auth": True,
-                "auth_type": "oauth",
-                "models": ["gpt-5"],
-            }
-
+        # Use Pydantic model defaults if no config provided
         self._config = CodexSettings.model_validate(plugin_config)
 
         # Set up authentication manager first

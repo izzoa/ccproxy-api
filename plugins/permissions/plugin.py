@@ -179,3 +179,14 @@ class Plugin(ProviderPlugin):
     def get_auth_commands(self) -> list[Any] | None:
         """Permissions plugin doesn't have auth commands."""
         return None
+
+    async def get_auth_summary(self) -> dict[str, Any]:
+        """Get authentication summary for the plugin.
+
+        Returns:
+            Dictionary with auth status (not applicable for permissions plugin)
+        """
+        return {
+            "auth": "not_applicable",
+            "description": "Permissions plugin does not require authentication",
+        }
