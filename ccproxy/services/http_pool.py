@@ -128,19 +128,17 @@ class HTTPPoolManager:
 
     def get_shared_client_sync(self) -> httpx.AsyncClient:
         """Get or create the shared client synchronously.
-        
+
         This is used during initialization when we're not in an async context.
         Note: This doesn't use locking, so it should only be called during
         single-threaded initialization.
-        
+
         Returns:
             The shared httpx.AsyncClient instance
         """
         if self._shared_client is None:
             logger.info("creating_shared_client_sync")
-            self._shared_client = HTTPClientFactory.create_shared_client(
-                self.settings
-            )
+            self._shared_client = HTTPClientFactory.create_shared_client(self.settings)
         return self._shared_client
 
     def get_pool_client(self, base_url: str) -> httpx.AsyncClient | None:
