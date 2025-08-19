@@ -181,9 +181,9 @@ def get_claude_api_adapter(proxy_service: ProxyService) -> ClaudeAPIAdapter:
     """
     from fastapi import HTTPException
 
-    if not proxy_service.plugin_manager:
+    if not proxy_service.plugin_registry:
         raise HTTPException(status_code=503, detail="Plugin manager not initialized")
-    adapter = proxy_service.plugin_manager.get_plugin_adapter("claude_api")
+    adapter = proxy_service.plugin_registry.get_adapter("claude_api")
     if not adapter:
         raise HTTPException(status_code=503, detail="Claude API plugin not initialized")
     return cast("ClaudeAPIAdapter", adapter)
@@ -198,11 +198,14 @@ def get_claude_api_detection_service(proxy_service: ProxyService) -> Any | None:
     Returns:
         Claude API detection service if available, None otherwise
     """
-    if not proxy_service.plugin_manager:
+    if not proxy_service.plugin_registry:
         return None
-    plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("claude_api")
-    if plugin and hasattr(plugin, "_detection_service"):
-        return plugin._detection_service
+    # Access PluginManager's internal registry
+    from ccproxy.services.plugins import PluginManager
+    if isinstance(proxy_service.plugin_registry, PluginManager):
+        plugin = proxy_service.plugin_registry.plugin_registry.get_plugin("claude_api")
+        if plugin and hasattr(plugin, "_detection_service"):
+            return plugin._detection_service
     return None
 
 
@@ -220,9 +223,9 @@ def get_claude_sdk_adapter(proxy_service: ProxyService) -> Any:
     """
     from fastapi import HTTPException
 
-    if not proxy_service.plugin_manager:
+    if not proxy_service.plugin_registry:
         raise HTTPException(status_code=503, detail="Plugin manager not initialized")
-    adapter = proxy_service.plugin_manager.get_plugin_adapter("claude_sdk")
+    adapter = proxy_service.plugin_registry.get_adapter("claude_sdk")
     if not adapter:
         raise HTTPException(status_code=503, detail="Claude SDK plugin not initialized")
     return adapter
@@ -237,11 +240,14 @@ def get_claude_sdk_detection_service(proxy_service: ProxyService) -> Any | None:
     Returns:
         Claude SDK detection service if available, None otherwise
     """
-    if not proxy_service.plugin_manager:
+    if not proxy_service.plugin_registry:
         return None
-    plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("claude_sdk")
-    if plugin and hasattr(plugin, "_detection_service"):
-        return plugin._detection_service
+    # Access PluginManager's internal registry
+    from ccproxy.services.plugins import PluginManager
+    if isinstance(proxy_service.plugin_registry, PluginManager):
+        plugin = proxy_service.plugin_registry.plugin_registry.get_plugin("claude_sdk")
+        if plugin and hasattr(plugin, "_detection_service"):
+            return plugin._detection_service
     return None
 
 
@@ -259,9 +265,9 @@ def get_codex_adapter(proxy_service: ProxyService) -> CodexAdapter:
     """
     from fastapi import HTTPException
 
-    if not proxy_service.plugin_manager:
+    if not proxy_service.plugin_registry:
         raise HTTPException(status_code=503, detail="Plugin manager not initialized")
-    adapter = proxy_service.plugin_manager.get_plugin_adapter("codex")
+    adapter = proxy_service.plugin_registry.get_adapter("codex")
     if not adapter:
         raise HTTPException(status_code=503, detail="Codex plugin not initialized")
     return cast("CodexAdapter", adapter)
@@ -276,11 +282,14 @@ def get_codex_detection_service(proxy_service: ProxyService) -> Any | None:
     Returns:
         Codex detection service if available, None otherwise
     """
-    if not proxy_service.plugin_manager:
+    if not proxy_service.plugin_registry:
         return None
-    plugin = proxy_service.plugin_manager.plugin_registry.get_plugin("codex")
-    if plugin and hasattr(plugin, "_detection_service"):
-        return plugin._detection_service
+    # Access PluginManager's internal registry
+    from ccproxy.services.plugins import PluginManager
+    if isinstance(proxy_service.plugin_registry, PluginManager):
+        plugin = proxy_service.plugin_registry.plugin_registry.get_plugin("codex")
+        if plugin and hasattr(plugin, "_detection_service"):
+            return plugin._detection_service
     return None
 
 
