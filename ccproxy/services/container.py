@@ -14,9 +14,11 @@ from ccproxy.core.http import BaseProxyClient
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.plugins.registry import PluginRegistry
 from ccproxy.services.auth import AuthenticationService
+from ccproxy.services.cache import ResponseCache
 from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.factories import ConcreteServiceFactory
+from ccproxy.services.http.connection_pool import ConnectionPoolManager
 from ccproxy.services.http_pool import HTTPPoolManager
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.plugins import PluginManager
@@ -107,6 +109,8 @@ class ServiceContainer:
             http_client=self.get_http_client(),
             plugin_registry=plugin_manager,  # PluginManager implements IPluginRegistry
             metrics=metrics,
+            response_cache=self.get_response_cache(),
+            connection_pool_manager=self.get_connection_pool_manager(),
         )
 
         logger.debug(
@@ -227,6 +231,50 @@ class ServiceContainer:
             self._pool_manager = HTTPPoolManager(self.settings)
             logger.debug("Created HTTPPoolManager")
         return self._pool_manager
+
+    def get_response_cache(self) -> ResponseCache:
+        """Get response cache service instance.
+
+        Returns:
+            ResponseCache instance for caching API responses
+        """
+        service_key = "response_cache"
+        if service_key not in self._services:
+            # Configure cache based on settings
+            cache_settings = getattr(self.settings, "cache", None)
+            if cache_settings:
+                ttl = getattr(cache_settings, "default_ttl", 300.0)
+                max_size = getattr(cache_settings, "max_size", 1000)
+                self._services[service_key] = ResponseCache(
+                    default_ttl=ttl, max_size=max_size
+                )
+            else:
+                # Default configuration
+                self._services[service_key] = ResponseCache()
+            logger.debug("Created ResponseCache")
+        return self._services[service_key]  # type: ignore
+
+    def get_connection_pool_manager(self) -> ConnectionPoolManager:
+        """Get connection pool manager service instance.
+
+        Returns:
+            ConnectionPoolManager instance for managing HTTP connection pools
+        """
+        service_key = "connection_pool_manager"
+        if service_key not in self._services:
+            # Configure based on settings
+            pool_settings = getattr(self.settings, "http", None)
+            if pool_settings:
+                timeout = getattr(pool_settings, "timeout", 120.0)
+                pool_size = getattr(pool_settings, "pool_size", 20)
+                self._services[service_key] = ConnectionPoolManager(
+                    default_timeout=timeout, pool_size=pool_size
+                )
+            else:
+                # Default configuration
+                self._services[service_key] = ConnectionPoolManager()
+            logger.debug("Created ConnectionPoolManager")
+        return self._services[service_key]  # type: ignore
 
     async def close(self) -> None:
         """Close all managed resources during shutdown.

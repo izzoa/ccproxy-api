@@ -23,11 +23,11 @@ plugins/claude_sdk/
 ### Dependency Map
 1. **Plugin Dependencies (6 files)**
    - All use: `from ccproxy.adapters.sdk import models as sdk_models`
-   
+
 2. **Core Dependencies (1 critical)**
    - `ccproxy/models/messages.py`: Imports `SDKContentBlock`
    - Creates circular dependency if moved without refactoring
-   
+
 3. **Test Dependencies**
    - `tests/unit/services/test_claude_sdk_client.py`
    - Multiple inline imports in test methods
@@ -83,7 +83,7 @@ plugins/claude_sdk/
    # Before: from ccproxy.adapters.sdk import models as sdk_models
    # After:  from . import models as sdk_models
    ```
-   
+
 2. **Files to update**:
    - `plugins/claude_sdk/client.py`
    - `plugins/claude_sdk/converter.py`

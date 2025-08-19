@@ -18,7 +18,7 @@ from ccproxy.config.constants import (
 )
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.handler_config import HandlerConfig
-from ccproxy.services.http_handler import PluginHTTPHandler
+from ccproxy.services.http.plugin_handler import PluginHTTPHandler
 from ccproxy.services.interfaces import IRequestHandler
 
 
@@ -84,12 +84,9 @@ class CodexAdapter(BaseAdapter):
         if isinstance(self.proxy_service, ProxyService):
             # Initialize HTTP handler with shared HTTP client from proxy service
             shared_client = getattr(self.proxy_service, "http_client", None)
-            if shared_client:
-                self._http_handler = PluginHTTPHandler(http_client=shared_client)
-            else:
-                # Fallback to legacy config-based client
-                client_config = self.proxy_service.config.get_httpx_client_config()
-                self._http_handler = PluginHTTPHandler(client_config)
+            if not shared_client:
+                raise RuntimeError("ProxyService must have http_client attribute")
+            self._http_handler = PluginHTTPHandler(http_client=shared_client)
 
             # Initialize transformers
             self.request_transformer = CodexRequestTransformer(self._detection_service)
@@ -102,10 +99,8 @@ class CodexAdapter(BaseAdapter):
             )
             self.response_transformer = CodexResponseTransformer(cors_settings)
         else:
-            # Fallback: use default config if not ProxyService
-            self._http_handler = PluginHTTPHandler({})
-            self.request_transformer = CodexRequestTransformer(self._detection_service)
-            self.response_transformer = CodexResponseTransformer(None)
+            # No ProxyService available
+            raise RuntimeError("CodexAdapter requires a ProxyService instance")
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any

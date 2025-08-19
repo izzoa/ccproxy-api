@@ -9,8 +9,10 @@ from ccproxy.config.settings import Settings
 from ccproxy.core.http import BaseProxyClient
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.services.auth import AuthenticationService
+from ccproxy.services.cache import ResponseCache
 from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.credentials.manager import CredentialsManager
+from ccproxy.services.http.connection_pool import ConnectionPoolManager
 from ccproxy.services.interfaces import IPluginRegistry
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler
@@ -38,6 +40,8 @@ class ProxyService:
         http_client: httpx.AsyncClient,  # Shared HTTP client for centralized management
         plugin_registry: IPluginRegistry | None = None,  # Uses protocol interface
         metrics: PrometheusMetrics | None = None,
+        response_cache: ResponseCache | None = None,
+        connection_pool_manager: ConnectionPoolManager | None = None,
     ) -> None:
         """Initialize with all dependencies injected.
 
@@ -59,11 +63,17 @@ class ProxyService:
         self.plugin_registry = plugin_registry
         self.metrics = metrics
 
+        # Performance optimization services
+        self.response_cache = response_cache or ResponseCache()
+        self.connection_pool_manager = (
+            connection_pool_manager or ConnectionPoolManager()
+        )
+
         # Shared HTTP client (injected for centralized management)
         self.http_client = http_client
 
         logger.debug(
-            "ProxyService initialized with injected services and shared HTTP client"
+            "ProxyService initialized with injected services and performance optimizations"
         )
 
     def set_plugin_registry(self, plugin_registry: IPluginRegistry) -> None:
@@ -93,11 +103,28 @@ class ProxyService:
         # Initialize plugins with the shared HTTP client
         await self.plugin_registry.initialize_plugins(self.http_client, self, scheduler)
 
+    async def get_pooled_client(
+        self, base_url: str | None = None, streaming: bool = False
+    ) -> httpx.AsyncClient:
+        """Get a pooled HTTP client for the given configuration.
+
+        Args:
+            base_url: Base URL for the client
+            streaming: Whether to use streaming configuration
+
+        Returns:
+            HTTPX AsyncClient from the pool
+        """
+        if streaming:
+            return await self.connection_pool_manager.get_streaming_client(base_url)
+        return await self.connection_pool_manager.get_client(base_url)
+
     async def close(self) -> None:
         """Clean up resources on shutdown.
 
         - Closes proxy client
         - Closes credentials manager
+        - Closes connection pools
         - Does NOT close HTTP client (managed by ServiceContainer)
         """
         try:
@@ -112,6 +139,14 @@ class ProxyService:
             # Close credentials manager
             if hasattr(self.credentials_manager, "close"):
                 await self.credentials_manager.close()
+
+            # Close connection pools
+            if self.connection_pool_manager:
+                await self.connection_pool_manager.close_all()
+
+            # Clear response cache
+            if self.response_cache:
+                self.response_cache.clear()
 
             logger.info("ProxyService cleanup complete")
 

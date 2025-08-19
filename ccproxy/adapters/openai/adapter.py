@@ -397,7 +397,7 @@ class OpenAIAdapter(APIAdapter):
                 elif block.get("type") == "system_message":
                     # Handle custom system_message content blocks
                     system_text = block.get("text", "")
-                    source = block.get("source", "claude_code_sdk")
+                    source = block.get("source", "ccproxy")
                     # Format as text with clear source attribution
                     content += f"[{source}]: {system_text}"
                 elif block.get("type") == "tool_use_sdk":
@@ -411,7 +411,7 @@ class OpenAIAdapter(APIAdapter):
                     tool_calls.append(format_openai_tool_call(tool_call_block))
                 elif block.get("type") == "tool_result_sdk":
                     # Handle custom tool_result_sdk content blocks - add as text with source attribution
-                    source = block.get("source", "claude_code_sdk")
+                    source = block.get("source", "ccproxy")
                     tool_use_id = block.get("tool_use_id", "")
                     result_content = block.get("content", "")
                     is_error = block.get("is_error", False)
@@ -419,7 +419,7 @@ class OpenAIAdapter(APIAdapter):
                     content += f"[{source} tool_result {tool_use_id}{error_indicator}]: {result_content}"
                 elif block.get("type") == "result_message":
                     # Handle custom result_message content blocks - add as text with source attribution
-                    source = block.get("source", "claude_code_sdk")
+                    source = block.get("source", "ccproxy")
                     result_data = block.get("data", {})
                     session_id = result_data.get("session_id", "")
                     stop_reason = result_data.get("stop_reason", "")

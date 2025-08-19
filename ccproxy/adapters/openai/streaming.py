@@ -394,7 +394,7 @@ class OpenAIStreamProcessor:
             elif block.get("type") == "system_message":
                 # Handle system message content block
                 system_text = block.get("text", "")
-                source = block.get("source", "claude_code_sdk")
+                source = block.get("source", "ccproxy")
                 # Format as text with clear source attribution
                 formatted_text = f"[{source}]: {system_text}"
                 yield self._format_chunk_output(delta={"content": formatted_text})
@@ -403,7 +403,7 @@ class OpenAIStreamProcessor:
                 tool_id = block.get("id", "")
                 tool_name = block.get("name", "")
                 tool_input = block.get("input", {})
-                source = block.get("source", "claude_code_sdk")
+                source = block.get("source", "ccproxy")
 
                 # For dict format, immediately yield the tool call
                 if self.output_format == "dict":
@@ -432,7 +432,7 @@ class OpenAIStreamProcessor:
                     }
             elif block.get("type") == "tool_result_sdk":
                 # Handle custom tool_result_sdk content block
-                source = block.get("source", "claude_code_sdk")
+                source = block.get("source", "ccproxy")
                 tool_use_id = block.get("tool_use_id", "")
                 result_content = block.get("content", "")
                 is_error = block.get("is_error", False)
@@ -441,7 +441,7 @@ class OpenAIStreamProcessor:
                 yield self._format_chunk_output(delta={"content": formatted_text})
             elif block.get("type") == "result_message":
                 # Handle custom result_message content block
-                source = block.get("source", "claude_code_sdk")
+                source = block.get("source", "ccproxy")
                 result_data = block.get("data", {})
                 session_id = result_data.get("session_id", "")
                 stop_reason = result_data.get("stop_reason", "")

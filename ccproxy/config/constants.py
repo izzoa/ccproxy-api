@@ -19,3 +19,8 @@ CODEX_RESPONSES_ENDPOINT = "/codex/responses"
 # Format Conversion Patterns
 OPENAI_CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 OPENAI_COMPLETIONS_PATH = "/chat/completions"
+
+# HTTP Client Configuration
+HTTP_CLIENT_TIMEOUT = 120.0  # 2 minutes default timeout
+HTTP_STREAMING_TIMEOUT = 300.0  # 5 minutes for streaming requests
+HTTP_CLIENT_POOL_SIZE = 20  # Max connections per pool
