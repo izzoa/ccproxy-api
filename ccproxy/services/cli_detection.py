@@ -52,10 +52,10 @@ class CLIDetectionService:
         self.settings = settings
         self.cache_dir = get_ccproxy_cache_dir()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Create resolver from settings
         self.resolver = BinaryResolver.from_settings(settings)
-        
+
         # Cache for detection results
         self._detection_cache: dict[str, CLIDetectionResult] = {}
 
@@ -82,7 +82,7 @@ class CLIDetectionService:
             CLIDetectionResult with detection information
         """
         cache_key = cache_key or binary_name
-        
+
         # Check memory cache first
         if cache_key in self._detection_cache:
             cached_result = self._detection_cache[cache_key]
@@ -96,16 +96,16 @@ class CLIDetectionService:
 
         # Try to detect the binary
         result = self.resolver.find_binary(binary_name, package_name)
-        
+
         if result:
             # Binary found - get version
             version = await self._get_cli_version(
                 result.command, version_flag, version_parser
             )
-            
+
             # Determine source
             source = "path" if result.is_direct else "package_manager"
-            
+
             detection_result = CLIDetectionResult(
                 name=binary_name,
                 version=version,
@@ -115,7 +115,7 @@ class CLIDetectionService:
                 package_manager=result.package_manager,
                 cached=False,
             )
-            
+
             logger.info(
                 "cli_detection_success",
                 binary=binary_name,
@@ -123,7 +123,7 @@ class CLIDetectionService:
                 source=source,
                 package_manager=result.package_manager,
             )
-            
+
         elif fallback_data:
             # Use fallback data
             detection_result = CLIDetectionResult(
@@ -136,13 +136,13 @@ class CLIDetectionService:
                 cached=False,
                 fallback_data=fallback_data,
             )
-            
+
             logger.warning(
                 "cli_detection_using_fallback",
                 binary=binary_name,
                 reason="CLI not found",
             )
-            
+
         else:
             # Not found and no fallback
             detection_result = CLIDetectionResult(
@@ -154,16 +154,16 @@ class CLIDetectionService:
                 package_manager=None,
                 cached=False,
             )
-            
+
             logger.error(
                 "cli_detection_failed",
                 binary=binary_name,
                 package=package_name,
             )
-        
+
         # Cache the result
         self._detection_cache[cache_key] = detection_result
-        
+
         return detection_result
 
     async def _get_cli_version(
@@ -185,29 +185,27 @@ class CLIDetectionService:
         try:
             # Prepare command with version flag
             cmd = cli_command + [version_flag]
-            
+
             # Run command with timeout
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(), timeout=5.0
-            )
-            
+
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5.0)
+
             if process.returncode == 0 and stdout:
                 version_output = stdout.decode().strip()
-                
+
                 # Use custom parser if provided
                 if version_parser:
                     parsed = version_parser(version_output)
                     return str(parsed) if parsed is not None else None
-                
+
                 # Default parsing logic
                 return self._parse_version_output(version_output)
-            
+
             # Try stderr as some CLIs output version there
             if stderr:
                 version_output = stderr.decode().strip()
@@ -215,10 +213,10 @@ class CLIDetectionService:
                     parsed = version_parser(version_output)
                     return str(parsed) if parsed is not None else None
                 return self._parse_version_output(version_output)
-            
+
             return None
-            
-        except asyncio.TimeoutError:
+
+        except TimeoutError:
             logger.debug("cli_version_timeout", command=cli_command)
             return None
         except Exception as e:
@@ -238,18 +236,19 @@ class CLIDetectionService:
         if "/" in output:
             # Handle "tool/1.0.0" format
             output = output.split("/")[-1]
-        
+
         if "(" in output:
             # Handle "1.0.0 (Tool Name)" format
             output = output.split("(")[0].strip()
-        
+
         # Extract version number pattern (e.g., "1.0.0", "v1.0.0")
         import re
+
         version_pattern = r"v?(\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?)"
         match = re.search(version_pattern, output)
         if match:
             return match.group(1)
-        
+
         # Return cleaned output if no pattern matches
         return output.strip()
 
@@ -267,10 +266,10 @@ class CLIDetectionService:
         """
         cache_file_name = cache_file or f"{binary_name}_version.json"
         cache_path = self.cache_dir / cache_file_name
-        
+
         if not cache_path.exists():
             return None
-        
+
         try:
             with cache_path.open("r") as f:
                 data = json.load(f)
@@ -297,15 +296,15 @@ class CLIDetectionService:
         """
         cache_file_name = cache_file or f"{binary_name}_version.json"
         cache_path = self.cache_dir / cache_file_name
-        
+
         try:
             data = {"binary": binary_name, "version": version}
             if additional_data:
                 data.update(additional_data)
-            
+
             with cache_path.open("w") as f:
                 json.dump(data, f, indent=2)
-            
+
             logger.debug("cache_saved", file=str(cache_path), version=version)
         except Exception as e:
             logger.warning("cache_save_error", file=str(cache_path), error=str(e))
@@ -331,7 +330,7 @@ class CLIDetectionService:
                 package_manager=result.package_manager,
                 is_available=result.is_available,
             )
-        
+
         # Fall back to resolver
         return self.resolver.get_cli_info(binary_name)
 
@@ -370,9 +369,9 @@ class CLIDetectionService:
                 for binary_name, package_name in binaries
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             detected: dict[str, CLIDetectionResult] = {}
-            for (binary_name, _), result in zip(binaries, results):
+            for (binary_name, _), result in zip(binaries, results, strict=False):
                 if isinstance(result, Exception):
                     logger.error(
                         "cli_detection_error",
@@ -381,7 +380,7 @@ class CLIDetectionService:
                     )
                 elif isinstance(result, CLIDetectionResult):
                     detected[binary_name] = result
-            
+
             return detected
         else:
             # Detect sequentially
@@ -396,5 +395,5 @@ class CLIDetectionService:
                         binary=binary_name,
                         error=str(e),
                     )
-            
+
             return detected

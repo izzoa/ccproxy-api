@@ -17,6 +17,7 @@ from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.factories import ConcreteServiceFactory
+from ccproxy.services.http_pool import HTTPPoolManager
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.plugins import PluginManager
 from ccproxy.services.streaming import StreamingHandler
@@ -58,6 +59,7 @@ class ServiceContainer:
         # Service instances (created on-demand, not singletons)
         self._services: dict[str, object] = {}
         self._http_client: httpx.AsyncClient | None = None
+        self._pool_manager: HTTPPoolManager | None = None
 
         logger.debug("ServiceContainer initialized with dependency injection")
 
@@ -206,8 +208,26 @@ class ServiceContainer:
             Shared httpx.AsyncClient instance
         """
         if not self._http_client:
-            self._http_client = self._factory.create_http_client(self.settings)
+            # Use pool manager for centralized management
+            pool_manager = self.get_pool_manager()
+            import asyncio
+
+            self._http_client = asyncio.run(pool_manager.get_shared_client())
         return self._http_client
+
+    def get_pool_manager(self) -> HTTPPoolManager:
+        """Get HTTP connection pool manager instance.
+
+        This provides centralized management of HTTP connection pools,
+        ensuring efficient resource usage across all components.
+
+        Returns:
+            HTTPPoolManager instance
+        """
+        if not self._pool_manager:
+            self._pool_manager = HTTPPoolManager(self.settings)
+            logger.debug("Created HTTPPoolManager")
+        return self._pool_manager
 
     async def close(self) -> None:
         """Close all managed resources during shutdown.
@@ -215,7 +235,13 @@ class ServiceContainer:
         This method properly cleans up all resources managed by the container,
         ensuring graceful shutdown and preventing resource leaks.
         """
-        # Close HTTP client
+        # Close pool manager (which closes all HTTP clients)
+        if self._pool_manager:
+            await self._pool_manager.close_all()
+            self._pool_manager = None
+            logger.debug("Closed HTTP pool manager")
+
+        # Close HTTP client if it was created separately
         if self._http_client:
             await self._http_client.aclose()
             self._http_client = None
