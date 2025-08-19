@@ -6,10 +6,10 @@ from uuid import uuid4
 
 import structlog
 
-from ccproxy.adapters.sdk import models as sdk_models
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
 
+from . import models as sdk_models
 from .config import SDKMessageMode
 from .converter import MessageConverter
 

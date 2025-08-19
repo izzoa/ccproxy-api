@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from ccproxy.adapters.sdk import models as sdk_models
 from ccproxy.core.async_task_manager import create_managed_task
 
+from . import models as sdk_models
 from .exceptions import StreamTimeoutError
 from .message_queue import MessageQueue
 

@@ -11,8 +11,6 @@ from uuid import uuid4
 import structlog
 from claude_code_sdk import ClaudeCodeOptions
 
-from ccproxy.adapters.sdk import models as sdk_models
-from ccproxy.adapters.sdk.models import SDKMessage, create_sdk_message
 from ccproxy.auth.manager import AuthManager
 from ccproxy.core.errors import ClaudeProxyError, ServiceUnavailableError
 from ccproxy.models.messages import MessageResponse
@@ -24,9 +22,11 @@ from plugins.claude_sdk.exceptions import StreamTimeoutError
 from plugins.claude_sdk.manager import SessionManager
 from plugins.claude_sdk.options import OptionsHandler
 
+from . import models as sdk_models
 from .client import ClaudeSDKClient
 from .config import ClaudeSDKSettings, SDKMessageMode
 from .converter import MessageConverter
+from .models import SDKMessage, create_sdk_message
 from .streaming import ClaudeStreamProcessor
 
 

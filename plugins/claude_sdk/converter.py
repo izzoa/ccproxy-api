@@ -7,10 +7,10 @@ from typing import Any
 
 import structlog
 
-from ccproxy.adapters.sdk import models as sdk_models
 from ccproxy.core.async_utils import patched_typing
 from ccproxy.models.messages import MessageResponse
 
+from . import models as sdk_models
 from .config import SDKMessageMode
 
 
