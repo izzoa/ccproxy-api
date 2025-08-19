@@ -1,9 +1,15 @@
 """Protocol interfaces for dependency inversion."""
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.tracing.interfaces import RequestTracer
+
+
+if TYPE_CHECKING:
+    import httpx
+
+    from ccproxy.plugins.registry import PluginRegistry
 
 
 class IRequestHandler(Protocol):
@@ -33,14 +39,14 @@ class IPluginRegistry(Protocol):
 
     async def initialize_plugins(
         self,
-        http_client: Any,
-        proxy_service: Any,
-        scheduler: Any | None = None,
+        http_client: "httpx.AsyncClient",
+        proxy_service: "IRequestHandler",
+        scheduler: Any | None = None,  # Scheduler doesn't have a protocol yet
     ) -> None:
         """Initialize all plugins."""
         ...
 
-    def get_plugin_registry(self) -> Any:
+    def get_plugin_registry(self) -> "PluginRegistry":
         """Get the internal plugin registry for admin operations."""
         ...
 

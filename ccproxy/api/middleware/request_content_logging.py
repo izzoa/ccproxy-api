@@ -1,8 +1,7 @@
 """Request content logging middleware for capturing full HTTP request/response data."""
 
 import json
-from collections.abc import AsyncGenerator
-from typing import Any
+from collections.abc import AsyncGenerator, Awaitable, Callable
 
 import structlog
 from fastapi import Request, Response
@@ -30,7 +29,9 @@ class RequestContentLoggingMiddleware(BaseHTTPMiddleware):
         """
         super().__init__(app)
 
-    async def dispatch(self, request: Request, call_next: Any) -> Any:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response | StreamingResponse:
         """Process the request and log content.
 
         Args:

@@ -1,8 +1,8 @@
 """Request ID middleware for generating and tracking request IDs."""
 
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
 
 import structlog
 from fastapi import Request, Response
@@ -26,7 +26,9 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         """
         super().__init__(app)
 
-    async def dispatch(self, request: Request, call_next: Any) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Process the request and add request ID/context.
 
         Args:
@@ -71,4 +73,4 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             # Add request ID to response headers
             response.headers["x-request-id"] = request_id
 
-            return response  # type: ignore[no-any-return]
+            return response

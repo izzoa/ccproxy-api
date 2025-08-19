@@ -1,7 +1,7 @@
 """Access logging middleware for structured HTTP request/response logging."""
 
 import time
-from typing import Any
+from collections.abc import Awaitable, Callable
 
 import structlog
 from fastapi import Request, Response
@@ -25,7 +25,9 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         """
         super().__init__(app)
 
-    async def dispatch(self, request: Request, call_next: Any) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Process the request and log access details.
 
         Args:
