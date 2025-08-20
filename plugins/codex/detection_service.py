@@ -68,7 +68,7 @@ class CodexDetectionService:
             return detected_data
 
         except Exception as e:
-            logger.warning("detection_codex_headers_failed", fallback=True, error=e)
+            logger.warning("detection_codex_headers_failed", fallback=True, exc_info=e)
             # Return fallback data
             fallback_data = self._get_fallback_data()
             self._cached_data = fallback_data
@@ -188,14 +188,6 @@ class CodexDetectionService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            # stderr = ""
-            # if process.stderr:
-            #     stderr = await process.stderr.read(128)
-            # stdout = ""
-            # if process.stdout:
-            #     stdout = await process.stdout.read(128)
-            # logger.warning("rcecdy", stderr=stderr, stdout=stdout)
-
             # Wait for process with timeout
             try:
                 await asyncio.wait_for(process.wait(), timeout=300)
@@ -203,11 +195,19 @@ class CodexDetectionService:
                 process.kill()
                 await process.wait()
 
+            stdout = await process.stdout.read() if process.stdout else b""
+            stderr = await process.stderr.read() if process.stderr else b""
+
             # Stop server
             server.should_exit = True
             await server_task
 
             if not captured_data:
+                logger.error(
+                    "failed_to_capture_codex_cli_request",
+                    stdout=stdout.decode(errors="ignore"),
+                    stderr=stderr.decode(errors="ignore"),
+                )
                 raise RuntimeError("Failed to capture Codex CLI request")
 
             # Extract headers and instructions
