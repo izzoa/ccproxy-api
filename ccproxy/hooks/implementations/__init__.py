@@ -5,7 +5,7 @@ This module contains standard hook implementations for common use cases:
 - LoggingHook: Structured logging
 - AnalyticsHook: Analytics data collection
 - AccessLoggingHook: Access logging (replaces AccessLogMiddleware)
-- ContentLoggingHook: Content logging (replaces RequestContentLoggingMiddleware)
+- ContentLoggingHook: Content logging for hooks-based logging
 - StreamingCaptureHook: Streaming response capture
 """
 

@@ -15,9 +15,6 @@ from ccproxy import __version__
 from ccproxy.api.middleware.cors import setup_cors_middleware
 from ccproxy.api.middleware.errors import setup_error_handlers
 from ccproxy.api.middleware.logging import AccessLogMiddleware
-from ccproxy.api.middleware.request_content_logging import (
-    RequestContentLoggingMiddleware,
-)
 from ccproxy.api.middleware.request_id import RequestIDMiddleware
 from ccproxy.api.middleware.server_header import ServerHeaderMiddleware
 from ccproxy.api.routes.health import router as health_router
@@ -480,10 +477,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.add_middleware(RawHTTPLoggingMiddleware)
         logger.info("raw_http_logging_middleware_enabled")
 
-    # Add request content logging middleware first (will run fourth due to middleware order)
-    app.add_middleware(RequestContentLoggingMiddleware)
-
-    # Add custom access log middleware second (will run third due to middleware order)
+    # Add custom access log middleware (will run second due to middleware order)
     app.add_middleware(AccessLogMiddleware)
 
     # Add request ID middleware fourth (will run first to initialize context)
