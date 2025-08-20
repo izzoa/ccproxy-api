@@ -115,10 +115,16 @@ class OpenAIOAuthClient:
                     seconds=expires_in
                 )
 
+                # Capture id_token if available (contains chatgpt_account_id for proper UUID)
+                id_token = token_data.get("id_token")
+                if not id_token:
+                    logger.debug("No id_token in OAuth response")
+
                 # Create credentials (account_id will be extracted from access_token)
                 credentials = OpenAICredentials(
                     access_token=token_data["access_token"],
                     refresh_token=token_data.get("refresh_token", ""),
+                    id_token=id_token,
                     expires_at=expires_at,
                     account_id="",  # Will be auto-extracted by validator
                     active=True,
@@ -372,11 +378,21 @@ class OpenAIOAuthClient:
         app = self._create_callback_app(code_verifier, state)
 
         # Start callback server
-        self._server_task = await create_managed_task(
-            self._run_callback_server(app),
-            name="oauth_callback_server",
-            creator="OpenAIOAuthClient",
-        )
+        # Try to use managed task if task manager is started, otherwise use regular task
+        from ccproxy.core.async_task_manager import get_task_manager
+
+        task_manager = get_task_manager()
+        if task_manager.is_started:
+            self._server_task = await create_managed_task(
+                self._run_callback_server(app),
+                name="oauth_callback_server",
+                creator="OpenAIOAuthClient",
+            )
+        else:
+            # Fallback to regular asyncio.create_task for CLI usage
+            self._server_task = asyncio.create_task(
+                self._run_callback_server(app), name="oauth_callback_server"
+            )
 
         # Give server time to start
         await asyncio.sleep(1)

@@ -170,7 +170,8 @@ class OpenAITokenStorage:
             codex_data = {
                 "OPENAI_API_KEY": existing_data.get("OPENAI_API_KEY"),
                 "tokens": {
-                    "id_token": existing_data.get("tokens", {}).get("id_token"),
+                    "id_token": credentials.id_token
+                    or existing_data.get("tokens", {}).get("id_token"),
                     "access_token": credentials.access_token,
                     "refresh_token": credentials.refresh_token,
                     "account_id": credentials.account_id,

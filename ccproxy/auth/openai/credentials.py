@@ -27,6 +27,7 @@ class OpenAICredentials(BaseModel):
 
     access_token: str = Field(..., description="OpenAI access token (JWT)")
     refresh_token: str = Field(..., description="OpenAI refresh token")
+    id_token: str | None = Field(None, description="OpenAI ID token (JWT)")
     expires_at: datetime = Field(..., description="Token expiration timestamp")
     account_id: str = Field(..., description="OpenAI account ID extracted from token")
     active: bool = Field(default=True, description="Whether credentials are active")
@@ -60,9 +61,61 @@ class OpenAICredentials(BaseModel):
     @field_validator("account_id", mode="before")
     @classmethod
     def extract_account_id(cls, v: Any, info: Any) -> str:
-        """Extract account ID from access token if not provided."""
+        """Extract account ID from tokens if not provided.
+
+        Prioritizes chatgpt_account_id (UUID format) from id_token,
+        falls back to auth0 sub claim if not found.
+        """
         if isinstance(v, str) and v:
             return v
+
+        # Try to extract from id_token first (contains chatgpt_account_id UUID)
+        id_token = None
+        if hasattr(info, "data") and info.data and isinstance(info.data, dict):
+            id_token = info.data.get("id_token")
+
+        if id_token and isinstance(id_token, str):
+            try:
+                # Decode JWT without verification to extract claims
+                decoded = jwt.decode(id_token, options={"verify_signature": False})
+
+                # Look for OpenAI auth claims with chatgpt_account_id (proper UUID)
+                if "https://api.openai.com/auth" in decoded:
+                    auth_claims = decoded["https://api.openai.com/auth"]
+                    if isinstance(auth_claims, dict):
+                        # Use chatgpt_account_id if available (this is the proper UUID)
+                        if "chatgpt_account_id" in auth_claims and isinstance(
+                            auth_claims["chatgpt_account_id"], str
+                        ):
+                            account_id = auth_claims["chatgpt_account_id"]
+                            logger.info(
+                                "Using chatgpt_account_id from id_token",
+                                account_id=account_id,
+                            )
+                            return account_id
+
+                        # Also check organization_id as a fallback
+                        if "organization_id" in auth_claims and isinstance(
+                            auth_claims["organization_id"], str
+                        ):
+                            org_id = auth_claims["organization_id"]
+                            if not org_id.startswith("auth0|"):
+                                logger.info(
+                                    "Using organization_id from id_token",
+                                    org_id=org_id,
+                                )
+                                return org_id
+
+                # Check top-level claims in id_token
+                if "account_id" in decoded and isinstance(decoded["account_id"], str):
+                    return decoded["account_id"]
+                elif "org_id" in decoded and isinstance(decoded["org_id"], str):
+                    # Check if org_id looks like a UUID (not auth0|xxx format)
+                    org_id = decoded["org_id"]
+                    if not org_id.startswith("auth0|"):
+                        return org_id
+            except (jwt.DecodeError, jwt.InvalidTokenError, KeyError, ValueError) as e:
+                logger.debug("id_token_decode_failed", error=str(e))
 
         # Try to extract from access_token
         access_token = None
@@ -73,17 +126,38 @@ class OpenAICredentials(BaseModel):
             try:
                 # Decode JWT without verification to extract claims
                 decoded = jwt.decode(access_token, options={"verify_signature": False})
+
+                # Check for OpenAI auth claims in access_token too
+                if "https://api.openai.com/auth" in decoded:
+                    auth_claims = decoded["https://api.openai.com/auth"]
+                    if (
+                        isinstance(auth_claims, dict)
+                        and "chatgpt_account_id" in auth_claims
+                    ):
+                        account_id = auth_claims["chatgpt_account_id"]
+                        logger.info(
+                            "Using chatgpt_account_id from access_token",
+                            account_id=account_id,
+                        )
+                        return str(account_id)
+
                 if "org_id" in decoded and isinstance(decoded["org_id"], str):
                     return decoded["org_id"]
                 elif "sub" in decoded and isinstance(decoded["sub"], str):
-                    return decoded["sub"]
+                    # Fallback to auth0 sub (not ideal but maintains compatibility)
+                    sub = decoded["sub"]
+                    logger.warning(
+                        "Falling back to auth0 sub as account_id - consider updating to use chatgpt_account_id",
+                        sub=sub,
+                    )
+                    return sub
                 elif "account_id" in decoded and isinstance(decoded["account_id"], str):
                     return decoded["account_id"]
             except (jwt.DecodeError, jwt.InvalidTokenError, KeyError, ValueError) as e:
                 logger.warning("jwt_decode_failed", error=str(e), exc_info=e)
 
         raise ValueError(
-            "account_id is required and could not be extracted from access_token"
+            "account_id is required and could not be extracted from tokens"
         )
 
     def is_expired(self) -> bool:
@@ -102,6 +176,7 @@ class OpenAICredentials(BaseModel):
         return {
             "access_token": self.access_token,
             "refresh_token": self.refresh_token,
+            "id_token": self.id_token,
             "expires_at": self.expires_at.isoformat(),
             "account_id": self.account_id,
             "active": self.active,
