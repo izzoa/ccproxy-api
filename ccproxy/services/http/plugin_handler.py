@@ -77,6 +77,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
                     body=body,
                     handler_config=handler_config,
                     request_context=request_context or {},
+                    client=self._http_client,  # use shared client so logging transport applies
                 )
             )
             return response
@@ -88,6 +89,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
             headers=headers,
             body=body,
             handler_config=handler_config,
+            request_context=request_context,
         )
 
     async def prepare_request(
@@ -136,6 +138,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
         headers: dict[str, str],
         body: bytes,
         handler_config: HandlerConfig,
+        request_context: Any = None,
     ) -> Response:
         """Handle a regular (non-streaming) HTTP request.
 
@@ -158,7 +161,9 @@ class PluginHTTPHandler(BaseHTTPHandler):
 
         try:
             # Make HTTP request
-            response = await self._execute_request(method, url, headers, body)
+            response = await self._execute_request(
+                method, url, headers, body, request_context
+            )
 
             # Process response through adapters and transformers
             processed_body, processed_headers = await self._processor.process_response(
@@ -201,6 +206,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
         url: str,
         headers: dict[str, str],
         body: bytes,
+        request_context: Any | None = None,
     ) -> httpx.Response:
         """Execute the actual HTTP request.
 
@@ -209,6 +215,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
             url: Target URL
             headers: Request headers
             body: Request body
+            request_context: Request context containing request_id
 
         Returns:
             HTTPX Response object
@@ -221,6 +228,11 @@ class PluginHTTPHandler(BaseHTTPHandler):
                 "No HTTP client available - must provide http_client in constructor"
             )
 
+        # Pass request ID via extensions for internal tracking (not sent upstream)
+        extensions = {}
+        if request_context and hasattr(request_context, 'request_id'):
+            extensions['request_id'] = request_context.request_id
+        
         # Use shared HTTP client
         return await self._http_client.request(
             method=method,
@@ -228,6 +240,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
             headers=headers,
             content=body,
             timeout=httpx.Timeout(120.0),
+            extensions=extensions,
         )
 
     async def cleanup(self) -> None:

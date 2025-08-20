@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
+import os
 
 import httpx
 from fastapi import APIRouter, FastAPI
@@ -472,6 +473,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Setup middleware
     setup_cors_middleware(app, settings)
     setup_error_handlers(app)
+    
+    # Add raw HTTP logging middleware if enabled (runs at transport level)
+    if os.getenv("CCPROXY_LOG_RAW_HTTP", "").lower() == "true":
+        from ccproxy.api.middleware.raw_http_logger import RawHTTPLoggingMiddleware
+        app.add_middleware(RawHTTPLoggingMiddleware)
+        logger.info("raw_http_logging_middleware_enabled")
 
     # Add request content logging middleware first (will run fourth due to middleware order)
     app.add_middleware(RequestContentLoggingMiddleware)

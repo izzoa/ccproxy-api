@@ -142,7 +142,7 @@ class HTTPPoolManager:
             logger.info("creating_shared_client_sync")
             self._shared_client = HTTPClientFactory.create_client(
                 settings=self.settings,
-                http2=True,  # Enable HTTP/2 for shared client
+                http2=False,  # Disable HTTP/2 to ensure logging transport works
             )
         return self._shared_client
 

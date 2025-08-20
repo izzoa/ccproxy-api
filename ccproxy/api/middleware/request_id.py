@@ -25,6 +25,25 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             app: The ASGI application
         """
         super().__init__(app)
+    
+    async def __call__(self, scope, receive, send):
+        """ASGI interface to inject request ID early."""
+        if scope["type"] == "http":
+            # Generate or extract request ID
+            headers_dict = dict(scope.get("headers", []))
+            request_id = headers_dict.get(b'x-request-id', b'').decode('utf-8') or str(uuid.uuid4())
+            
+            # Store in ASGI extensions for other middleware
+            if "extensions" not in scope:
+                scope["extensions"] = {}
+            scope["extensions"]["request_id"] = request_id
+            
+            # If not in headers, add it
+            if b'x-request-id' not in headers_dict:
+                scope["headers"] = list(scope.get("headers", []))
+                scope["headers"].append((b'x-request-id', request_id.encode('utf-8')))
+        
+        return await super().__call__(scope, receive, send)
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]

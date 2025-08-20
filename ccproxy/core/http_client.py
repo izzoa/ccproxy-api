@@ -75,14 +75,26 @@ class HTTPClientFactory:
             max_keepalive_connections=max_keepalive_connections,
             max_connections=max_connections,
         )
+        
+        # Create base transport
+        base_transport = httpx.AsyncHTTPTransport(
+            limits=limits,
+            http2=http2,
+            verify=verify,
+            proxy=proxy,
+        )
+        
+        # Wrap with logging transport if enabled
+        transport = base_transport
+        if os.getenv("CCPROXY_LOG_RAW_HTTP", "").lower() == "true":
+            from ccproxy.services.http.logging_transport import LoggingHTTPTransport
+            transport = LoggingHTTPTransport(base_transport)
+            logger.debug("raw_http_logging_enabled")
 
         # Merge with any additional kwargs
         client_config = {
             "timeout": timeout,
-            "limits": limits,
-            "http2": http2,
-            "verify": verify,
-            "proxy": proxy,
+            "transport": transport,
             **kwargs,
         }
 
@@ -94,6 +106,7 @@ class HTTPClientFactory:
             max_connections=max_connections,
             http2=http2,
             has_proxy=proxy is not None,
+            raw_logging_enabled=os.getenv("CCPROXY_LOG_RAW_HTTP", "").lower() == "true",
         )
 
         return httpx.AsyncClient(**client_config)

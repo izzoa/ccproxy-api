@@ -70,6 +70,7 @@ class StreamingHandler:
         handler_config: HandlerConfig,
         request_context: RequestContext,
         client_config: dict[str, Any] | None = None,
+        client: httpx.AsyncClient | None = None,
     ) -> StreamingResponse:
         """Execute streaming HTTP request with SSE processing.
 
@@ -83,51 +84,109 @@ class StreamingHandler:
 
         async def stream_generator() -> AsyncGenerator[bytes, None]:
             """Generate streaming response chunks."""
+            nonlocal response_headers
             total_chunks = 0
             total_bytes = 0
 
             try:
-                # Create HTTP client with appropriate config
+                # Create or use provided HTTP client with appropriate config
                 config = client_config or {}
-                async with (
-                    httpx.AsyncClient(**config) as client,
-                    client.stream(
+                if client is None:
+                    # Prepare extensions for request ID tracking
+                    extensions = {}
+                    if request_context and hasattr(request_context, 'request_id'):
+                        extensions['request_id'] = request_context.request_id
+                    else:
+                        logger.warning(
+                            "streaming_request_missing_request_id",
+                            url=url,
+                            method=method,
+                            message="Skipping raw HTTP logging for this streaming request"
+                        )
+                    
+                    async with httpx.AsyncClient(**config) as local_client:
+                        async with local_client.stream(
+                            method=method,
+                            url=url,
+                            headers=headers,
+                            content=body,
+                            timeout=httpx.Timeout(300.0),
+                            extensions=extensions,
+                        ) as response:
+                            # Capture response headers to pass to client and context
+                            response_headers = dict(response.headers)
+                            
+                            # Pass all response headers to the request context
+                            if request_context and hasattr(request_context, "metadata"):
+                                request_context.metadata["response_headers"] = response_headers
+                            
+                            # Check for error status
+                            if response.status_code >= 400:
+                                error_body = await response.aread()
+                                yield error_body
+                                return
+
+                            # Stream the response
+                            if handler_config.response_adapter:
+                                async for chunk in self._process_sse_events(
+                                    response, handler_config.response_adapter
+                                ):
+                                    total_chunks += 1
+                                    total_bytes += len(chunk)
+                                    yield chunk
+                            else:
+                                async for chunk in response.aiter_bytes():
+                                    total_chunks += 1
+                                    total_bytes += len(chunk)
+                                    yield chunk
+                else:
+                    # Prepare extensions for request ID tracking
+                    extensions = {}
+                    if request_context and hasattr(request_context, 'request_id'):
+                        extensions['request_id'] = request_context.request_id
+                    else:
+                        logger.warning(
+                            "streaming_request_missing_request_id",
+                            url=url,
+                            method=method,
+                            message="Skipping raw HTTP logging for this streaming request"
+                        )
+                    
+                    async with client.stream(
                         method=method,
                         url=url,
                         headers=headers,
                         content=body,
-                        timeout=httpx.Timeout(300.0),  # 5 minute timeout for streaming
-                    ) as response,
-                ):
-                    # Capture response headers to pass to client and context
-                    nonlocal response_headers
-                    response_headers = dict(response.headers)
-                    
-                    # Pass all response headers to the request context
-                    if request_context and hasattr(request_context, "metadata"):
-                        request_context.metadata["response_headers"] = response_headers
-                    
-                    # Check for error status
-                    if response.status_code >= 400:
-                        error_body = await response.aread()
-                        yield error_body
-                        return
+                        timeout=httpx.Timeout(300.0),
+                        extensions=extensions,
+                    ) as response:
+                        # Capture response headers to pass to client and context
+                        response_headers = dict(response.headers)
+                        
+                        # Pass all response headers to the request context
+                        if request_context and hasattr(request_context, "metadata"):
+                            request_context.metadata["response_headers"] = response_headers
+                        
+                        # Check for error status
+                        if response.status_code >= 400:
+                            error_body = await response.aread()
+                            yield error_body
+                            return
 
-                    # Stream the response
-                    if handler_config.response_adapter:
-                        # Process SSE events with adapter
-                        async for chunk in self._process_sse_events(
-                            response, handler_config.response_adapter
-                        ):
-                            total_chunks += 1
-                            total_bytes += len(chunk)
-                            yield chunk
-                    else:
-                        # Pass through raw chunks
-                        async for chunk in response.aiter_bytes():
-                            total_chunks += 1
-                            total_bytes += len(chunk)
-                            yield chunk
+                        # Stream the response
+                        if handler_config.response_adapter:
+                            async for chunk in self._process_sse_events(
+                                response, handler_config.response_adapter
+                            ):
+                                total_chunks += 1
+                                total_bytes += len(chunk)
+                                yield chunk
+                        else:
+                            async for chunk in response.aiter_bytes():
+                                total_chunks += 1
+                                total_bytes += len(chunk)
+                                yield chunk
+                    
 
                 # Update metrics if available
                 if request_context and hasattr(request_context, "metrics"):
