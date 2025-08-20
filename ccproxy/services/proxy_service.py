@@ -1,8 +1,8 @@
 """Refactored ProxyService - orchestrates proxy requests using injected services."""
 
 import time
-from collections.abc import Awaitable, Callable
-from typing import Any
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
@@ -12,6 +12,7 @@ from starlette.responses import Response, StreamingResponse
 from ccproxy.config.settings import Settings
 from ccproxy.core.http import BaseProxyClient
 from ccproxy.hooks import HookEvent, HookManager
+from ccproxy.hooks.base import HookContext
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.cache import ResponseCache
@@ -23,6 +24,9 @@ from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
 
+
+if TYPE_CHECKING:
+    from ccproxy.observability.context import RequestContext
 
 logger = structlog.get_logger(__name__)
 
@@ -131,14 +135,36 @@ class ProxyService:
         """
         start_time = time.time()
 
-        # Emit request started hook
+        # Get or create RequestContext
+        from ccproxy.observability.context import RequestContext
+
+        request_context = RequestContext.get_current()
+        if not request_context:
+            # Create a minimal context if not available
+            import uuid
+
+            request_context = RequestContext(
+                request_id=str(uuid.uuid4()),
+                start_time=start_time,
+                logger=logger,
+                metadata={
+                    "endpoint": endpoint,
+                    "method": method,
+                    "provider": provider,
+                    "plugin": plugin_name,
+                },
+            )
+
+        # Emit request started hook with context
         if self.hook_manager:
-            await self.hook_manager.emit(
+            await self._emit_hook_with_context(
                 HookEvent.REQUEST_STARTED,
+                request_context,
                 request=request,
                 provider=provider,
                 plugin=plugin_name,
-                data={"endpoint": endpoint, "method": method},
+                endpoint=endpoint,
+                method=method,
             )
 
         try:
@@ -149,29 +175,56 @@ class ProxyService:
             duration = time.time() - start_time
             status = getattr(response, "status_code", 200)
 
-            # Emit request completed hook
+            # Update request context with response info
+            request_context.metadata.update(
+                {
+                    "status_code": status,
+                    "duration_ms": duration * 1000,
+                    "duration_seconds": duration,
+                }
+            )
+
+            # Check if response is streaming and wrap if needed
+            if isinstance(response, StreamingResponse):
+                response = await self._wrap_streaming_with_hooks(
+                    response, request_context
+                )
+
+            # Emit request completed hook with context
             if self.hook_manager:
-                await self.hook_manager.emit(
+                await self._emit_hook_with_context(
                     HookEvent.REQUEST_COMPLETED,
-                    data={"duration": duration, "status": status},
+                    request_context,
                     request=request,
                     response=response,
                     provider=provider,
                     plugin=plugin_name,
+                    duration=duration,
+                    status=status,
                 )
 
             return response
 
         except Exception as e:
-            # Emit request failed hook
+            # Update context with error info
+            request_context.metadata.update(
+                {
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                }
+            )
+
+            # Emit request error hook with context
             if self.hook_manager:
-                await self.hook_manager.emit(
+                await self._emit_hook_with_context(
                     HookEvent.REQUEST_FAILED,
-                    error=e,
+                    request_context,
                     request=request,
                     provider=provider,
                     plugin=plugin_name,
-                    data={"endpoint": endpoint, "method": method},
+                    endpoint=endpoint,
+                    method=method,
+                    error=e,
                 )
             raise
 
@@ -205,6 +258,114 @@ class ProxyService:
         if streaming:
             return await self.connection_pool_manager.get_streaming_client(base_url)
         return await self.connection_pool_manager.get_client(base_url)
+
+    async def _emit_hook_with_context(
+        self,
+        event: HookEvent,
+        request_context: "RequestContext",
+        **extra_data: Any,
+    ) -> None:
+        """Emit a hook event with RequestContext in metadata.
+
+        Args:
+            event: The hook event to emit
+            request_context: The request context to include
+            **extra_data: Additional data to pass to the hook
+        """
+        if not self.hook_manager:
+            return
+
+        from datetime import datetime
+
+        # Create hook context with request context in metadata
+        context = HookContext(
+            event=event,
+            timestamp=datetime.utcnow(),
+            data={},  # Data will be in metadata for our use case
+            metadata={
+                "request_context": request_context,
+                **extra_data,
+            },
+        )
+
+        # Emit the hook event
+        await self.hook_manager.emit_with_context(context)
+
+    async def _wrap_streaming_with_hooks(
+        self,
+        response: StreamingResponse,
+        request_context: "RequestContext",
+    ) -> StreamingResponse:
+        """Wrap streaming response to emit chunk events.
+
+        Args:
+            response: The streaming response to wrap
+            request_context: The request context
+
+        Returns:
+            Wrapped streaming response that emits events
+        """
+        # Emit stream start event
+        if self.hook_manager:
+            await self._emit_hook_with_context(
+                HookEvent.PROVIDER_STREAM_START,
+                request_context,
+                stream_metadata={
+                    "start_time": time.time(),
+                    "content_type": response.media_type,
+                },
+            )
+
+        # Get the original iterator
+        original_iterator = response.body_iterator
+
+        # Create wrapped iterator
+        async def wrapped_iterator() -> AsyncIterator[bytes]:
+            """Wrap the stream iterator to emit events."""
+            chunks_sent = 0
+            total_bytes = 0
+
+            try:
+                async for chunk in original_iterator:
+                    # Ensure chunk is bytes
+                    if isinstance(chunk, (str, memoryview)):
+                        chunk = (
+                            chunk.encode() if isinstance(chunk, str) else bytes(chunk)
+                        )
+
+                    chunks_sent += 1
+                    total_bytes += len(chunk)
+
+                    # Emit chunk event (optional, controlled by settings)
+                    if self.hook_manager and self.settings.hooks.enable_chunk_events:
+                        await self._emit_hook_with_context(
+                            HookEvent.PROVIDER_STREAM_CHUNK,
+                            request_context,
+                            chunk_data=chunk,
+                        )
+
+                    yield chunk
+
+            finally:
+                # Emit stream end event
+                if self.hook_manager:
+                    await self._emit_hook_with_context(
+                        HookEvent.PROVIDER_STREAM_END,
+                        request_context,
+                        stream_metrics={
+                            "end_time": time.time(),
+                            "chunks_sent": chunks_sent,
+                            "total_bytes": total_bytes,
+                        },
+                    )
+
+        # Create new streaming response with wrapped iterator
+        return StreamingResponse(
+            wrapped_iterator(),
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+        )
 
     async def close(self) -> None:
         """Clean up resources on shutdown.

@@ -216,12 +216,58 @@ class ClaudeAPIAdapter(BaseAdapter):
             access_token=access_token,
         )
 
+        # Parse request body to extract model and other metadata
+        try:
+            request_data = json.loads(transformed_body) if transformed_body else {}
+        except json.JSONDecodeError:
+            request_data = {}
+
+        # Get or create RequestContext
+        from ccproxy.observability.context import RequestContext
+
+        request_context = RequestContext.get_current()
+        if request_context:
+            # Update existing context with claude_api specific metadata
+            request_context.metadata.update(
+                {
+                    "provider": "claude_api",
+                    "service_type": "claude_api",
+                    "endpoint": endpoint.rstrip("/").split("/")[-1]
+                    if endpoint
+                    else "messages",
+                    "model": request_data.get("model", "unknown"),
+                    "stream": is_streaming,
+                    "needs_conversion": needs_conversion,
+                }
+            )
+        else:
+            # Create new context if none exists (shouldn't happen with ProxyService)
+            import time
+            import uuid
+
+            request_context = RequestContext(
+                request_id=str(uuid.uuid4()),
+                start_time=time.time(),
+                logger=self.logger,
+                metadata={
+                    "provider": "claude_api",
+                    "service_type": "claude_api",
+                    "endpoint": endpoint.rstrip("/").split("/")[-1]
+                    if endpoint
+                    else "messages",
+                    "model": request_data.get("model", "unknown"),
+                    "stream": is_streaming,
+                    "needs_conversion": needs_conversion,
+                },
+            )
+
         self.logger.info(
             "claude_api_request",
             endpoint=endpoint,
             target_url=target_url,
             needs_conversion=needs_conversion,
             is_streaming=is_streaming,
+            model=request_context.metadata.get("model"),
         )
 
         # Get streaming handler if needed
@@ -229,8 +275,8 @@ class ClaudeAPIAdapter(BaseAdapter):
         if is_streaming and self.proxy_service:
             streaming_handler = getattr(self.proxy_service, "streaming_handler", None)
 
-        # Execute request
-        return await self._http_handler.handle_request(
+        # Execute request with proper request_context
+        response = await self._http_handler.handle_request(
             method=method,
             url=target_url,
             headers=headers,
@@ -238,7 +284,123 @@ class ClaudeAPIAdapter(BaseAdapter):
             handler_config=handler_config,
             is_streaming=is_streaming,
             streaming_handler=streaming_handler,
-            request_context={},
+            request_context=request_context,  # Pass the actual RequestContext object
+        )
+
+        # For streaming responses, wrap to accumulate chunks and extract headers
+        if is_streaming and isinstance(response, StreamingResponse):
+            return await self._wrap_streaming_response(response, request_context)
+
+        return response
+
+    async def _wrap_streaming_response(
+        self, response: StreamingResponse, request_context: Any
+    ) -> StreamingResponse:
+        """Wrap streaming response to accumulate chunks and extract headers.
+
+        Args:
+            response: The streaming response to wrap
+            request_context: The request context to update
+
+        Returns:
+            Wrapped streaming response
+        """
+        from collections.abc import AsyncIterator
+
+        # Get the original iterator
+        original_iterator = response.body_iterator
+
+        # Create accumulator for chunks
+        chunks: list[bytes] = []
+        headers_extracted = False
+
+        # Create metrics collector for usage extraction
+        from ccproxy.utils.streaming_metrics import StreamingMetricsCollector
+        collector = StreamingMetricsCollector(request_id=request_context.request_id)
+        
+        async def wrapped_iterator() -> AsyncIterator[bytes]:
+            """Wrap the stream iterator to accumulate chunks."""
+            nonlocal headers_extracted
+            
+            async for chunk in original_iterator:
+                # Extract headers on first chunk (after streaming has started)
+                if not headers_extracted:
+                    headers_extracted = True
+                    if "response_headers" in request_context.metadata:
+                        response_headers = request_context.metadata["response_headers"]
+                        
+                        # Extract relevant headers and put them directly in metadata for access_logger
+                        headers_for_log = {}
+                        for k, v in response_headers.items():
+                            k_lower = k.lower()
+                            # Include Anthropic headers and request IDs
+                            if k_lower.startswith('anthropic-ratelimit'):
+                                # Put rate limit headers directly in metadata for access_logger
+                                request_context.metadata[k_lower] = v
+                                headers_for_log[k] = v
+                            elif k_lower == 'anthropic-request-id':
+                                # Also store request ID
+                                request_context.metadata["anthropic_request_id"] = v
+                                headers_for_log[k] = v
+                            elif 'request' in k_lower and 'id' in k_lower:
+                                headers_for_log[k] = v
+                        
+                        # Also store the headers dictionary for display
+                        request_context.metadata["headers"] = headers_for_log
+                        
+                        self.logger.debug(
+                            "claude_api_headers_extracted",
+                            headers_count=len(headers_for_log),
+                            headers=headers_for_log,
+                            direct_metadata_keys=[k for k in request_context.metadata.keys() if 'anthropic' in k.lower()],
+                        )
+                
+                if isinstance(chunk, (str, memoryview)):
+                    chunk = chunk.encode() if isinstance(chunk, str) else bytes(chunk)
+                chunks.append(chunk)
+                
+                # Process this chunk for usage data
+                chunk_str = chunk.decode("utf-8", errors="ignore")
+                is_final = collector.process_chunk(chunk_str)
+                
+                # If we got final metrics, update context
+                if is_final:
+                    usage_metrics = collector.get_metrics()
+                    if usage_metrics:
+                        # Calculate cost if we have model info
+                        model = request_context.metadata.get("model")
+                        if model:
+                            cost_usd = collector.calculate_final_cost(model)
+                        else:
+                            cost_usd = usage_metrics.get("cost_usd")
+                        
+                        # Update request context with usage data
+                        request_context.metadata.update({
+                            "tokens_input": usage_metrics.get("tokens_input", 0),
+                            "tokens_output": usage_metrics.get("tokens_output", 0),
+                            "tokens_total": (
+                                (usage_metrics.get("tokens_input") or 0) +
+                                (usage_metrics.get("tokens_output") or 0)
+                            ),
+                            "cost_usd": cost_usd or 0.0,
+                            "cache_read_tokens": usage_metrics.get("cache_read_tokens"),
+                            "cache_write_tokens": usage_metrics.get("cache_write_tokens"),
+                        })
+                
+                yield chunk
+
+            # Mark that stream processing is complete
+            request_context.metadata.update({
+                "stream_accumulated": True,
+                "stream_chunks_count": len(chunks),
+            })
+
+        # Create new streaming response with wrapped iterator
+        return StreamingResponse(
+            wrapped_iterator(),
+            status_code=response.status_code,
+            headers=dict(response.headers) if hasattr(response, "headers") else {},
+            media_type=response.media_type,
         )
 
     async def handle_streaming(

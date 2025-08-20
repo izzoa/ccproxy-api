@@ -77,6 +77,9 @@ class StreamingHandler:
         - Processes SSE events with adapter if provided
         - Returns StreamingResponseWithLogging wrapper
         """
+        
+        # Store response headers to pass to client
+        response_headers: dict[str, str] = {}
 
         async def stream_generator() -> AsyncGenerator[bytes, None]:
             """Generate streaming response chunks."""
@@ -96,6 +99,14 @@ class StreamingHandler:
                         timeout=httpx.Timeout(300.0),  # 5 minute timeout for streaming
                     ) as response,
                 ):
+                    # Capture response headers to pass to client and context
+                    nonlocal response_headers
+                    response_headers = dict(response.headers)
+                    
+                    # Pass all response headers to the request context
+                    if request_context and hasattr(request_context, "metadata"):
+                        request_context.metadata["response_headers"] = response_headers
+                    
                     # Check for error status
                     if response.status_code >= 400:
                         error_body = await response.aread()
@@ -149,15 +160,20 @@ class StreamingHandler:
                 error_msg = json.dumps({"error": str(e)}).encode()
                 yield error_msg
 
-        # Return streaming response
+        # Merge response headers with necessary streaming headers
+        final_headers = {
+            **response_headers,  # Include all headers from upstream response
+            "Cache-Control": "no-cache",
+            "X-Request-ID": request_context.request_id if request_context else "",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Content-Type": "text/event-stream",  # Ensure correct content type
+        }
+        
+        # Return streaming response with all headers
         return StreamingResponseWithLogging(
             stream_generator(),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Request-ID": request_context.request_id if request_context else "",
-                "X-Accel-Buffering": "no",  # Disable nginx buffering
-            },
+            headers=final_headers,
             request_context=request_context,
             metrics=self.metrics,
         )

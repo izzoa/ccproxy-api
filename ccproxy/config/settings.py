@@ -40,6 +40,17 @@ class ConfigurationError(Exception):
     pass
 
 
+class LoggingHooksSettings(BaseModel):
+    """Settings for logging hooks migration."""
+
+    use_hook_logging: bool = True
+    enable_access_logging: bool = True
+    enable_content_logging: bool = True
+    enable_streaming_logging: bool = True
+    parallel_run_mode: bool = False
+    disable_middleware_during_parallel: bool = False
+
+
 class HooksSettings(BaseModel):
     """Hook system configuration."""
 
@@ -48,6 +59,8 @@ class HooksSettings(BaseModel):
     logging_enabled: bool = True
     analytics_enabled: bool = False
     analytics_batch_size: int = 100
+    enable_chunk_events: bool = False  # For streaming chunk events
+    logging: LoggingHooksSettings = Field(default_factory=LoggingHooksSettings)
 
 
 # PoolSettings class removed - connection pooling functionality has been removed

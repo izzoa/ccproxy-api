@@ -12,8 +12,6 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from ccproxy.core.async_task_manager import create_fire_and_forget_task
-
 
 if TYPE_CHECKING:
     from ccproxy.observability.context import RequestContext
@@ -330,7 +328,6 @@ async def _store_access_log(
             "access_log_duckdb_error",
             error=str(e),
             request_id=log_data.get("request_id"),
-            exc_info=e,
         )
 
 
@@ -343,7 +340,6 @@ async def _write_to_storage(storage: Any, data: dict[str, Any]) -> None:
             "duckdb_store_error",
             error=str(e),
             request_id=data.get("request_id"),
-            exc_info=e,
         )
 
 
@@ -384,7 +380,6 @@ async def _emit_access_event(event_type: str, data: dict[str, Any]) -> None:
             event_type=event_type,
             error=str(e),
             request_id=data.get("request_id"),
-            exc_info=e,
         )
 
 
@@ -432,6 +427,8 @@ def log_request_start(
     # Emit SSE event for real-time dashboard updates
     # Note: This is a synchronous function, so we schedule the async emission
     try:
+        import asyncio
+
         from ccproxy.observability.sse_events import emit_sse_event
 
         # Create event data for SSE
@@ -448,11 +445,7 @@ def log_request_start(
         sse_data = {k: v for k, v in sse_data.items() if v is not None}
 
         # Schedule async event emission
-        create_fire_and_forget_task(
-            emit_sse_event("request_start", sse_data),
-            name="sse_request_start",
-            creator="access_logger",
-        )
+        asyncio.create_task(emit_sse_event("request_start", sse_data))
 
     except Exception as e:
         # Log error but don't fail the request
@@ -461,5 +454,4 @@ def log_request_start(
             event_type="request_start",
             error=str(e),
             request_id=request_id,
-            exc_info=e,
         )

@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, FastAPI
 from fastapi.staticfiles import StaticFiles
 from structlog import get_logger
@@ -34,7 +35,6 @@ from ccproxy.core.http_client import close_shared_http_client
 from ccproxy.core.logging import setup_logging
 from ccproxy.hooks import HookManager, HookRegistry
 from ccproxy.hooks.events import HookEvent
-from ccproxy.hooks.implementations import AnalyticsHook, LoggingHook, MetricsHook
 from ccproxy.observability import get_metrics
 from ccproxy.utils.models_provider import get_models_list
 from ccproxy.utils.startup_helpers import (
@@ -181,45 +181,6 @@ async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
     hook_registry = HookRegistry()
     hook_manager = HookManager(hook_registry)
 
-    # Register built-in hooks based on settings
-    if settings.hooks.metrics_enabled:
-        try:
-            prometheus_metrics = get_metrics()
-            metrics_hook = MetricsHook(prometheus_metrics)
-            hook_registry.register(metrics_hook)
-            logger.debug("metrics_hook_registered")
-        except Exception as e:
-            logger.error(
-                "metrics_hook_registration_failed",
-                error=str(e),
-                exc_info=e,
-            )
-
-    if settings.hooks.logging_enabled:
-        try:
-            logging_hook = LoggingHook()
-            hook_registry.register(logging_hook)
-            logger.debug("logging_hook_registered")
-        except Exception as e:
-            logger.error(
-                "logging_hook_registration_failed",
-                error=str(e),
-                exc_info=e,
-            )
-
-    if settings.hooks.analytics_enabled:
-        try:
-            analytics_hook = AnalyticsHook(
-                batch_size=settings.hooks.analytics_batch_size
-            )
-            hook_registry.register(analytics_hook)
-            logger.debug("analytics_hook_registered")
-        except Exception as e:
-            logger.error(
-                "analytics_hook_registration_failed",
-                error=str(e),
-                exc_info=e,
-            )
 
     # Load plugin hooks from plugin registry
     if hasattr(app.state, "proxy_service"):

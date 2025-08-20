@@ -67,6 +67,29 @@ class HookManager:
                 self._logger.error(f"Hook {hook.name} failed for {event}", error=str(e))
                 # Continue executing other hooks
 
+    async def emit_with_context(self, context: HookContext) -> None:
+        """Emit an event using a pre-built HookContext.
+
+        This is useful when you need to build the context with specific metadata
+        before emitting the event.
+
+        Args:
+            context: The HookContext to emit
+        """
+        hooks = self._registry.get_hooks(context.event)
+        if not hooks:
+            return
+
+        # Execute all hooks, catching errors
+        for hook in hooks:
+            try:
+                await self._execute_hook(hook, context)
+            except Exception as e:
+                self._logger.error(
+                    f"Hook {hook.name} failed for {context.event}", error=str(e)
+                )
+                # Continue executing other hooks
+
     async def _execute_hook(self, hook: Hook, context: HookContext) -> None:
         """Execute a single hook with proper async/sync handling.
 
