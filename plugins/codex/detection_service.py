@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import socket
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -168,35 +169,39 @@ class CodexDetectionService:
             # Wait for server to start
             await asyncio.sleep(0.5)
 
-            # Execute Codex CLI with proxy
-            env = {
-                **dict(os.environ),
-                "OPENAI_BASE_URL": f"http://127.0.0.1:{port}/backend-api/codex",
-            }
+            stdout, stderr = b"", b""
+            with tempfile.TemporaryDirectory() as temp_home:
+                # Execute Codex CLI with proxy
+                env = {
+                    **dict(os.environ),
+                    "OPENAI_BASE_URL": f"http://127.0.0.1:{port}/backend-api/codex",
+                    "OPENAI_API_KEY": "dummy-key-for-detection",
+                    "HOME": temp_home,
+                }
 
-            # Get codex command from CLI service
-            cli_info = self._cli_service.get_cli_info("codex")
-            if not cli_info["is_available"] or not cli_info["command"]:
-                raise FileNotFoundError("Codex CLI not found for header detection")
+                # Get codex command from CLI service
+                cli_info = self._cli_service.get_cli_info("codex")
+                if not cli_info["is_available"] or not cli_info["command"]:
+                    raise FileNotFoundError("Codex CLI not found for header detection")
 
-            # Prepare command
-            cmd = cli_info["command"] + ["exec", "test"]
+                # Prepare command
+                cmd = cli_info["command"] + ["exec", "test"]
 
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            # Wait for process with timeout
-            try:
-                await asyncio.wait_for(process.wait(), timeout=300)
-            except TimeoutError:
-                process.kill()
-                await process.wait()
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    env=env,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                # Wait for process with timeout
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=300)
+                except TimeoutError:
+                    process.kill()
+                    await process.wait()
 
-            stdout = await process.stdout.read() if process.stdout else b""
-            stderr = await process.stderr.read() if process.stderr else b""
+                stdout = await process.stdout.read() if process.stdout else b""
+                stderr = await process.stderr.read() if process.stderr else b""
 
             # Stop server
             server.should_exit = True
