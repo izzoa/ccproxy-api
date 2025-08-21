@@ -1,6 +1,7 @@
 """ASGI middleware for logging raw HTTP data from client requests."""
 
 from collections.abc import Callable
+from typing import Any
 
 from .logger import RawHTTPLogger
 
@@ -8,19 +9,28 @@ from .logger import RawHTTPLogger
 class RawHTTPLoggingMiddleware:
     """ASGI middleware to log raw HTTP data without buffering."""
 
-    def __init__(self, app: Callable, logger: RawHTTPLogger = None):
+    def __init__(
+        self, app: Callable[..., Any], logger: RawHTTPLogger | None = None
+    ) -> None:
         self.app = app
         self.logger = logger or RawHTTPLogger()
 
-    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+    async def __call__(
+        self,
+        scope: dict[str, Any],
+        receive: Callable[[], Any],
+        send: Callable[[dict[str, Any]], Any],
+    ) -> None:
         """Process ASGI request with raw logging."""
         # Only handle HTTP requests
         if scope["type"] != "http":
-            return await self.app(scope, receive, send)
+            await self.app(scope, receive, send)
+            return
 
         # Skip if logging is disabled
         if not self.logger.should_log():
-            return await self.app(scope, receive, send)
+            await self.app(scope, receive, send)
+            return
 
         # Check if path should be logged based on include/exclude rules
         path = scope.get("path", "/")
@@ -29,15 +39,15 @@ class RawHTTPLoggingMiddleware:
             if any(
                 path.startswith(exclude) for exclude in self.logger.config.exclude_paths
             ):
-                return await self.app(scope, receive, send)
+                await self.app(scope, receive, send)
+                return
 
             # Then check include_paths (if specified, only log included paths)
-            if self.logger.config.include_paths:
-                if not any(
-                    path.startswith(include)
-                    for include in self.logger.config.include_paths
-                ):
-                    return await self.app(scope, receive, send)
+            if self.logger.config.include_paths and not any(
+                path.startswith(include) for include in self.logger.config.include_paths
+            ):
+                await self.app(scope, receive, send)
+                return
 
         # Extract request ID from headers or generate one
         request_id = self._get_request_id(scope)
@@ -54,24 +64,26 @@ class RawHTTPLoggingMiddleware:
         # Forward to app
         await self.app(scope, wrapped_receive, wrapped_send)
 
-    def _get_request_id(self, scope: dict) -> str:
+    def _get_request_id(self, scope: dict[str, Any]) -> str:
         """Extract request ID from ASGI scope or headers."""
         # First check ASGI extensions (set by RequestIDMiddleware)
         if "extensions" in scope and "request_id" in scope["extensions"]:
-            return scope["extensions"]["request_id"]
+            return str(scope["extensions"]["request_id"])
 
         # Fallback: Look for request ID in headers
         headers = dict(scope.get("headers", []))
         for header_name in [b"x-request-id", b"x-correlation-id"]:
             if header_name in headers:
-                return headers[header_name].decode("utf-8")
+                return str(headers[header_name].decode("utf-8"))
 
         # Last resort: Generate a UUID (consistent with RequestIDMiddleware)
         import uuid
 
         return str(uuid.uuid4())
 
-    async def _log_request_headers(self, scope: dict, request_id: str) -> None:
+    async def _log_request_headers(
+        self, scope: dict[str, Any], request_id: str
+    ) -> None:
         """Log the initial request headers."""
         # Build raw request line
         method = scope.get("method", "GET")
@@ -107,11 +119,13 @@ class RawHTTPLoggingMiddleware:
 
         await self.logger.log_client_request(request_id, raw)
 
-    def _wrap_receive(self, receive: Callable, request_id: str) -> Callable:
+    def _wrap_receive(
+        self, receive: Callable[[], Any], request_id: str
+    ) -> Callable[[], Any]:
         """Wrap receive to capture request body chunks."""
 
-        async def wrapped() -> dict:
-            message = await receive()
+        async def wrapped() -> dict[str, Any]:
+            message: dict[str, Any] = await receive()
 
             # Log request body chunks
             if message["type"] == "http.request":
@@ -123,11 +137,13 @@ class RawHTTPLoggingMiddleware:
 
         return wrapped
 
-    def _wrap_send(self, send: Callable, request_id: str) -> Callable:
+    def _wrap_send(
+        self, send: Callable[[dict[str, Any]], Any], request_id: str
+    ) -> Callable[[dict[str, Any]], Any]:
         """Wrap send to capture response chunks."""
         logged_headers = False
 
-        async def wrapped(message: dict) -> None:
+        async def wrapped(message: dict[str, Any]) -> None:
             nonlocal logged_headers
 
             if message["type"] == "http.response.start":

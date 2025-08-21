@@ -1,317 +1,71 @@
-"""Codex provider plugin implementation."""
+"""Codex provider plugin v2 implementation."""
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
-
-if TYPE_CHECKING:
-    pass
-from fastapi import APIRouter
-from pydantic import BaseModel
-
-from ccproxy.auth.openai.credentials import OpenAITokenManager
-from ccproxy.core.services import CoreServices
-from ccproxy.models.provider import ProviderConfig
-from ccproxy.plugins.protocol import (
-    HealthCheckResult,
-    ProviderPlugin,
+from ccproxy.plugins import (
+    PluginContext,
+    PluginManifest,
+    ProviderPluginFactory,
+    ProviderPluginRuntime,
+    RouteSpec,
 )
-from ccproxy.services.adapters.base import BaseAdapter
-from ccproxy.utils.binary_resolver import BinaryResolver
-
-from .adapter import CodexAdapter
-from .config import CodexSettings
-from .detection_service import CodexDetectionService
-from .health import codex_health_check
-from .routes import router as codex_router
-from .tasks import CodexDetectionRefreshTask
+from plugins.codex.adapter import CodexAdapter
+from plugins.codex.config import CodexSettings
+from plugins.codex.detection_service import CodexDetectionService
+from plugins.codex.routes import router as codex_router
 
 
 logger = structlog.get_logger(__name__)
 
 
-class Plugin(ProviderPlugin):
-    """Codex provider plugin."""
+class CodexRuntime(ProviderPluginRuntime):
+    """Runtime for Codex provider plugin."""
 
-    def __init__(self) -> None:
-        self._name = "codex"
-        self._version = "1.0.0"
-        self._router_prefix = "/api/codex"
-        self._adapter: CodexAdapter | None = None
-        self._config: CodexSettings | None = None
-        self._services: CoreServices | None = None
-        self._detection_service: CodexDetectionService | None = None
-        self._auth_manager: OpenAITokenManager | None = None
+    def __init__(self, manifest: PluginManifest):
+        """Initialize runtime."""
+        super().__init__(manifest)
+        self.config: CodexSettings | None = None
+        self.auth_manager: Any | None = None
 
-    @property
-    def name(self) -> str:
-        return self._name
+    async def _on_initialize(self) -> None:
+        """Initialize the Codex provider plugin."""
+        if not self.context:
+            raise RuntimeError("Context not set")
 
-    @property
-    def version(self) -> str:
-        return self._version
+        # Get configuration
+        config = self.context.get("config")
+        if not isinstance(config, CodexSettings):
+            logger.warning("codex_plugin_no_config", plugin=self.name)
+            return
+        self.config = config
 
-    @property
-    def dependencies(self) -> list[str]:
-        """List of plugin names this plugin depends on."""
-        return []  # No dependencies
+        # Get auth manager from context
+        self.auth_manager = self.context.get("credentials_manager")
 
-    @property
-    def router_prefix(self) -> str:
-        return self._router_prefix
+        # Call parent to initialize adapter and detection service
+        await super()._on_initialize()
 
-    async def initialize(self, services: CoreServices) -> None:
-        """Initialize plugin with shared services."""
-        self._services = services
-
-        # Load plugin-specific configuration from plugins dictionary
-        plugin_config = services.get_plugin_config(self.name)
-
-        # Use Pydantic model defaults if no config provided
-        self._config = CodexSettings.model_validate(plugin_config)
-
-        # Set up authentication manager first
-        from ccproxy.auth.openai import OpenAITokenManager
-
-        auth_manager = OpenAITokenManager()
-        logger.debug(
-            "codex_plugin_auth_setup",
-            auth_manager_type=type(auth_manager).__name__,
-            storage_location=auth_manager.get_storage_location(),
+        logger.info(
+            "codex_plugin_initialized",
+            plugin=self.name,
+            has_adapter=self.adapter is not None,
+            has_detection=self.detection_service is not None,
+            has_auth=self.auth_manager is not None,
         )
-
-        # Check if we have valid credentials
-        has_creds = await auth_manager.has_credentials()
-        if has_creds:
-            token = await auth_manager.get_valid_token()
-            logger.debug(
-                "codex_plugin_auth_status",
-                has_credentials=True,
-                has_valid_token=bool(token),
-                token_preview=token[:20] + "..." if token else None,
-            )
-        else:
-            logger.warning(
-                "codex_plugin_no_auth",
-                msg="No OpenAI credentials found. Run 'ccproxy auth login --provider openai' to authenticate.",
-            )
-
-        self._auth_manager = auth_manager  # Store for health checks
-
-        # Set up detection service for the adapter
-        from .detection_service import CodexDetectionService
-
-        detection_service = CodexDetectionService(services.settings)
-
-        # Initialize detection service to capture Codex CLI headers
-        logger.debug("codex_plugin_initializing_detection")
-        try:
-            await detection_service.initialize_detection()
-
-            # Log Codex CLI status
-            version = detection_service.get_version()
-            binary_path = detection_service.get_binary_path()
-
-            if binary_path:
-                logger.debug(
-                    "codex_cli_available",
-                    status="available",
-                    version=version,
-                    binary_path=binary_path,
-                )
-            else:
-                logger.warning(
-                    "codex_cli_not_found",
-                    status="not_found",
-                    msg="Codex CLI not found in PATH or common locations",
-                )
-
-            logger.debug(
-                "codex_plugin_detection_initialized",
-                has_cached_data=detection_service.get_cached_data() is not None,
-                version=version,
-            )
-        except Exception as e:
-            logger.warning(
-                "codex_plugin_detection_initialization_failed",
-                error=str(e),
-                msg="Using fallback Codex instructions",
-                exc_info=e,
-            )
-
-        self._detection_service = detection_service  # Store for health checks
-
-        # Now create the adapter with all required dependencies
-        self._adapter = CodexAdapter(
-            proxy_service=services.proxy_service,  # Use proxy service from core services
-            auth_manager=auth_manager,
-            detection_service=detection_service,
-            http_client=services.http_client,
-            logger=logger.bind(plugin=self.name),
-        )
-        logger.debug("codex_plugin_adapter_created", adapter_has_all_deps=True)
-
-    def get_summary(self) -> dict[str, Any]:
-        """Get plugin summary for consolidated logging."""
-        summary: dict[str, Any] = {
-            "router_prefix": self.router_prefix,
-            "models": "auto",  # Codex discovers models dynamically
-        }
-
-        # Add basic authentication status (detailed auth info requires async call)
-        if self._auth_manager:
-            summary["auth"] = "configured"
-        else:
-            summary["auth"] = "not_configured"
-
-        # Add CLI information using common format
-        if self._detection_service:
-            cli_version = self._detection_service.get_version()
-            cli_path = self._detection_service.get_cli_path()
-
-            # Create CLI info using common format
-            resolver = BinaryResolver()
-            cli_info = resolver.get_cli_info("codex", "@openai/codex", cli_version)
-
-            # Override with actual detection service results if available
-            if cli_path:
-                cli_info["command"] = cli_path
-                cli_info["is_available"] = True
-                if isinstance(cli_path, list) and len(cli_path) > 1:
-                    cli_info["source"] = "package_manager"
-                    cli_info["package_manager"] = cli_path[0]
-                    cli_info["path"] = None
-                else:
-                    cli_info["source"] = "path"
-                    cli_info["path"] = (
-                        cli_path[0] if isinstance(cli_path, list) else cli_path
-                    )
-                    cli_info["package_manager"] = None
-
-            # Store CLI info in a structured way for dynamic logging
-            summary["cli_info"] = {"codex": cli_info}
-
-        return summary
-
-    async def get_auth_summary(self) -> dict[str, Any]:
-        """Get detailed authentication status (async version for use in plugin manager)."""
-        if not self._auth_manager:
-            return {"auth": "not_configured"}
-
-        try:
-            auth_status = await self._auth_manager.get_auth_status()
-            summary = {"auth": "not_configured"}
-
-            if auth_status.get("auth_configured"):
-                if auth_status.get("token_available"):
-                    summary["auth"] = "authenticated"
-                    if "time_remaining" in auth_status:
-                        summary["auth_expires"] = auth_status["time_remaining"]
-                    if "token_expired" in auth_status:
-                        summary["auth_expired"] = auth_status["token_expired"]
-                else:
-                    summary["auth"] = "no_token"
-            else:
-                summary["auth"] = "not_configured"
-
-            return summary
-        except Exception as e:
-            logger.warning("codex_auth_status_error", error=str(e), exc_info=e)
-            return {"auth": "status_error"}
-
-    async def shutdown(self) -> None:
-        """Cleanup on shutdown."""
-        if self._adapter:
-            await self._adapter.cleanup()
-
-    def create_adapter(self) -> BaseAdapter:
-        if not self._adapter:
-            raise RuntimeError("Plugin not initialized")
-        return self._adapter
-
-    def create_config(self) -> ProviderConfig:
-        if not self._config:
-            raise RuntimeError("Plugin not initialized")
-        return self._config
-
-    async def validate(self) -> bool:
-        """Check if Codex configuration is valid."""
-        # Always return True - actual validation happens during initialization
-        # The plugin system calls validate() before initialize(), so we can't
-        # check config here since it hasn't been loaded yet
-        # The detection service will handle CLI availability checking
-        return True
-
-    def get_routes(self) -> APIRouter | None:
-        """Return Codex-specific routes."""
-        # Return the router defined in routes.py
-        return codex_router
-
-    async def health_check(self) -> HealthCheckResult:
-        """Perform health check for Codex plugin."""
-        return await codex_health_check(
-            self._config, self._detection_service, self._auth_manager
-        )
-
-    def get_scheduled_tasks(self) -> list[dict[str, Any]] | None:  # type: ignore[override]
-        """Get scheduled task definitions for Codex plugin.
-
-        Returns:
-            List with detection refresh task or None if detection service not available
-        """
-        if not self._detection_service:
-            return None
-
-        # Create the task definition with detection_service
-        task_def = {
-            "task_name": f"codex_detection_refresh_{self.name}",
-            "task_type": "codex_detection_refresh",
-            "task_class": CodexDetectionRefreshTask,
-            "interval_seconds": 3600.0,  # Refresh every hour
-            "enabled": True,
-            "detection_service": self._detection_service,
-            "skip_initial_run": True,
-        }
-
-        return [task_def]
-
-    def get_config_class(self) -> type[BaseModel] | None:
-        """Get the Pydantic configuration model for this plugin.
-
-        Returns:
-            CodexSettings class for plugin configuration
-        """
-        return CodexSettings
-
-    async def get_oauth_client(self) -> Any:
-        """Get OAuth client for Codex authentication.
-
-        Returns:
-            OpenAI OAuth client instance configured for Codex
-        """
-        from ccproxy.auth.openai import OpenAIOAuthClient
-
-        if not self._config:
-            raise RuntimeError("Plugin not initialized")
-
-        return OpenAIOAuthClient(self._config, self._auth_manager)
 
     async def get_profile_info(self) -> dict[str, Any] | None:
-        """Get Codex-specific profile information from stored credentials.
-
-        Returns:
-            Dictionary containing Codex-specific profile information
-        """
+        """Get Codex-specific profile information from stored credentials."""
         try:
             import base64
             import json
 
             # Get access token from stored credentials
-            if not self._auth_manager:
+            if not self.auth_manager:
                 return None
 
-            access_token = await self._auth_manager.get_valid_token()
+            access_token = await self.auth_manager.get_access_token()
             if not access_token:
                 return None
 
@@ -369,11 +123,138 @@ class Plugin(ProviderPlugin):
             logger.debug(f"Failed to get Codex profile info: {e}")
             return None
 
-    def get_auth_commands(self) -> list[Any] | None:
-        """Get Codex-specific auth command extensions.
+    async def get_auth_summary(self) -> dict[str, Any]:
+        """Get detailed authentication status."""
+        if not self.auth_manager:
+            return {"auth": "not_configured"}
 
-        Returns:
-            List of auth command definitions or None
-        """
-        # Codex plugin doesn't need custom auth commands for now
-        return None
+        try:
+            auth_status = await self.auth_manager.get_auth_status()
+            summary = {"auth": "not_configured"}
+
+            if auth_status.get("auth_configured"):
+                if auth_status.get("token_available"):
+                    summary["auth"] = "authenticated"
+                    if "time_remaining" in auth_status:
+                        summary["auth_expires"] = auth_status["time_remaining"]
+                    if "token_expired" in auth_status:
+                        summary["auth_expired"] = auth_status["token_expired"]
+                else:
+                    summary["auth"] = "no_token"
+            else:
+                summary["auth"] = "not_configured"
+
+            return summary
+        except Exception as e:
+            logger.warning("codex_auth_status_error", error=str(e), exc_info=e)
+            return {"auth": "status_error"}
+
+    async def _get_health_details(self) -> dict[str, Any]:
+        """Get health check details."""
+        details = await super()._get_health_details()
+
+        # Add Codex-specific details
+        if self.config:
+            details.update(
+                {
+                    "base_url": self.config.base_url,
+                    "supports_streaming": self.config.supports_streaming,
+                    "models": self.config.models,
+                }
+            )
+
+        # Add authentication status
+        if self.auth_manager:
+            try:
+                auth_status = await self.auth_manager.get_auth_status()
+                details["auth_configured"] = auth_status.get("auth_configured", False)
+                details["token_available"] = auth_status.get("token_available", False)
+            except Exception as e:
+                details["auth_error"] = str(e)
+
+        return details
+
+
+class CodexFactory(ProviderPluginFactory):
+    """Factory for Codex provider plugin."""
+
+    def __init__(self) -> None:
+        """Initialize factory with manifest."""
+        # Create manifest with static declarations
+        manifest = PluginManifest(
+            name="codex",
+            version="1.0.0",
+            description="OpenAI Codex provider plugin with OAuth authentication and format conversion",
+            is_provider=True,
+            config_class=CodexSettings,
+            dependencies=[],  # No dependencies
+            routes=[
+                RouteSpec(
+                    router=codex_router,
+                    prefix="/api/codex",
+                    tags=["provider", "codex"],
+                ),
+            ],
+            oauth_provider_factory=self._create_oauth_provider,
+            token_manager_factory=self._create_token_manager,
+        )
+
+        # Initialize with manifest
+        super().__init__(manifest)
+
+    def _create_oauth_provider(self) -> Any:
+        """Create OAuth provider for registry."""
+        from plugins.codex.auth.oauth import CodexOAuthProvider
+
+        return CodexOAuthProvider()
+
+    def _create_token_manager(self) -> Any:
+        """Create token manager for Codex."""
+        from plugins.codex.auth.manager import CodexTokenManager
+
+        return CodexTokenManager()
+
+    def create_runtime(self) -> CodexRuntime:
+        """Create runtime instance."""
+        return CodexRuntime(self.manifest)
+
+    def create_adapter(self, context: PluginContext) -> CodexAdapter:
+        """Create the Codex adapter."""
+        proxy_service = context.get("proxy_service")
+        auth_manager = context.get("credentials_manager")
+        detection_service = context.get("detection_service")
+        http_client = context.get("http_client")
+        logger_instance = context.get("logger")
+
+        if not proxy_service:
+            raise RuntimeError("ProxyService is required for Codex adapter")
+        if not auth_manager:
+            raise RuntimeError("Auth manager is required for Codex adapter")
+        if not detection_service:
+            raise RuntimeError("Detection service is required for Codex adapter")
+
+        return CodexAdapter(
+            proxy_service=proxy_service,
+            auth_manager=auth_manager,
+            detection_service=detection_service,
+            http_client=http_client,
+            logger=logger_instance,
+        )
+
+    def create_detection_service(self, context: PluginContext) -> CodexDetectionService:
+        """Create the Codex detection service."""
+        settings = context.get("settings")
+        if not settings:
+            raise RuntimeError("Settings are required for Codex detection service")
+
+        return CodexDetectionService(settings)
+
+    def create_credentials_manager(self, context: PluginContext) -> Any:
+        """Create the Codex credentials manager."""
+        from plugins.codex.auth.manager import CodexTokenManager
+
+        return CodexTokenManager()
+
+
+# Export the factory instance
+factory = CodexFactory()

@@ -606,7 +606,6 @@ class TestSchedulerFastAPIIntegration:
                 "ccproxy.observability.stats_printer.get_stats_collector"
             ) as mock_stats,
             patch("ccproxy.pricing.updater.PricingUpdater") as mock_pricing,
-            patch("ccproxy.services.credentials.CredentialsManager") as mock_creds,
         ):
             # Mock settings to return our test configuration
             mock_get_settings.return_value = settings

@@ -31,6 +31,7 @@ class ClaudeAPIRequestTransformer:
         headers: dict[str, str],
         session_id: str = "",
         access_token: str | None = None,
+        **kwargs: Any,
     ) -> dict[str, str]:
         """Transform request headers.
 
@@ -38,12 +39,25 @@ class ClaudeAPIRequestTransformer:
 
         Args:
             headers: Original request headers
+            session_id: Optional session ID
+            access_token: Optional access token
+            **kwargs: Additional parameters
 
         Returns:
             Transformed headers with Claude CLI headers injected
         """
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
+
+        # Debug logging
+        logger.debug(
+            "transform_headers_called",
+            has_access_token=access_token is not None,
+            access_token_length=len(access_token) if access_token else 0,
+            header_count=len(headers),
+            has_x_api_key="x-api-key" in headers,
+            has_authorization="Authorization" in headers,
+        )
 
         transformed = headers.copy()
 
@@ -100,6 +114,15 @@ class ClaudeAPIRequestTransformer:
         else:
             logger.debug("using_detected_headers_for_auth")
 
+        # Debug logging - what headers are we returning?
+        logger.debug(
+            "transform_headers_result",
+            has_x_api_key="x-api-key" in transformed,
+            has_authorization="Authorization" in transformed,
+            header_count=len(transformed),
+            detected_headers_used=has_detected_headers,
+        )
+
         return transformed
 
     def transform_body(self, body: bytes | None) -> bytes | None:
@@ -115,6 +138,13 @@ class ClaudeAPIRequestTransformer:
         """
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
+
+        logger.debug(
+            "transform_body_called",
+            has_body=body is not None,
+            body_length=len(body) if body else 0,
+            has_detection_service=self.detection_service is not None,
+        )
 
         if not body:
             return body
@@ -134,12 +164,39 @@ class ClaudeAPIRequestTransformer:
         # Inject system prompt if available
         if self.detection_service:
             cached_data = self.detection_service.get_cached_data()
+            logger.debug(
+                "checking_cached_data",
+                has_cached_data=cached_data is not None,
+                has_system_prompt=cached_data.system_prompt is not None
+                if cached_data
+                else False,
+                has_system_field=cached_data.system_prompt.system_field is not None
+                if cached_data and cached_data.system_prompt
+                else False,
+                system_already_in_data="system" in data,
+            )
             if cached_data and cached_data.system_prompt and "system" not in data:
-                # Inject the detected system prompt
+                # Inject the detected system prompt (as list or string)
                 data["system"] = cached_data.system_prompt.system_field
                 logger.debug(
-                    "injected_system_prompt", version=cached_data.claude_version
+                    "injected_system_prompt",
+                    version=cached_data.claude_version,
+                    system_type=type(cached_data.system_prompt.system_field).__name__,
+                    system_length=len(str(cached_data.system_prompt.system_field)),
                 )
+            else:
+                logger.debug(
+                    "system_prompt_not_injected",
+                    reason="no_cached_data"
+                    if not cached_data
+                    else "no_system_prompt"
+                    if not cached_data.system_prompt
+                    else "system_already_exists"
+                    if "system" in data
+                    else "unknown",
+                )
+        else:
+            logger.debug("no_detection_service_available")
 
         return json.dumps(data).encode("utf-8")
 

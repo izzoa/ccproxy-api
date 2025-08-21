@@ -5,8 +5,8 @@ from typing import Any, Literal
 import structlog
 
 from ccproxy.plugins.protocol import HealthCheckResult
-from ccproxy.services.credentials.manager import CredentialsManager
 
+from .auth.manager import ClaudeApiTokenManager
 from .config import ClaudeAPISettings
 from .detection_service import ClaudeAPIDetectionService
 
@@ -17,13 +17,13 @@ logger = structlog.get_logger(__name__)
 async def claude_api_health_check(
     config: ClaudeAPISettings | None,
     detection_service: ClaudeAPIDetectionService | None = None,
-    credentials_manager: CredentialsManager | None = None,
+    credentials_manager: ClaudeApiTokenManager | None = None,
 ) -> HealthCheckResult:
     """Perform health check for Claude API plugin.
 
     Args:
         config: Plugin configuration
-        credentials_manager: Credentials manager for OAuth token status
+        credentials_manager: Token manager for OAuth token status
 
     Returns:
         HealthCheckResult with plugin status including OAuth token details

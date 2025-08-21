@@ -1,12 +1,13 @@
 """Request ID middleware for generating and tracking request IDs."""
 
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, MutableMapping
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Receive, Send
 
 from ccproxy.core.logging import get_logger
 from ccproxy.observability.context import request_context
@@ -26,7 +27,9 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         """
         super().__init__(app)
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(
+        self, scope: MutableMapping[str, Any], receive: Receive, send: Send
+    ) -> None:
         """ASGI interface to inject request ID early."""
         if scope["type"] == "http":
             # Generate or extract request ID

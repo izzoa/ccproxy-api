@@ -96,7 +96,7 @@ plugins:
 plugins:
   raw_http_logger:
     enabled: true
-    include_paths: 
+    include_paths:
       - "/api"  # Include all API paths
     exclude_paths:
       - "/api/health"  # But exclude health endpoint

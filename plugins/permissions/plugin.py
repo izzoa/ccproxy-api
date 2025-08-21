@@ -1,148 +1,153 @@
-"""Permission plugin registration and lifecycle management."""
+"""Permissions plugin v2 implementation."""
 
 from typing import Any
 
 import structlog
-from fastapi import APIRouter
-from pydantic import BaseModel
 
-from ccproxy.core.services import CoreServices
-from ccproxy.plugins.protocol import HealthCheckResult, SystemPlugin
-
-from .config import PermissionsConfig
-from .mcp import mcp_router
-from .routes import router
-from .service import get_permission_service
+from ccproxy.plugins import (
+    PluginContext,
+    PluginManifest,
+    RouteSpec,
+    SystemPluginFactory,
+    SystemPluginRuntime,
+)
+from plugins.permissions.config import PermissionsConfig
+from plugins.permissions.mcp import mcp_router
+from plugins.permissions.routes import router
+from plugins.permissions.service import get_permission_service
 
 
 logger = structlog.get_logger(__name__)
 
 
-class Plugin(SystemPlugin):
-    """Permissions plugin providing authorization services.
+class PermissionsRuntime(SystemPluginRuntime):
+    """Runtime for permissions plugin."""
 
-    This is a system plugin that provides permission management.
-    """
+    def __init__(self, manifest: PluginManifest):
+        """Initialize runtime."""
+        super().__init__(manifest)
+        self.config: PermissionsConfig | None = None
+        self.service = get_permission_service()
 
-    def __init__(self) -> None:
+    async def _on_initialize(self) -> None:
         """Initialize the permissions plugin."""
-        self._name = "permissions"
-        self._version = "1.0.0"
-        self._router_prefix = "/permissions"
-        self._service = get_permission_service()
-        self._config: PermissionsConfig | None = None
-        self._logger = logger.bind(plugin=self._name)
+        if not self.context:
+            raise RuntimeError("Context not set")
 
-    @property
-    def name(self) -> str:
-        """Plugin name."""
-        return self._name
+        # Get configuration
+        config = self.context.get("config")
+        if not isinstance(config, PermissionsConfig):
+            logger.warning("permissions_plugin_no_config", plugin=self.name)
+            # Use default config if none provided
+            self.config = PermissionsConfig()
+        else:
+            self.config = config
 
-    @property
-    def version(self) -> str:
-        """Plugin version."""
-        return self._version
-
-    @property
-    def dependencies(self) -> list[str]:
-        """List of plugin names this plugin depends on."""
-        return []  # No dependencies
-
-    @property
-    def router_prefix(self) -> str:
-        """Route prefix for this plugin."""
-        return self._router_prefix
-
-    async def initialize(self, services: CoreServices) -> None:
-        """Initialize plugin with shared services.
-
-        Args:
-            services: Core services container
-        """
-        self._logger.info("initializing_permissions_plugin")
-
-        # Store services for later use
-        self._services = services
-
-        # Load plugin configuration
-        plugin_config = services.get_plugin_config(self.name)
-        self._config = PermissionsConfig.model_validate(plugin_config)
+        logger.info("initializing_permissions_plugin")
 
         # Start the permission service if enabled
-        if self._config.enabled:
+        if self.config.enabled:
             # Update service timeout from config
-            self._service._timeout_seconds = self._config.timeout_seconds
-            await self._service.start()
-            self._logger.info(
+            self.service._timeout_seconds = self.config.timeout_seconds
+            await self.service.start()
+            logger.info(
                 "permission_service_started",
-                timeout_seconds=self._config.timeout_seconds,
-                terminal_ui=self._config.enable_terminal_ui,
-                sse_stream=self._config.enable_sse_stream,
+                timeout_seconds=self.config.timeout_seconds,
+                terminal_ui=self.config.enable_terminal_ui,
+                sse_stream=self.config.enable_sse_stream,
             )
         else:
-            self._logger.info("permission_service_disabled")
+            logger.info("permission_service_disabled")
 
-    async def shutdown(self) -> None:
+    async def _on_shutdown(self) -> None:
         """Shutdown the plugin and cleanup resources."""
-        self._logger.info("shutting_down_permissions_plugin")
+        logger.info("shutting_down_permissions_plugin")
 
         # Stop the permission service
-        await self._service.stop()
+        await self.service.stop()
 
-        self._logger.info("permissions_plugin_shutdown_complete")
+        logger.info("permissions_plugin_shutdown_complete")
 
-    async def validate(self) -> bool:
-        """Validate plugin is ready."""
-        # Permissions plugin is always valid if service exists
-        return self._service is not None
-
-    def get_routes(self) -> APIRouter | dict[str, APIRouter] | None:
-        """Get plugin routes.
-
-        Returns a dictionary mapping mount paths to routers:
-        - /permissions: SSE streaming and permission management routes
-        - /mcp: MCP protocol routes for Claude Code
-        """
-        routes = {}
-
-        # Add SSE streaming routes at /permissions if enabled
-        if self._config and self._config.enable_sse_stream:
-            routes["/permissions"] = router
-
-        # Always add MCP routes at /mcp root (they're essential for Claude Code)
-        routes["/mcp"] = mcp_router
-
-        return routes
-
-    async def health_check(self) -> HealthCheckResult:
-        """Perform health check."""
+    async def _get_health_details(self) -> dict[str, Any]:
+        """Get health check details."""
         try:
             # Check if service is running
-            pending_count = len(await self._service.get_pending_requests())
-            return HealthCheckResult(
-                status="pass",
-                componentId=self.name,
-                componentType="system_plugin",
-                output=f"Service running with {pending_count} pending requests",
-                version=self.version,
-                details={
-                    "pending_requests": pending_count,
-                    "enabled": self._config.enabled if self._config else False,
-                },
-            )
+            pending_count = len(await self.service.get_pending_requests())
+            return {
+                "type": "system",
+                "initialized": self.initialized,
+                "pending_requests": pending_count,
+                "enabled": self.config.enabled if self.config else False,
+                "service_running": self.service is not None,
+            }
         except Exception as e:
-            return HealthCheckResult(
-                status="fail",
-                componentId=self.name,
-                componentType="system_plugin",
-                output=str(e),
-                version=self.version,
+            logger.error("health_check_failed", error=str(e))
+            return {
+                "type": "system",
+                "initialized": self.initialized,
+                "enabled": self.config.enabled if self.config else False,
+                "error": str(e),
+            }
+
+
+class PermissionsFactory(SystemPluginFactory):
+    """Factory for permissions plugin."""
+
+    def __init__(self) -> None:
+        """Initialize factory with manifest."""
+        # Create manifest with static declarations
+        manifest = PluginManifest(
+            name="permissions",
+            version="1.0.0",
+            description="Permissions plugin providing authorization services for tool calls",
+            is_provider=False,
+            config_class=PermissionsConfig,
+        )
+
+        # Initialize with manifest
+        super().__init__(manifest)
+
+    def create_runtime(self) -> PermissionsRuntime:
+        """Create runtime instance."""
+        return PermissionsRuntime(self.manifest)
+
+    def create_context(self, core_services: Any) -> PluginContext:
+        """Create context and update manifest with routes if enabled."""
+        # Get base context
+        context = super().create_context(core_services)
+
+        # Check if plugin is enabled
+        config = context.get("config")
+        if isinstance(config, PermissionsConfig) and config.enabled:
+            # Add routes to manifest
+            # This is safe because it happens during app creation phase
+            if not self.manifest.routes:
+                self.manifest.routes = []
+
+            # Always add MCP routes at /mcp root (they're essential for Claude Code)
+            mcp_route_spec = RouteSpec(
+                router=mcp_router,
+                prefix="/mcp",
+                tags=["mcp"],
+            )
+            self.manifest.routes.append(mcp_route_spec)
+
+            # Add SSE streaming routes at /permissions if enabled
+            if config.enable_sse_stream:
+                permissions_route_spec = RouteSpec(
+                    router=router,
+                    prefix="/permissions",
+                    tags=["permissions"],
+                )
+                self.manifest.routes.append(permissions_route_spec)
+
+            logger.debug(
+                "permissions_routes_added_to_manifest",
+                sse_enabled=config.enable_sse_stream,
             )
 
-    def get_scheduled_tasks(self) -> list[Any] | None:
-        """Permissions plugin doesn't need scheduled tasks."""
-        return None
+        return context
 
-    def get_config_class(self) -> type[BaseModel] | None:
-        """Get configuration class."""
-        return PermissionsConfig
+
+# Export the factory instance
+factory = PermissionsFactory()

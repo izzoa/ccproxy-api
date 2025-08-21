@@ -7,20 +7,17 @@ the KISS principle and avoiding overengineering.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import structlog
 from fastapi import FastAPI
 
-from ccproxy.auth.exceptions import CredentialsNotFoundError
 from ccproxy.observability import get_metrics
 
 # Note: get_claude_cli_info is imported locally to avoid circular imports
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
 from ccproxy.scheduler.errors import SchedulerError
 from ccproxy.scheduler.manager import start_scheduler, stop_scheduler
-from ccproxy.services.credentials.manager import CredentialsManager
 
 
 # Note: get_permission_service is imported locally to avoid circular imports
@@ -40,70 +37,8 @@ async def validate_claude_authentication_startup(
         app: FastAPI application instance
         settings: Application settings
     """
-    try:
-        credentials_manager = CredentialsManager()
-        validation = await credentials_manager.validate()
-
-        if validation.valid and not validation.expired:
-            credentials = validation.credentials
-            oauth_token = credentials.claude_ai_oauth if credentials else None
-
-            if oauth_token and oauth_token.expires_at_datetime:
-                hours_until_expiry = int(
-                    (
-                        oauth_token.expires_at_datetime - datetime.now(UTC)
-                    ).total_seconds()
-                    / 3600
-                )
-                logger.debug(
-                    "claude_token_valid",
-                    expires_in_hours=hours_until_expiry,
-                    subscription_type=oauth_token.subscription_type,
-                    credentials_path=str(validation.path) if validation.path else None,
-                )
-            else:
-                logger.debug(
-                    "claude_token_valid", credentials_path=str(validation.path)
-                )
-        elif validation.expired:
-            logger.warning(
-                "claude_token_expired",
-                message="Claude authentication token has expired. Please run 'ccproxy auth login' to refresh.",
-                credentials_path=str(validation.path) if validation.path else None,
-            )
-        else:
-            logger.warning(
-                "claude_token_invalid",
-                message="Claude authentication token is invalid. Please run 'ccproxy auth login'.",
-                credentials_path=str(validation.path) if validation.path else None,
-            )
-    except CredentialsNotFoundError:
-        logger.warning(
-            "claude_token_not_found",
-            message="No Claude authentication credentials found. Please run 'ccproxy auth login' to authenticate.",
-            searched_paths=settings.auth.storage.storage_paths,
-        )
-    except (ImportError, ModuleNotFoundError) as e:
-        logger.error(
-            "claude_token_validation_import_error",
-            error=str(e),
-            message="Failed to import Claude authentication modules. The server will continue without Claude authentication.",
-            exc_info=e,
-        )
-    except (OSError, FileNotFoundError, PermissionError) as e:
-        logger.error(
-            "claude_token_validation_file_error",
-            error=str(e),
-            message="Failed to access Claude authentication files. The server will continue without Claude authentication.",
-            exc_info=e,
-        )
-    except Exception as e:
-        logger.error(
-            "claude_token_validation_unexpected_error",
-            error=str(e),
-            message="Failed to validate Claude authentication token. The server will continue without Claude authentication.",
-            exc_info=e,
-        )
+    # Authentication is now handled by individual plugins
+    logger.debug("Authentication validation moved to plugins")
 
 
 async def check_version_updates_startup(app: FastAPI, settings: Settings) -> None:
@@ -328,14 +263,10 @@ async def initialize_proxy_service_startup(app: FastAPI, settings: Settings) -> 
         # Get global metrics instance
         metrics = get_metrics()
 
-        # Create credentials manager
-        credentials_manager = CredentialsManager(config=settings.auth)
-
         # Create ServiceContainer and use it to create ProxyService
         container = ServiceContainer(settings)
         proxy_service = container.create_proxy_service(
             proxy_client=proxy_client,
-            credentials_manager=credentials_manager,
             metrics=metrics,
         )
 

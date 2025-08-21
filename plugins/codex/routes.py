@@ -1,22 +1,20 @@
 """Codex plugin routes."""
 
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response, StreamingResponse
 
-from ccproxy.api.dependencies import (
-    CodexAdapterDep,
-    CodexDetectionDep,
-    ProxyServiceDep,
-)
+from ccproxy.api.dependencies import ProxyServiceDep, get_plugin_adapter
 from ccproxy.auth.conditional import ConditionalAuthDep
 
 
 if TYPE_CHECKING:
     pass
 
+# Create plugin-specific adapter dependency
+CodexAdapterDep = Annotated[Any, Depends(get_plugin_adapter("codex"))]
 
 router = APIRouter(tags=["plugin-codex"])
 
@@ -42,10 +40,9 @@ def codex_path_transformer(path: str) -> str:
 @router.post("/responses", response_model=None)
 async def codex_responses(
     request: Request,
-    adapter: CodexAdapterDep,
     proxy_service: ProxyServiceDep,
-    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
+    adapter: CodexAdapterDep,
 ) -> StreamingResponse | Response:
     """Create Codex completion with auto-generated session_id.
 
@@ -71,10 +68,9 @@ async def codex_responses(
 async def codex_responses_with_session(
     session_id: str,
     request: Request,
-    adapter: CodexAdapterDep,
     proxy_service: ProxyServiceDep,
-    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
+    adapter: CodexAdapterDep,
 ) -> StreamingResponse | Response:
     """Create Codex completion with specific session_id.
 
@@ -95,16 +91,16 @@ async def codex_responses_with_session(
 @router.post("/chat/completions", response_model=None)
 async def codex_chat_completions(
     request: Request,
-    adapter: CodexAdapterDep,
     proxy_service: ProxyServiceDep,
-    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
+    adapter: CodexAdapterDep,
 ) -> StreamingResponse | Response:
     """Create a chat completion using Codex with OpenAI-compatible format.
 
     This endpoint handles OpenAI format requests and converts them
     to/from Codex Response API format transparently.
     """
+
     # Get session_id from header if provided
     header_session_id = request.headers.get("session_id")
     session_id = header_session_id or str(uuid.uuid4())
@@ -125,10 +121,9 @@ async def codex_chat_completions(
 async def codex_chat_completions_with_session(
     session_id: str,
     request: Request,
-    adapter: CodexAdapterDep,
     proxy_service: ProxyServiceDep,
-    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
+    adapter: CodexAdapterDep,
 ) -> StreamingResponse | Response:
     """Create a chat completion with specific session_id using OpenAI format.
 
@@ -149,25 +144,20 @@ async def codex_chat_completions_with_session(
 @router.post("/v1/chat/completions", response_model=None)
 async def codex_v1_chat_completions(
     request: Request,
-    adapter: CodexAdapterDep,
     proxy_service: ProxyServiceDep,
-    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
+    adapter: CodexAdapterDep,
 ) -> StreamingResponse | Response:
     """OpenAI v1 compatible chat completions endpoint.
 
     Maps to the standard chat completions handler.
     """
-    return await codex_chat_completions(
-        request, adapter, proxy_service, detection_service, auth
-    )
+    return await codex_chat_completions(request, proxy_service, auth, adapter)
 
 
 @router.get("/v1/models", response_model=None)
 async def list_models(
     request: Request,
-    adapter: CodexAdapterDep,
-    detection_service: CodexDetectionDep,
     auth: ConditionalAuthDep,
 ) -> dict[str, Any]:
     """List available Codex models.

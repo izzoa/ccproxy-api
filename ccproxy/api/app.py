@@ -1,9 +1,10 @@
-"""FastAPI application factory for CCProxy API Server."""
+"""FastAPI application factory for CCProxy API Server with v2 plugin system."""
 
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
+import structlog
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from structlog import get_logger
@@ -12,9 +13,6 @@ from typing_extensions import TypedDict
 from ccproxy import __version__
 from ccproxy.api.middleware.cors import setup_cors_middleware
 from ccproxy.api.middleware.errors import setup_error_handlers
-from ccproxy.api.middleware.logging import AccessLogMiddleware
-from ccproxy.api.middleware.request_id import RequestIDMiddleware
-from ccproxy.api.middleware.server_header import ServerHeaderMiddleware
 from ccproxy.api.routes.health import router as health_router
 from ccproxy.api.routes.metrics import (
     dashboard_router,
@@ -22,8 +20,6 @@ from ccproxy.api.routes.metrics import (
     prometheus_router,
 )
 from ccproxy.api.routes.plugins import router as plugins_router
-
-# proxy routes are now handled by plugin system
 from ccproxy.auth.oauth.routes import router as oauth_router
 from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
@@ -31,6 +27,16 @@ from ccproxy.core.http_client import close_shared_http_client
 from ccproxy.core.logging import setup_logging
 from ccproxy.hooks import HookManager, HookRegistry
 from ccproxy.hooks.events import HookEvent
+
+# V2 Plugin System imports
+from ccproxy.plugins import (
+    MiddlewareManager,
+    PluginRegistry,
+    discover_and_load_plugins,
+    setup_default_middleware,
+)
+from ccproxy.services.container import ServiceContainer
+from ccproxy.services.factories import ConcreteServiceFactory
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
     check_version_updates_startup,
@@ -100,78 +106,74 @@ async def setup_proxy_service_shutdown(app: FastAPI) -> None:
                 )
 
 
-async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
-    """Initialize plugins during startup."""
+async def initialize_plugins_v2_startup(app: FastAPI, settings: Settings) -> None:
+    """Initialize v2 plugins during startup (runtime phase)."""
     if not settings.enable_plugins:
         logger.info("plugin_system_disabled")
         return
 
-    # Get proxy service from app state if available
-    if hasattr(app.state, "proxy_service"):
-        proxy_service = app.state.proxy_service
+    # Get plugin registry from app state (set during app creation)
+    if not hasattr(app.state, "plugin_registry"):
+        logger.warning("plugin_registry_not_found")
+        return
 
-        # Check if plugins are already initialized (from startup_helpers)
-        # plugin_registry is actually a PluginManager instance
-        plugin_manager = proxy_service.plugin_registry
-        if (
-            plugin_manager
-            and hasattr(plugin_manager, "initialized")
-            and not plugin_manager.initialized
-        ):
-            # Pass scheduler if available
-            scheduler = getattr(app.state, "scheduler", None)
-            await proxy_service.initialize_plugins(scheduler=scheduler)
+    plugin_registry: PluginRegistry = app.state.plugin_registry
 
-        # Register plugin routes and middleware (this should always happen)
-        if plugin_manager and hasattr(plugin_manager, "plugin_registry"):
-            # Access the internal PluginRegistry from PluginManager
-            for plugin_name in plugin_manager.plugin_registry.list_plugins():
-                plugin = plugin_manager.plugin_registry.get_plugin(plugin_name)
+    # Create service container for plugin initialization
+    if not hasattr(app.state, "service_container"):
+        factory = ConcreteServiceFactory()
+        app.state.service_container = ServiceContainer(settings, factory)
 
-                # Note: raw_http_logger middleware is added during app creation
-                # to ensure proper ordering (must be added before app starts)
+    service_container = app.state.service_container
 
-                # Register routes
-                if plugin and hasattr(plugin, "get_routes"):
-                    routes = plugin.get_routes()
+    # Create a core services adapter for the plugin system
+    # The plugin system expects certain attributes that we need to provide
+    class CoreServicesAdapter:
+        def __init__(self, container: ServiceContainer):
+            self.settings = container.settings
+            self.http_client = container.get_http_client()
+            self.logger = structlog.get_logger()
+            self.proxy_service = getattr(app.state, "proxy_service", None)
+            self.scheduler = getattr(app.state, "scheduler", None)
+            self._container = container
 
-                    if isinstance(routes, dict):
-                        # New format: dictionary mapping paths to routers
-                        for prefix, router in routes.items():
-                            if router:
-                                app.include_router(
-                                    router,
-                                    prefix=prefix,
-                                    tags=[f"plugin-{plugin.name}"],
-                                )
-                                logger.debug(
-                                    "plugin_routes_registered",
-                                    plugin_name=plugin.name,
-                                    router_prefix=prefix,
-                                )
-                    elif routes:
-                        # Backward compatibility: single router
-                        app.include_router(
-                            routes,
-                            prefix=plugin.router_prefix,
-                            tags=[f"plugin-{plugin.name}"],
-                        )
-                        logger.debug(
-                            "plugin_routes_registered",
-                            plugin_name=plugin.name,
-                            router_prefix=plugin.router_prefix,
-                        )
+        def get_plugin_config(self, plugin_name: str) -> Any:
+            """Get plugin configuration."""
+            # Check if plugin config exists in settings
+            if hasattr(self.settings, "plugins") and self.settings.plugins:
+                plugin_config = self.settings.plugins.get(plugin_name)
+                if plugin_config:
+                    return (
+                        plugin_config.model_dump()
+                        if hasattr(plugin_config, "model_dump")
+                        else plugin_config
+                    )
 
-        logger.info(
-            "plugins_initialization_completed",
-            providers=len(plugin_manager.list_active_providers())
-            if hasattr(plugin_manager, "list_active_providers")
-            else 0,
-        )
+            # Return empty config as default
+            return {}
+
+    core_services = CoreServicesAdapter(service_container)
+
+    # Initialize all plugins with their runtime context
+    await plugin_registry.initialize_all(core_services)
+
+    logger.info(
+        "plugins_v2_initialization_completed",
+        total_plugins=len(plugin_registry.list_plugins()),
+        provider_plugins=len(plugin_registry.list_provider_plugins()),
+    )
 
 
-async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
-    """Initialize hook system during startup."""
+async def shutdown_plugins_v2(app: FastAPI) -> None:
+    """Shutdown v2 plugins."""
+    if hasattr(app.state, "plugin_registry"):
+        plugin_registry: PluginRegistry = app.state.plugin_registry
+        await plugin_registry.shutdown_all()
+        logger.debug("plugins_v2_shutdown_completed")
+
+
+async def initialize_hooks_v2_startup(app: FastAPI, settings: Settings) -> None:
+    """Initialize hook system with v2 plugins."""
     if not settings.hooks.enabled:
         logger.info("hook_system_disabled")
         return
@@ -180,64 +182,47 @@ async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
     hook_registry = HookRegistry()
     hook_manager = HookManager(hook_registry)
 
-    # Load plugin hooks from plugin registry
-    if hasattr(app.state, "proxy_service"):
-        proxy_service = app.state.proxy_service
-        if hasattr(proxy_service, "plugin_registry"):
-            plugin_manager = proxy_service.plugin_registry
-            if plugin_manager and hasattr(plugin_manager, "plugin_registry"):
-                # Access the internal PluginRegistry from PluginManager
-                for plugin_name in plugin_manager.plugin_registry.list_plugins():
-                    plugin = plugin_manager.plugin_registry.get_plugin(plugin_name)
-                    if plugin and hasattr(plugin, "get_hooks"):
-                        try:
-                            hooks = plugin.get_hooks()
-                            if hooks:
-                                for hook in hooks:
-                                    hook_registry.register(hook)
-                                    logger.debug(
-                                        "plugin_hook_registered",
-                                        plugin_name=plugin.name,
-                                        hook_name=hook.name,
-                                    )
-                        except Exception as e:
-                            logger.error(
-                                "plugin_hook_registration_failed",
-                                plugin_name=plugin.name,
-                                error=str(e),
-                                exc_info=e,
-                            )
+    # Get plugin registry from app state
+    if hasattr(app.state, "plugin_registry"):
+        plugin_registry: PluginRegistry = app.state.plugin_registry
 
-    # Emit APP_STARTUP event
-    try:
-        await hook_manager.emit(HookEvent.APP_STARTUP)
-        logger.debug("app_startup_event_emitted")
-    except Exception as e:
-        logger.error(
-            "app_startup_event_failed",
-            error=str(e),
-            exc_info=e,
-        )
+        # Register hooks from plugin manifests
+        for name, factory in plugin_registry.factories.items():
+            manifest = factory.get_manifest()
+            for hook_spec in manifest.hooks:
+                try:
+                    hook_instance = hook_spec.hook_class(**hook_spec.kwargs)
+                    hook_registry.register(hook_instance)
+                    logger.debug(
+                        "plugin_hook_registered",
+                        plugin_name=name,
+                        hook_class=hook_spec.hook_class.__name__,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "plugin_hook_registration_failed",
+                        plugin_name=name,
+                        hook_class=hook_spec.hook_class.__name__,
+                        error=str(e),
+                        exc_info=e,
+                    )
 
-    # Store hook_manager in app.state for FastAPI
+    # Store hook manager in app state
+    app.state.hook_registry = hook_registry
     app.state.hook_manager = hook_manager
 
-    # Set hook_manager on ProxyService if available
-    if hasattr(app.state, "proxy_service"):
-        proxy_service = app.state.proxy_service
-        if hasattr(proxy_service, "set_hook_manager"):
-            proxy_service.set_hook_manager(hook_manager)
-            logger.debug("hook_manager_set_on_proxy_service")
+    # Trigger startup hook
+    try:
+        # Use the APP_STARTUP event from the enum
+        await hook_manager.emit(HookEvent.APP_STARTUP, {"phase": "startup"})
+    except Exception as e:
+        logger.error("startup_hook_failed", error=str(e), exc_info=e)
 
-    logger.info(
-        "hook_system_initialization_completed",
-        metrics_enabled=settings.hooks.metrics_enabled,
-        logging_enabled=settings.hooks.logging_enabled,
-        analytics_enabled=settings.hooks.analytics_enabled,
-    )
+    # Use _hooks to get the count (or better, add a method to get count)
+    logger.info("hook_system_initialized", hook_count=len(hook_registry._hooks))
 
 
-# Define lifecycle components for startup/shutdown organization
+# Define lifecycle components in order
 LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
     {
         "name": "Task Manager",
@@ -245,7 +230,7 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "shutdown": setup_task_manager_shutdown,
     },
     {
-        "name": "Claude Authentication",
+        "name": "Authentication Validation",
         "startup": validate_claude_authentication_startup,
         "shutdown": None,  # One-time validation, no cleanup needed
     },
@@ -279,26 +264,17 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "startup": initialize_proxy_service_startup,
         "shutdown": setup_proxy_service_shutdown,
     },
-]
-
-
-# Add plugin initialization to lifecycle components
-LIFECYCLE_COMPONENTS.append(
     {
-        "name": "Plugin System",
-        "startup": initialize_plugins_startup,
-        "shutdown": None,  # Plugins cleaned up with proxy service
-    }
-)
-
-# Add hook system initialization after plugins
-LIFECYCLE_COMPONENTS.append(
+        "name": "Plugin System V2",
+        "startup": initialize_plugins_v2_startup,
+        "shutdown": shutdown_plugins_v2,
+    },
     {
-        "name": "Hook System",
-        "startup": initialize_hooks_startup,
+        "name": "Hook System V2",
+        "startup": initialize_hooks_v2_startup,
         "shutdown": None,  # Hook system cleaned up automatically
-    }
-)
+    },
+]
 
 SHUTDOWN_ONLY_COMPONENTS: list[ShutdownComponent] = [
     {
@@ -330,9 +306,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.debug(
         "server_configured", host=settings.server.host, port=settings.server.port
     )
-
-    # Claude CLI configuration is now handled by the plugin
-    logger.debug("claude_cli_configuration_delegated_to_plugin")
 
     # Execute startup components in order
     for component in LIFECYCLE_COMPONENTS:
@@ -413,7 +386,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    """Create and configure the FastAPI application.
+    """Create and configure the FastAPI application with v2 plugin system.
 
     Args:
         settings: Optional settings override. If None, uses get_settings().
@@ -423,22 +396,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """
     if settings is None:
         settings = get_settings()
+
     # Configure logging based on settings BEFORE any module uses logger
-    # This is needed for reload mode where the app is re-imported
-
     import structlog
-
-    # Only configure if not already configured or if no file handler exists
-    # okay we have the first debug line but after uvicorn start they are not show root_logger = logging.getLogger()
-    # for h in root_logger.handlers:
-    #     print(h)
-    # has_file_handler = any(
-    #     isinstance(h, logging.FileHandler) for h in root_logger.handlers
-    # )
 
     if not structlog.is_configured():
         # Only setup logging if structlog is not configured at all
-        # Always use console output, but respect file logging from settings
         json_logs = False
         setup_logging(
             json_logs=json_logs,
@@ -453,21 +416,88 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Setup middleware
+    logger.warn("v2")
+    # PHASE 1: Plugin Discovery and Registration (before app starts)
+    plugin_registry = PluginRegistry()
+    middleware_manager = MiddlewareManager()
+
+    if settings.enable_plugins:
+        # Discover and load plugin factories
+        plugin_factories = discover_and_load_plugins(settings)
+
+        # Register all plugin factories
+        for factory in plugin_factories.values():
+            plugin_registry.register_factory(factory)
+
+        # Create a minimal core services adapter for manifest population
+        # This allows plugins to check their configuration and add middleware/routes
+        class ManifestPopulationServices:
+            def __init__(self, settings: Settings | None) -> None:
+                self.settings = settings
+                self.http_client = None  # Not needed for manifest population
+                self.logger = structlog.get_logger()
+                self.proxy_service = None  # Not needed for manifest population
+
+            def get_plugin_config(self, plugin_name: str) -> dict[str, Any]:
+                # Use the settings.plugins dictionary populated by Pydantic
+                if (
+                    self.settings
+                    and hasattr(self.settings, "plugins")
+                    and self.settings.plugins
+                ):
+                    return self.settings.plugins.get(plugin_name, {})
+                return {}
+
+        manifest_services = ManifestPopulationServices(settings)
+
+        # Call create_context on each factory to populate manifests
+        # This allows plugins to conditionally add middleware/routes based on config
+        for _name, factory in plugin_registry.factories.items():
+            factory.create_context(manifest_services)
+
+        # Collect middleware from all plugins
+        for name, factory in plugin_registry.factories.items():
+            manifest = factory.get_manifest()
+            if manifest.middleware:
+                middleware_manager.add_plugin_middleware(name, manifest.middleware)
+                logger.debug(
+                    "plugin_middleware_collected",
+                    plugin=name,
+                    count=len(manifest.middleware),
+                )
+
+        # Register plugin routes (static registration during app creation)
+        for name, factory in plugin_registry.factories.items():
+            manifest = factory.get_manifest()
+            for route_spec in manifest.routes:
+                app.include_router(
+                    route_spec.router,
+                    prefix=route_spec.prefix,
+                    tags=list(route_spec.tags)
+                    if route_spec.tags
+                    else [f"plugin-{name}"],
+                    dependencies=route_spec.dependencies,
+                )
+                logger.debug(
+                    "plugin_routes_registered",
+                    plugin=name,
+                    prefix=route_spec.prefix,
+                )
+
+    # Store plugin registry in app state for runtime initialization
+    app.state.plugin_registry = plugin_registry
+
+    # Setup CORS middleware first (needs to be outermost)
     setup_cors_middleware(app, settings)
     setup_error_handlers(app)
 
-    # Add custom access log middleware (will run second due to middleware order)
-    app.add_middleware(AccessLogMiddleware)
+    # Setup default core middleware
+    setup_default_middleware(middleware_manager)
 
-    # Add request ID middleware fourth (will run first to initialize context)
-    app.add_middleware(RequestIDMiddleware)
+    # Apply all middleware in correct order
+    middleware_manager.apply_to_app(app)
 
-    # Add server header middleware (for non-proxy routes)
-    # You can customize the server name here
-    app.add_middleware(ServerHeaderMiddleware, server_name="uvicorn")
-
-    # Include health router (always enabled)
+    # Include core routers
     app.include_router(health_router, tags=["health"])
 
     # Include observability routers with granular controls
@@ -491,35 +521,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Get the path to the dashboard static files
     current_file = Path(__file__)
-    project_root = (
-        current_file.parent.parent.parent
-    )  # ccproxy/api/app.py -> project root
+    project_root = current_file.parent.parent.parent
     dashboard_static_path = project_root / "ccproxy" / "static" / "dashboard"
 
     # Mount dashboard static files if they exist
-    if dashboard_static_path.exists():
-        # Mount the _app directory for SvelteKit assets at the correct base path
-        app_path = dashboard_static_path / "_app"
-        if app_path.exists():
-            app.mount(
-                "/dashboard/_app",
-                StaticFiles(directory=str(app_path)),
-                name="dashboard-assets",
-            )
-
-        # Mount favicon.svg at root level
-        favicon_path = dashboard_static_path / "favicon.svg"
-        if favicon_path.exists():
-            # For single files, we'll handle this in the dashboard route or add a specific route
-            pass
+    if dashboard_static_path.exists() and settings.observability.dashboard_enabled:
+        app.mount(
+            "/dashboard/assets",
+            StaticFiles(directory=str(dashboard_static_path)),
+            name="dashboard-static",
+        )
+        logger.debug("dashboard_static_files_mounted", path=str(dashboard_static_path))
 
     return app
 
 
 def get_app() -> FastAPI:
-    """Get the FastAPI application instance.
+    """Get the FastAPI app instance.
 
-    Returns:
-        FastAPI application instance.
+    This is a convenience function for backwards compatibility.
     """
-    return create_app()
+    from ccproxy.config.settings import get_settings
+
+    return create_app(get_settings())
+
+
+# Export create_app as the main factory
+__all__ = ["create_app", "get_app"]

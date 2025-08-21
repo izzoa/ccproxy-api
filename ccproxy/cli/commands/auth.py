@@ -1,14 +1,7 @@
 """Authentication and credential management commands."""
 
 import asyncio
-from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
-
-
-if TYPE_CHECKING:
-    from ccproxy.auth.openai import OpenAIOAuthClient, OpenAITokenManager
-    from ccproxy.plugins.protocol import ProviderPlugin
-    from plugins.codex.config import CodexSettings
+from typing import Annotated, Any
 
 import typer
 from rich import box
@@ -18,11 +11,6 @@ from structlog import get_logger
 
 from ccproxy.cli.helpers import get_rich_toolkit
 from ccproxy.config.settings import get_settings
-from ccproxy.core.async_utils import get_claude_docker_home_dir
-from ccproxy.models.provider import ProviderConfig
-from ccproxy.plugins.loader import PluginLoader
-from ccproxy.plugins.protocol import ProviderPlugin
-from ccproxy.services.credentials import CredentialsManager
 
 
 app = typer.Typer(name="auth", help="Authentication and credential management")
@@ -31,29 +19,32 @@ console = Console()
 logger = get_logger(__name__)
 
 
-def get_credentials_manager(
-    custom_paths: list[Path] | None = None,
-) -> CredentialsManager:
-    """Get a CredentialsManager instance with custom paths if provided."""
-    if custom_paths:
-        # Get base settings and update storage paths
-        settings = get_settings()
-        settings.auth.storage.storage_paths = custom_paths
-        return CredentialsManager(config=settings.auth)
-    else:
-        # Use default settings
-        settings = get_settings()
-        return CredentialsManager(config=settings.auth)
+def _suppress_debug_logging() -> None:
+    pass
 
 
-def get_docker_credential_paths() -> list[Path]:
-    """Get credential file paths for Docker environment."""
-    docker_home = Path(get_claude_docker_home_dir())
-    return [
-        docker_home / ".claude" / ".credentials.json",
-        docker_home / ".config" / "claude" / ".credentials.json",
-        Path(".credentials.json"),
-    ]
+async def initialize_plugins_for_oauth() -> None:
+    """Initialize plugins to register their OAuth providers."""
+    from ccproxy.auth.oauth.registry import get_oauth_registry
+    from ccproxy.config.settings import get_settings
+    from ccproxy.plugins.discovery import discover_and_load_plugins
+
+    settings = get_settings()
+    plugins = discover_and_load_plugins(settings)
+
+    # Register OAuth providers from plugins
+    registry = get_oauth_registry()
+    for plugin_name, factory in plugins.items():
+        manifest = factory.get_manifest()
+        if manifest.oauth_provider_factory:
+            try:
+                provider = manifest.oauth_provider_factory()
+                registry.register_provider(provider)
+                logger.debug(f"Registered OAuth provider from plugin: {plugin_name}")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to register OAuth provider from {plugin_name}: {e}"
+                )
 
 
 async def discover_oauth_providers() -> dict[str, tuple[str, str]]:
@@ -62,56 +53,19 @@ async def discover_oauth_providers() -> dict[str, tuple[str, str]]:
     Returns:
         Dictionary mapping provider names to (auth_type, description) tuples
     """
-    oauth_providers = {}
+    from ccproxy.auth.oauth.registry import get_oauth_registry
 
-    loader = PluginLoader()
-    plugins = await loader.load_plugins()
+    # Initialize plugins first to register providers
+    await initialize_plugins_for_oauth()
 
-    for plugin in plugins:
-        # Check if plugin supports OAuth
-        try:
-            # Try to get config class and instantiate it directly
-            config_class = plugin.get_config_class()
-            if config_class:
-                config = config_class()
-                # Check if config is a ProviderConfig with OAuth support
-                if (
-                    isinstance(config, ProviderConfig)
-                    and hasattr(config, "requires_auth")
-                    and config.requires_auth
-                    and hasattr(config, "auth_type")
-                    and config.auth_type == "oauth"
-                ):
-                    oauth_providers[plugin.name] = (
-                        config.auth_type,
-                        f"{plugin.name} OAuth provider",
-                    )
-        except AttributeError as e:
-            logger.debug(
-                "plugin_oauth_missing_attribute",
-                plugin=plugin.name,
-                error=str(e),
-                exc_info=e,
-            )
-            continue
-        except ValueError as e:
-            logger.debug(
-                "plugin_oauth_invalid_config",
-                plugin=plugin.name,
-                error=str(e),
-                exc_info=e,
-            )
-            continue
-        except Exception as e:
-            logger.debug(
-                "plugin_oauth_check_failed",
-                plugin=plugin.name,
-                error=str(e),
-                exc_info=e,
-            )
-            continue
+    registry = get_oauth_registry()
+    providers = registry.list_providers()
 
-    return oauth_providers
+    result = {}
+    for name, info in providers.items():
+        result[name] = ("oauth", info.description)
+
+    return result
 
 
 def get_oauth_provider_choices() -> list[str]:
@@ -120,7 +74,7 @@ def get_oauth_provider_choices() -> list[str]:
     return list(providers.keys())
 
 
-async def get_plugin_for_provider(provider: str) -> "ProviderPlugin":
+async def get_plugin_for_provider(provider: str) -> Any:
     """Get the plugin instance for the specified provider.
 
     Args:
@@ -132,41 +86,11 @@ async def get_plugin_for_provider(provider: str) -> "ProviderPlugin":
     Raises:
         ValueError: If provider not found or doesn't support OAuth
     """
-    loader = PluginLoader()
-    plugins = await loader.load_plugins()
-
-    for plugin in plugins:
-        if plugin.name == provider:
-            # Check if it's a ProviderPlugin
-            if not isinstance(plugin, ProviderPlugin):
-                raise ValueError(f"Plugin '{provider}' is not a provider plugin")
-
-            try:
-                # Try to get config class and instantiate it directly
-                config_class = plugin.get_config_class()
-                if config_class:
-                    config = config_class()
-                    if (
-                        hasattr(config, "requires_auth")
-                        and config.requires_auth
-                        and hasattr(config, "auth_type")
-                        and config.auth_type == "oauth"
-                    ):
-                        return plugin
-                    else:
-                        raise ValueError(
-                            f"Provider '{provider}' does not support OAuth authentication"
-                        )
-            except AttributeError as e:
-                raise ValueError(
-                    f"Provider '{provider}' missing OAuth configuration: {e}"
-                ) from e
-            except Exception as e:
-                raise ValueError(
-                    f"Failed to check OAuth support for provider '{provider}': {e}"
-                ) from e
-
-    raise ValueError(f"OAuth provider '{provider}' not found")
+    # TODO: Integrate with v2 plugin system
+    # For now, this is a stub that will be replaced when v2 integration is complete
+    raise ValueError(
+        f"OAuth provider '{provider}' integration pending v2 plugin system update"
+    )
 
 
 async def get_oauth_client_for_provider(provider: str) -> Any:
@@ -286,6 +210,7 @@ async def check_provider_credentials(provider: str) -> dict[str, Any]:
 @app.command(name="providers")
 def list_providers() -> None:
     """List all available OAuth providers."""
+    _suppress_debug_logging()
     toolkit = get_rich_toolkit()
     toolkit.print("[bold cyan]Available OAuth Providers[/bold cyan]", centered=True)
     toolkit.print_line()
@@ -327,140 +252,30 @@ def list_providers() -> None:
 @app.command(name="login")
 def login_command(
     provider: Annotated[
-        str | None,
+        str,
         typer.Argument(
-            help="Provider to authenticate with (claude-sdk, claude-api, codex, openai)"
+            help="Provider to authenticate with (claude-api, codex, openai)"
         ),
-    ] = None,
-    docker: Annotated[
-        bool,
-        typer.Option(
-            "--docker",
-            help="Use Docker credential paths (Claude SDK only)",
-        ),
-    ] = False,
-    credential_file: Annotated[
-        str | None,
-        typer.Option(
-            "--credential-file",
-            help="Path to specific credential file (Claude SDK only)",
-        ),
-    ] = None,
+    ],
     no_browser: Annotated[
         bool,
         typer.Option("--no-browser", help="Don't automatically open browser for OAuth"),
     ] = False,
 ) -> None:
-    """Login to a provider using appropriate authentication.
+    """Login to a provider using OAuth authentication.
 
     Examples:
-        ccproxy auth login                # Default Claude SDK login
-        ccproxy auth login claude-sdk     # Explicit Claude SDK login
         ccproxy auth login claude-api     # Claude API OAuth login
         ccproxy auth login codex          # Codex/OpenAI OAuth login
         ccproxy auth login openai         # Alias for codex
     """
+    _suppress_debug_logging()
     toolkit = get_rich_toolkit()
-
-    # Default to claude-sdk if no provider specified
-    if provider is None:
-        provider = "claude-sdk"
 
     # Normalize provider names
     provider = provider.lower()
     if provider == "openai":
         provider = "codex"  # OpenAI is an alias for codex
-    elif provider == "claude":
-        provider = "claude-sdk"  # Default 'claude' to SDK
-
-    # Handle Claude SDK authentication (non-OAuth)
-    if provider == "claude-sdk":
-        toolkit.print("[bold cyan]Claude SDK Login[/bold cyan]", centered=True)
-        toolkit.print_line()
-
-        try:
-            # Get credential paths based on options
-            custom_paths = None
-            if credential_file:
-                custom_paths = [Path(credential_file)]
-            elif docker:
-                custom_paths = get_docker_credential_paths()
-
-            # Check if already logged in
-            manager = get_credentials_manager(custom_paths)
-            validation_result = asyncio.run(manager.validate())
-            if validation_result.valid and not validation_result.expired:
-                console.print(
-                    "[yellow]You are already logged in with valid credentials.[/yellow]"
-                )
-                console.print(
-                    "Use [cyan]ccproxy auth info[/cyan] to view current credentials."
-                )
-
-                overwrite = typer.confirm(
-                    "Do you want to login again and overwrite existing credentials?"
-                )
-                if not overwrite:
-                    console.print("Login cancelled.")
-                    return
-
-            # Perform OAuth login
-            console.print("Starting OAuth login process...")
-            console.print("Your browser will open for authentication.")
-            console.print(
-                "A temporary server will start on port 54545 for the OAuth callback..."
-            )
-
-            try:
-                asyncio.run(manager.login())
-                toolkit.print("Successfully logged in to Claude SDK!", tag="success")
-
-                # Show credential info
-                console.print("\n[dim]Credential information:[/dim]")
-                updated_validation = asyncio.run(manager.validate())
-                if updated_validation.valid and updated_validation.credentials:
-                    oauth_token = updated_validation.credentials.claude_ai_oauth
-                    console.print(
-                        f"  Subscription: {oauth_token.subscription_type or 'Unknown'}"
-                    )
-                    if oauth_token.scopes:
-                        console.print(f"  Scopes: {', '.join(oauth_token.scopes)}")
-                    exp_dt = oauth_token.expires_at_datetime
-                    console.print(
-                        f"  Expires: {exp_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-                    )
-            except OSError as e:
-                logger.error("oauth_server_error", error=str(e), exc_info=e)
-                toolkit.print(
-                    "Failed to start OAuth server. Please check port 54545 is available.",
-                    tag="error",
-                )
-                raise typer.Exit(1) from e
-            except ValueError as e:
-                logger.error("oauth_config_error", error=str(e), exc_info=e)
-                toolkit.print(
-                    "OAuth configuration error. Please check your setup.", tag="error"
-                )
-                raise typer.Exit(1) from e
-            except Exception as e:
-                logger.error("oauth_login_failed", error=str(e), exc_info=e)
-                toolkit.print("Login failed. Please try again.", tag="error")
-                raise typer.Exit(1) from e
-
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Login cancelled by user.[/yellow]")
-            raise typer.Exit(1) from None
-        except ImportError as e:
-            toolkit.print(f"Failed to import required modules: {e}", tag="error")
-            raise typer.Exit(1) from e
-        except AttributeError as e:
-            toolkit.print(f"Configuration or plugin error: {e}", tag="error")
-            raise typer.Exit(1) from e
-        except Exception as e:
-            toolkit.print(f"Error during login: {e}", tag="error")
-            raise typer.Exit(1) from e
-
-        return
 
     # Handle OAuth providers (claude-api, codex)
     toolkit.print(
@@ -480,46 +295,55 @@ def login_command(
             )
             raise typer.Exit(1)
 
-        # Special handling for codex/OpenAI
-        if provider == "codex":
-            from ccproxy.auth.openai import OpenAIOAuthClient, OpenAITokenManager
-            from plugins.codex.config import CodexSettings
+        # Use the new OAuth integration handler
+        from ccproxy.cli.oauth_integration import CLIOAuthHandler
 
-            settings = CodexSettings()
-            token_manager = OpenAITokenManager()
-            oauth_client = OpenAIOAuthClient(settings, token_manager)
+        # Use different ports for different providers to avoid conflicts
+        port = 9999 if provider == "claude-api" else 1455
+        handler = CLIOAuthHandler(port=port)
 
-            console.print("Starting OpenAI/Codex OAuth login process...")
-            console.print(
-                "A temporary server will start on port 1455 for the OAuth callback..."
-            )
-            if not no_browser:
-                console.print("Your browser will open for authentication.")
-
+        try:
             credentials = asyncio.run(
-                oauth_client.authenticate(open_browser=not no_browser)
-            )
-
-            toolkit.print("Successfully logged in to OpenAI/Codex!", tag="success")
-            console.print("\n[dim]Credential information:[/dim]")
-            console.print(f"  Account ID: {credentials.account_id}")
-            console.print(
-                f"  Expires: {credentials.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-            )
-        else:
-            # Generic OAuth flow for other providers
-            oauth_client = asyncio.run(get_oauth_client_for_provider(provider))
-
-            console.print(f"Starting {provider} OAuth login process...")
-            if not no_browser:
-                console.print("Your browser will open for authentication.")
-
-            credentials = asyncio.run(
-                oauth_client.authenticate(open_browser=not no_browser)
+                handler.login(provider, open_browser=not no_browser)
             )
 
             toolkit.print(f"Successfully logged in to {provider}!", tag="success")
-            console.print(f"\n[dim]Authenticated with {provider}[/dim]")
+
+            # Show credential summary using provider's method
+            console.print(f"\n[dim]Authentication successful for {provider}[/dim]")
+
+            from ccproxy.auth.oauth.registry import get_oauth_registry
+
+            registry = get_oauth_registry()
+            oauth_provider = registry.get_provider(provider)
+
+            if oauth_provider and hasattr(oauth_provider, "get_credential_summary"):
+                try:
+                    summary = oauth_provider.get_credential_summary(credentials)
+
+                    # Display summary info
+                    if summary.get("subscription_type"):
+                        console.print(f"  Subscription: {summary['subscription_type']}")
+                    if summary.get("account_id"):
+                        console.print(f"  Account ID: {summary['account_id']}")
+                    if summary.get("scopes"):
+                        console.print(f"  Scopes: {', '.join(summary['scopes'])}")
+                    if summary.get("expires_at"):
+                        console.print(f"  Token expires: {summary['expires_at']}")
+
+                    # Show storage location
+                    storage = oauth_provider.get_storage()
+                    if storage and hasattr(storage, "get_location"):
+                        console.print(f"  Stored at: {storage.get_location()}")
+                except Exception as e:
+                    logger.debug(f"Could not get credential summary: {e}")
+
+        except TimeoutError as e:
+            toolkit.print(f"OAuth login timed out: {e}", tag="error")
+            raise typer.Exit(1) from e
+        except ValueError as e:
+            toolkit.print(f"OAuth configuration error: {e}", tag="error")
+            raise typer.Exit(1) from e
 
     except ValueError as e:
         toolkit.print(f"Configuration error during {provider} login: {e}", tag="error")
@@ -543,11 +367,9 @@ def login_command(
 @app.command(name="status")
 def status_command(
     provider: Annotated[
-        str | None,
-        typer.Argument(
-            help="Provider to check status (claude-sdk, claude-api, codex, openai)"
-        ),
-    ] = None,
+        str,
+        typer.Argument(help="Provider to check status (claude-api, codex, openai)"),
+    ],
     detailed: Annotated[
         bool,
         typer.Option("--detailed", "-d", help="Show detailed credential information"),
@@ -556,28 +378,32 @@ def status_command(
     """Check authentication status and info for specified provider.
 
     Shows authentication status, credential validity, and account information.
-    If no provider specified, checks Claude SDK status.
 
     Examples:
-        ccproxy auth status              # Claude SDK status (default)
+        ccproxy auth status claude-api   # Claude API OAuth status
         ccproxy auth status codex        # Codex/OpenAI status
-        ccproxy auth status -d           # Detailed info with tokens
+        ccproxy auth status -d codex     # Detailed info with tokens
     """
+    _suppress_debug_logging()
     toolkit = get_rich_toolkit()
 
-    # Default to claude-sdk if no provider specified
-    if provider is None:
-        provider = "claude-sdk"
+    # Store original provider name for display
+    display_provider = provider.lower()
 
-    # Normalize provider names
+    # Normalize provider names for internal use
     provider = provider.lower()
     if provider == "openai":
         provider = "codex"
-    elif provider == "claude":
-        provider = "claude-sdk"
+
+    # Use proper display names
+    display_name = {
+        "openai": "OpenAI",
+        "codex": "Codex",
+        "claude-api": "Claude-Api",
+    }.get(display_provider, display_provider.replace("_", "-").title())
 
     toolkit.print(
-        f"[bold cyan]{provider.replace('_', '-').title()} Authentication Status[/bold cyan]",
+        f"[bold cyan]{display_name} Authentication Status[/bold cyan]",
         centered=True,
     )
     toolkit.print_line()
@@ -604,7 +430,16 @@ def status_command(
                 await plugin.initialize(services)
 
                 # Get profile info
-                return await plugin.get_profile_info()
+                profile_info = await plugin.get_profile_info()
+                if profile_info is None:
+                    return None
+                # Ensure we return a dict as specified in the function signature
+                if isinstance(profile_info, dict):
+                    return profile_info
+                # Convert other types to dict if possible
+                if hasattr(profile_info, "__dict__"):
+                    return dict(profile_info.__dict__)
+                return {"profile_info": str(profile_info)}
         except ValueError as e:
             # Provider doesn't support OAuth or doesn't exist
             logger.debug(
@@ -629,63 +464,49 @@ def status_command(
             return None
 
     try:
-        # Try to get profile info from ANY plugin (OAuth or not)
-        async def get_any_plugin_profile() -> dict[str, Any] | None:
-            """Get profile info from any plugin, not just OAuth ones."""
+        # Try to get profile info based on provider type
+        profile_info = None
+
+        if provider == "codex":
+            # Check Codex/OpenAI credentials directly
             try:
-                loader = PluginLoader()
-                plugins = await loader.load_plugins()
-
-                for plugin in plugins:
-                    if plugin.name == provider:
-                        # Check if it's a ProviderPlugin
-                        if not isinstance(plugin, ProviderPlugin):
-                            continue
-
-                        # Initialize plugin with minimal CoreServices
-                        import httpx
-                        import structlog
-
-                        from ccproxy.core.services import CoreServices
-
-                        settings = get_settings()
-
-                        async with httpx.AsyncClient() as client:
-                            services = CoreServices(
-                                settings=settings,
-                                http_client=client,
-                                logger=structlog.get_logger(),
-                            )
-                            await plugin.initialize(services)
-
-                            # Get profile info
-                            return await plugin.get_profile_info()
-
-                return None
-            except AttributeError as e:
-                logger.debug(
-                    "plugin_profile_missing_method",
-                    provider=provider,
-                    error=str(e),
-                    exc_info=e,
-                )
-                return None
-            except ValueError as e:
-                logger.debug(
-                    "plugin_profile_invalid_value",
-                    provider=provider,
-                    error=str(e),
-                    exc_info=e,
-                )
-                return None
+                token_manager = asyncio.run(get_token_manager_for_provider("codex"))
+                if token_manager:
+                    credentials = asyncio.run(token_manager.load_credentials())
+                if credentials:
+                    profile_info = {
+                        "account_id": credentials.account_id,
+                        "expires_at": credentials.expires_at.strftime(
+                            "%Y-%m-%d %H:%M:%S UTC"
+                        ),
+                    }
+            except ImportError as e:
+                logger.debug("codex_import_error", error=str(e), exc_info=e)
             except Exception as e:
-                logger.debug(
-                    "plugin_profile_failed", provider=provider, error=str(e), exc_info=e
-                )
-                return None
+                logger.debug("codex_status_error", error=str(e), exc_info=e)
 
-        # Get profile info from the plugin
-        profile_info = asyncio.run(get_any_plugin_profile())
+        elif provider == "claude-api":
+            # Check Claude API OAuth credentials
+            try:
+                token_manager = asyncio.run(
+                    get_token_manager_for_provider("claude_api")
+                )
+                if token_manager:
+                    credentials = asyncio.run(token_manager.load_credentials())
+                if credentials and credentials.claude_ai_oauth:
+                    oauth = credentials.claude_ai_oauth
+                    profile_info = {
+                        "email": getattr(oauth, "email", "N/A"),
+                        "subscription_type": oauth.subscription_type or "Unknown",
+                        "expires_at": oauth.expires_at_datetime.strftime(
+                            "%Y-%m-%d %H:%M:%S UTC"
+                        ),
+                        "scopes": oauth.scopes or [],
+                    }
+            except ImportError as e:
+                logger.debug("claude_api_import_error", error=str(e), exc_info=e)
+            except Exception as e:
+                logger.debug("claude_api_status_error", error=str(e), exc_info=e)
 
         if profile_info:
             console.print("[green]✓[/green] Authenticated with valid credentials")
@@ -767,23 +588,25 @@ def status_command(
             # For detailed mode, try to show token preview if available
             if detailed:
                 # Special handling for different providers
-                if provider == "claude-sdk":
-                    manager = get_credentials_manager()
-                    validation_result = asyncio.run(manager.validate())
-                    if validation_result.valid and validation_result.credentials:
-                        oauth = validation_result.credentials.claude_ai_oauth
+                if provider == "codex":
+                    token_manager = asyncio.run(get_token_manager_for_provider("codex"))
+                    if token_manager:
+                        credentials = asyncio.run(token_manager.load_credentials())
+                    if credentials and credentials.access_token:
+                        token_preview = f"{credentials.access_token[:12]}...{credentials.access_token[-8:]}"
+                        console.print(f"\n  Token: [dim]{token_preview}[/dim]")
+                elif provider == "claude-api":
+                    token_manager = asyncio.run(
+                        get_token_manager_for_provider("claude_api")
+                    )
+                    if token_manager:
+                        credentials = asyncio.run(token_manager.load_credentials())
+                    if credentials and credentials.claude_ai_oauth:
+                        oauth = credentials.claude_ai_oauth
                         if oauth.access_token:
                             token_str = oauth.access_token.get_secret_value()
                             token_preview = f"{token_str[:8]}...{token_str[-8:]}"
                             console.print(f"\n  Token: [dim]{token_preview}[/dim]")
-                elif provider == "codex":
-                    from ccproxy.auth.openai import OpenAITokenManager
-
-                    token_manager = OpenAITokenManager()
-                    credentials = asyncio.run(token_manager.load_credentials())
-                    if credentials and credentials.access_token:
-                        token_preview = f"{credentials.access_token[:12]}...{credentials.access_token[-8:]}"
-                        console.print(f"\n  Token: [dim]{token_preview}[/dim]")
         else:
             # No profile info means not authenticated or provider doesn't exist
             console.print("[red]✗[/red] Not authenticated or provider not found")
@@ -812,6 +635,7 @@ def logout_command(
         ccproxy auth logout codex
         ccproxy auth logout openai
     """
+    _suppress_debug_logging()
     toolkit = get_rich_toolkit()
 
     # Normalize provider names
@@ -824,10 +648,9 @@ def logout_command(
 
     try:
         if provider == "codex":
-            from ccproxy.auth.openai import OpenAITokenManager
-
-            token_manager = OpenAITokenManager()
-            existing_creds = asyncio.run(token_manager.load_credentials())
+            token_manager = asyncio.run(get_token_manager_for_provider("codex"))
+            if token_manager:
+                existing_creds = asyncio.run(token_manager.load_credentials())
 
             if not existing_creds:
                 console.print(
@@ -844,7 +667,7 @@ def logout_command(
                 return
 
             # Delete credentials
-            success = asyncio.run(token_manager.delete_credentials())
+            success = asyncio.run(token_manager.clear_credentials())
 
             if success:
                 toolkit.print(
@@ -874,113 +697,33 @@ def logout_command(
         raise typer.Exit(1) from e
 
 
-@app.command()
-def renew(
-    docker: Annotated[
-        bool,
-        typer.Option(
-            "--docker",
-            "-d",
-            help="Renew credentials for Docker environment",
-        ),
-    ] = False,
-    credential_file: Annotated[
-        Path | None,
-        typer.Option(
-            "--credential-file",
-            "-f",
-            help="Path to custom credential file",
-        ),
-    ] = None,
-) -> None:
-    """Force renew Claude credentials without checking expiration.
-
-    This command will refresh your access token regardless of whether it's expired.
-    Useful for testing or when you want to ensure you have the latest token.
-
-    Examples:
-        ccproxy auth renew
-        ccproxy auth renew --docker
-        ccproxy auth renew --credential-file /path/to/credentials.json
-    """
-    toolkit = get_rich_toolkit()
-    toolkit.print("[bold cyan]Claude Credentials Renewal[/bold cyan]", centered=True)
-    toolkit.print_line()
-
-    console = Console()
-
-    try:
-        # Get credential paths based on options
-        custom_paths = None
-        if credential_file:
-            custom_paths = [Path(credential_file)]
-        elif docker:
-            custom_paths = get_docker_credential_paths()
-
-        # Create credentials manager
-        manager = get_credentials_manager(custom_paths)
-
-        # Check if credentials exist
-        validation_result = asyncio.run(manager.validate())
-        if not validation_result.valid:
-            toolkit.print("[red]✗[/red] No credentials found to renew", tag="error")
-            console.print("\n[dim]Please login first:[/dim]")
-            console.print("[cyan]ccproxy auth login[/cyan]")
-            raise typer.Exit(1)
-
-        # Force refresh the token
-        console.print("[yellow]Refreshing access token...[/yellow]")
-        refreshed_credentials = asyncio.run(manager.refresh_token())
-
-        if refreshed_credentials:
-            toolkit.print(
-                "[green]✓[/green] Successfully renewed credentials!", tag="success"
-            )
-
-            # Show updated credential info
-            oauth_token = refreshed_credentials.claude_ai_oauth
-            console.print("\n[dim]Updated credential information:[/dim]")
-            console.print(
-                f"  Subscription: {oauth_token.subscription_type or 'Unknown'}"
-            )
-            if oauth_token.scopes:
-                console.print(f"  Scopes: {', '.join(oauth_token.scopes)}")
-            exp_dt = oauth_token.expires_at_datetime
-            console.print(f"  Expires: {exp_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-        else:
-            toolkit.print("[red]✗[/red] Failed to renew credentials", tag="error")
-            raise typer.Exit(1)
-
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Renewal cancelled by user.[/yellow]")
-        raise typer.Exit(1) from None
-    except OSError as e:
-        toolkit.print(f"Network or server error during renewal: {e}", tag="error")
-        raise typer.Exit(1) from e
-    except ValueError as e:
-        toolkit.print(f"Invalid credentials or configuration: {e}", tag="error")
-        raise typer.Exit(1) from e
-    except ImportError as e:
-        toolkit.print(f"Failed to import required modules: {e}", tag="error")
-        raise typer.Exit(1) from e
-    except Exception as e:
-        toolkit.print(f"Error during renewal: {e}", tag="error")
-        raise typer.Exit(1) from e
-
-
 # OpenAI Codex Authentication Commands
 
 
-def get_openai_token_manager() -> "OpenAITokenManager":
-    """Get OpenAI token manager dependency."""
-    from ccproxy.auth.openai import OpenAITokenManager
+async def get_token_manager_for_provider(provider: str) -> Any:
+    """Get token manager from plugin registry for the specified provider.
 
-    return OpenAITokenManager()
+    Args:
+        provider: Provider name (e.g., 'claude_api', 'codex')
+
+    Returns:
+        Token manager instance for the provider, or None if not found
+    """
+    from ccproxy.config.settings import get_settings
+    from ccproxy.plugins.discovery import discover_and_load_plugins
+
+    settings = get_settings()
+    plugins = discover_and_load_plugins(settings)
+
+    for plugin_name, factory in plugins.items():
+        manifest = factory.get_manifest()
+        if plugin_name == provider and manifest.token_manager_factory:
+            return manifest.token_manager_factory()
+
+    return None
 
 
-def get_openai_oauth_client(settings: "CodexSettings") -> "OpenAIOAuthClient":
-    """Get OpenAI OAuth client dependency."""
-    from ccproxy.auth.openai import OpenAIOAuthClient
-
-    token_manager = get_openai_token_manager()
-    return OpenAIOAuthClient(settings, token_manager)
+def get_openai_token_manager() -> Any:
+    """Get OpenAI/Codex token manager dependency."""
+    # Use the new plugin-based approach
+    return asyncio.run(get_token_manager_for_provider("codex"))

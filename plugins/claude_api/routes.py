@@ -1,20 +1,20 @@
 """Claude API plugin routes."""
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response
 
-from ccproxy.api.dependencies import (
-    ClaudeAPIAdapterDep,
-    ClaudeAPIDetectionDep,
-    ProxyServiceDep,
-)
+from ccproxy.api.dependencies import ProxyServiceDep, get_plugin_adapter
 from ccproxy.auth.conditional import ConditionalAuthDep
+from ccproxy.config.settings import get_settings
 
 
 if TYPE_CHECKING:
     pass
+
+# Create plugin-specific adapter dependency
+ClaudeAPIAdapterDep = Annotated[Any, Depends(get_plugin_adapter("claude_api"))]
 
 router = APIRouter(tags=["plugin-claude-api"])
 
@@ -40,10 +40,9 @@ def claude_api_path_transformer(path: str) -> str:
 @router.post("/v1/messages", response_model=None)
 async def create_anthropic_message(
     request: Request,
-    adapter: ClaudeAPIAdapterDep,
     proxy_service: ProxyServiceDep,
-    detection_service: ClaudeAPIDetectionDep,
     auth: ConditionalAuthDep,
+    adapter: ClaudeAPIAdapterDep,
 ) -> Response:
     """Create a message using Claude AI with native Anthropic format.
 
@@ -64,10 +63,9 @@ async def create_anthropic_message(
 @router.post("/v1/chat/completions", response_model=None)
 async def create_openai_chat_completion(
     request: Request,
-    adapter: ClaudeAPIAdapterDep,
     proxy_service: ProxyServiceDep,
-    detection_service: ClaudeAPIDetectionDep,
     auth: ConditionalAuthDep,
+    adapter: ClaudeAPIAdapterDep,
 ) -> Response:
     """Create a chat completion using Claude AI with OpenAI-compatible format.
 
@@ -94,8 +92,6 @@ async def list_models(
 
     Returns a list of available models in OpenAI-compatible format.
     """
-    # Get configured models from settings
-    from ccproxy.config.settings import get_settings
 
     settings = get_settings()
 

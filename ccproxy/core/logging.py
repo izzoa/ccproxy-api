@@ -295,7 +295,7 @@ def get_logger(name: str | None = None) -> BoundLogger:
     Returns:
         BoundLogger with request_id bound if available
     """
-    logger = structlog.get_logger(name)  # type: ignore[no-any-return]
+    logger = structlog.get_logger(name)
 
     # Try to get request context and bind request_id if available
     try:
@@ -309,4 +309,4 @@ def get_logger(name: str | None = None) -> BoundLogger:
         # This ensures backward compatibility
         pass
 
-    return logger
+    return logger  # type: ignore[no-any-return]

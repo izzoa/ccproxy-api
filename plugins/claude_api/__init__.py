@@ -4,7 +4,7 @@ This plugin provides direct access to the Anthropic Claude API
 with support for both native Anthropic format and OpenAI-compatible format.
 """
 
-from .plugin import Plugin
+from .plugin import factory
 
 
-__all__ = ["Plugin"]
+__all__ = ["factory"]

@@ -132,17 +132,17 @@ class CodexAdapter(BaseAdapter):
             OPENAI_CHAT_COMPLETIONS_PATH
         ) or endpoint.endswith(OPENAI_COMPLETIONS_PATH)
 
-        # Get authentication headers
+        # Get authentication token
         if not self._auth_manager:
             raise HTTPException(
                 status_code=503, detail="Authentication manager not available"
             )
-        auth_headers = await self._auth_manager.get_auth_headers()
 
-        # Extract access_token if present
-        access_token = None
-        if "Authorization" in auth_headers:
-            access_token = auth_headers["Authorization"].replace("Bearer ", "")
+        # Get access token directly from auth manager
+        access_token = await self._auth_manager.get_access_token()
+
+        # Build auth headers with Bearer token
+        auth_headers = {"Authorization": f"Bearer {access_token}"}
 
         # Build target URL
         target_url = f"{CODEX_API_BASE_URL}{CODEX_RESPONSES_ENDPOINT}"

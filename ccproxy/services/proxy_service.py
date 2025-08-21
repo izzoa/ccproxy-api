@@ -14,12 +14,9 @@ from ccproxy.core.http import BaseProxyClient
 from ccproxy.hooks import HookEvent, HookManager
 from ccproxy.hooks.base import HookContext
 from ccproxy.observability.metrics import PrometheusMetrics
-from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.cache import ResponseCache
 from ccproxy.services.config import ProxyConfiguration
-from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.http.connection_pool import ConnectionPoolManager
-from ccproxy.services.interfaces import IPluginRegistry
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
@@ -38,16 +35,13 @@ class ProxyService:
         self,
         # Core dependencies
         proxy_client: BaseProxyClient,
-        credentials_manager: CredentialsManager,
         settings: Settings,
         # Injected services
         request_tracer: CoreRequestTracer,
         mock_handler: MockResponseHandler,
         streaming_handler: StreamingHandler,
-        auth_service: AuthenticationService,
         config: ProxyConfiguration,
         http_client: httpx.AsyncClient,  # Shared HTTP client for centralized management
-        plugin_registry: IPluginRegistry | None = None,  # Uses protocol interface
         metrics: PrometheusMetrics | None = None,
         response_cache: ResponseCache | None = None,
         connection_pool_manager: ConnectionPoolManager | None = None,
@@ -61,16 +55,13 @@ class ProxyService:
         """
         # Core dependencies
         self.proxy_client = proxy_client
-        self.credentials_manager = credentials_manager
         self.settings = settings
 
         # Injected services
         self.request_tracer = request_tracer
         self.mock_handler = mock_handler
         self.streaming_handler = streaming_handler
-        self.auth_service = auth_service
         self.config = config
-        self.plugin_registry = plugin_registry
         self.metrics = metrics
 
         # Performance optimization services
@@ -88,15 +79,6 @@ class ProxyService:
         logger.debug(
             "ProxyService initialized with injected services and performance optimizations"
         )
-
-    def set_plugin_registry(self, plugin_registry: IPluginRegistry) -> None:
-        """Set the plugin registry.
-
-        This method allows setting the plugin registry after initialization
-        if it wasn't available during construction.
-        """
-        self.plugin_registry = plugin_registry
-        logger.debug("Plugin registry set on ProxyService")
 
     def set_hook_manager(self, hook_manager: HookManager) -> None:
         """Set the hook manager.
@@ -231,17 +213,11 @@ class ProxyService:
     async def initialize_plugins(self, scheduler: Any | None = None) -> None:
         """Initialize plugin system at startup.
 
-        - Delegates to plugin registry
-        - Called once during app startup
-        - Uses the shared HTTP client for centralized management
+        V2 plugins are initialized via FastAPI app lifecycle.
+        This method is kept for backwards compatibility but does nothing.
         """
-        if not self.plugin_registry:
-            raise RuntimeError(
-                "Plugin registry not set - check ServiceContainer initialization"
-            )
-
-        # Initialize plugins with the shared HTTP client
-        await self.plugin_registry.initialize_plugins(self.http_client, self, scheduler)
+        # V2 plugins don't use this method
+        pass
 
     async def get_pooled_client(
         self, base_url: str | None = None, streaming: bool = False
@@ -376,17 +352,11 @@ class ProxyService:
         - Does NOT close HTTP client (managed by ServiceContainer)
         """
         try:
-            # Close plugin registry if it has a close method
-            if self.plugin_registry and hasattr(self.plugin_registry, "close"):
-                await self.plugin_registry.close()
+            # V2 plugins are closed via FastAPI app lifecycle
 
             # Close proxy client
             if hasattr(self.proxy_client, "close"):
                 await self.proxy_client.close()
-
-            # Close credentials manager
-            if hasattr(self.credentials_manager, "close"):
-                await self.credentials_manager.close()
 
             # Close connection pools
             if self.connection_pool_manager:

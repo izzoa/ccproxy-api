@@ -7,7 +7,7 @@ import secrets
 import urllib.parse
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
 import httpx
 from pydantic import BaseModel
@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 CredentialsT = TypeVar("CredentialsT", bound=BaseModel)
 
 
-class BaseOAuthClient(ABC):
+class BaseOAuthClient(ABC, Generic[CredentialsT]):
     """Abstract base class for OAuth PKCE flow implementations."""
 
     def __init__(
@@ -34,7 +34,7 @@ class BaseOAuthClient(ABC):
         redirect_uri: str,
         base_url: str,
         scopes: list[str],
-        storage: TokenStorage | None = None,
+        storage: TokenStorage[CredentialsT] | None = None,
     ):
         """Initialize OAuth client with common parameters.
 
@@ -171,7 +171,7 @@ class BaseOAuthClient(ABC):
                     expires_in=token_response.get("expires_in"),
                 )
 
-                return token_response
+                return token_response  # type: ignore[no-any-return]
 
             except httpx.HTTPStatusError as e:
                 error_detail = self._extract_error_detail(e.response)
@@ -260,8 +260,10 @@ class BaseOAuthClient(ABC):
         """
         try:
             error_data = response.json()
-            return error_data.get(
-                "error_description", error_data.get("error", str(response.text))
+            return str(
+                error_data.get(
+                    "error_description", error_data.get("error", str(response.text))
+                )
             )
         except Exception:
             return response.text[:200] if len(response.text) > 200 else response.text
@@ -413,7 +415,7 @@ class BaseOAuthClient(ABC):
             token_response = await self._exchange_code_for_tokens(code, code_verifier)
 
             # Parse provider-specific response
-            credentials = await self.parse_token_response(token_response)
+            credentials: CredentialsT = await self.parse_token_response(token_response)
 
             # Save to storage if available
             if self.storage:

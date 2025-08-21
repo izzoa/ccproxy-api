@@ -36,7 +36,7 @@ class ClaudeAPIAdapter(BaseAdapter):
         auth_manager: Any,
         detection_service: Any,
         http_client: AsyncClient | None = None,
-        logger: structlog.BoundLogger | None = None,
+        logger: Any | None = None,
     ) -> None:
         """Initialize the Claude API adapter.
 
@@ -47,7 +47,10 @@ class ClaudeAPIAdapter(BaseAdapter):
             http_client: Optional HTTP client for making requests
             logger: Optional structured logger instance
         """
-        self.logger = logger or structlog.get_logger(__name__)
+        # Use stdlib logger for compatibility with RequestContext
+        import structlog.stdlib
+
+        self.logger = logger or structlog.stdlib.get_logger(__name__)
         self.proxy_service = proxy_service
         self._auth_manager = auth_manager
         self._detection_service = detection_service
@@ -107,8 +110,12 @@ class ClaudeAPIAdapter(BaseAdapter):
 
         # Get request body and auth
         body = await request.body()
-        auth_headers = await self._auth_manager.get_auth_headers()
-        access_token = auth_headers.get("x-api-key") if auth_headers else None
+
+        # Get access token directly from auth manager
+        access_token = await self._auth_manager.get_access_token()
+
+        # Build auth headers with Bearer token
+        auth_headers = {"Authorization": f"Bearer {access_token}"}
 
         # Determine endpoint handling
         target_url, needs_conversion = self._resolve_endpoint(endpoint)

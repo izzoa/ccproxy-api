@@ -1,328 +1,136 @@
-"""Claude API provider plugin implementation."""
+"""Claude API plugin v2 implementation."""
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
-
-if TYPE_CHECKING:
-    pass
-from fastapi import APIRouter
-from pydantic import BaseModel
-
-from ccproxy.core.services import CoreServices
-from ccproxy.plugins.protocol import (
-    HealthCheckResult,
-    OAuthClientProtocol,
-    ProviderPlugin,
+from ccproxy.plugins import (
+    PluginContext,
+    PluginManifest,
+    ProviderPluginFactory,
+    ProviderPluginRuntime,
+    RouteSpec,
+    TaskSpec,
 )
-from ccproxy.services.adapters.base import BaseAdapter
-from ccproxy.utils.binary_resolver import BinaryResolver
-from ccproxy.utils.cli_logging import log_plugin_summary
-
-from .adapter import ClaudeAPIAdapter
-from .config import ClaudeAPISettings
-from .detection_service import ClaudeAPIDetectionService
-from .health import claude_api_health_check
-from .routes import router as claude_api_router
-from .tasks import ClaudeAPIDetectionRefreshTask
+from plugins.claude_api.adapter import ClaudeAPIAdapter
+from plugins.claude_api.config import ClaudeAPISettings
+from plugins.claude_api.detection_service import ClaudeAPIDetectionService
+from plugins.claude_api.health import claude_api_health_check
+from plugins.claude_api.routes import router as claude_api_router
+from plugins.claude_api.tasks import ClaudeAPIDetectionRefreshTask
 
 
 logger = structlog.get_logger(__name__)
 
 
-class Plugin(ProviderPlugin):
-    """Claude API provider plugin.
+class ClaudeAPIRuntime(ProviderPluginRuntime):
+    """Runtime for Claude API plugin."""
 
-    This plugin provides direct access to the Anthropic Claude API
-    with support for both native Anthropic format and OpenAI-compatible format.
-    """
+    def __init__(self, manifest: PluginManifest):
+        """Initialize runtime."""
+        super().__init__(manifest)
+        self.config: ClaudeAPISettings | None = None
 
-    def __init__(self) -> None:
+    async def _on_initialize(self) -> None:
         """Initialize the Claude API plugin."""
-        self._name = "claude_api"
-        self._version = "1.0.0"
-        self._router_prefix = "/api"
-        self._services: CoreServices | None = None
-        self._config: ClaudeAPISettings | None = None
-        self._adapter: ClaudeAPIAdapter | None = None
-        self._credentials_manager: Any | None = None
-        self._detection_service: ClaudeAPIDetectionService | None = None
-
-    @property
-    def name(self) -> str:
-        """Plugin name."""
-        return self._name
-
-    @property
-    def version(self) -> str:
-        """Plugin version."""
-        return self._version
-
-    @property
-    def dependencies(self) -> list[str]:
-        """List of plugin names this plugin depends on."""
-        return []  # No dependencies
-
-    @property
-    def router_prefix(self) -> str:
-        """Unique route prefix for this plugin."""
-        return self._router_prefix
-
-    async def initialize(self, services: CoreServices) -> None:
-        """Initialize plugin with shared services.
-
-        Args:
-            services: Core services container with shared resources
-        """
-        self._services = services
-
-        # Load plugin-specific configuration
-        plugin_config = services.get_plugin_config(self.name)
-        self._config = ClaudeAPISettings.model_validate(plugin_config)
-
-        # Initialize detection service
-        self._detection_service = ClaudeAPIDetectionService(services.settings)
-        await self._detection_service.initialize_detection()
-
-        # Log CLI status
-        version = self._detection_service.get_version()
-        cli_path = self._detection_service.get_cli_path()
-
-        if cli_path:
-            logger.debug(
-                "claude_cli_available",
-                status="available",
-                version=version,
-                cli_path=cli_path,
-            )
-        else:
-            logger.warning(
-                "claude_cli_not_found",
-                status="not_found",
-                msg="Claude CLI not found in PATH or common locations",
-            )
-
-        # Initialize credentials manager for OAuth token management
-        from ccproxy.services.credentials.manager import CredentialsManager
-
-        self._credentials_manager = CredentialsManager()
-
-        # Initialize adapter with all required dependencies
-        self._adapter = ClaudeAPIAdapter(
-            proxy_service=services.proxy_service,  # Use proxy service from core services
-            auth_manager=self._credentials_manager,
-            detection_service=self._detection_service,
-            http_client=services.http_client,
-            logger=services.logger.bind(plugin=self.name),
-        )
+        # Debug: Log what we receive in context
         logger.debug(
+            "claude_api_initializing",
+            plugin=self.name,
+            context_keys=list(self.context.keys()) if self.context else [],
+            has_config="config" in (self.context or {}),
+            config_type=type(self.context.get("config")).__name__
+            if self.context
+            else None,
+        )
+
+        await super()._on_initialize()
+
+        if not self.context:
+            raise RuntimeError("Context not set")
+
+        # Get configuration
+        config = self.context.get("config")
+        if not isinstance(config, ClaudeAPISettings):
+            logger.warning(
+                "claude_api_no_config",
+                plugin=self.name,
+                config_type=type(config).__name__ if config else None,
+                config_value=config,
+            )
+            # Use default config if none provided
+            config = ClaudeAPISettings()
+            logger.info("claude_api_using_default_config", plugin=self.name)
+        self.config = config
+
+        # Initialize detection service to populate cached data
+        if self.detection_service:
+            try:
+                # This will detect headers and system prompt
+                await self.detection_service.initialize_detection()
+                version = self.detection_service.get_version()
+                cli_path = self.detection_service.get_cli_path()
+
+                if cli_path:
+                    logger.debug(
+                        "claude_cli_available",
+                        status="available",
+                        version=version,
+                        cli_path=cli_path,
+                    )
+                else:
+                    logger.warning(
+                        "claude_cli_not_found",
+                        status="not_found",
+                        msg="Claude CLI not found in PATH or common locations",
+                    )
+            except Exception as e:
+                logger.error(
+                    "claude_detection_initialization_failed",
+                    error=str(e),
+                    exc_info=e,
+                )
+
+        logger.info(
             "claude_api_plugin_initialized",
             status="initialized",
-            base_url=self._config.base_url,
-            models_count=len(self._config.models) if self._config.models else 0,
-            has_credentials_manager=True,
+            base_url=self.config.base_url,
+            models_count=len(self.config.models) if self.config.models else 0,
+            has_credentials_manager=self.credentials_manager is not None,
         )
 
-        # Log plugin summary with dynamic CLI logging
-        log_plugin_summary(self.get_summary(), self.name)
+    async def _get_health_details(self) -> dict[str, Any]:
+        """Get health check details."""
+        details = await super()._get_health_details()
 
-    def get_summary(self) -> dict[str, Any]:
-        """Get plugin summary for consolidated logging."""
-        summary: dict[str, Any] = {
-            "router_prefix": self.router_prefix,
-        }
+        # Add claude-api specific health check
+        if self.config and self.detection_service and self.credentials_manager:
+            try:
+                health_result = await claude_api_health_check(
+                    self.config, self.detection_service, self.credentials_manager
+                )
+                details.update(
+                    {
+                        "health_check_status": health_result.status,
+                        "health_check_detail": health_result.details,
+                    }
+                )
+            except Exception as e:
+                details["health_check_error"] = str(e)
 
-        if self._config:
-            if self._config.models:
-                summary["models"] = len(self._config.models)
-            else:
-                summary["models"] = 0
-            summary["base_url"] = self._config.base_url
-        else:
-            summary["models"] = 0
-
-        # Add basic authentication status (detailed auth info requires async call)
-        if self._credentials_manager:
-            summary["auth"] = "configured"
-        else:
-            summary["auth"] = "not_configured"
-
-        # Add CLI information using common format
-        if self._detection_service:
-            cli_version = self._detection_service.get_version()
-            cli_path = self._detection_service.get_cli_path()
-
-            # Create CLI info using common format
-            resolver = BinaryResolver()
-            cli_info = resolver.get_cli_info(
-                "claude", "@anthropic-ai/claude-code", cli_version
-            )
-
-            # Override with actual detection service results if available
-            if cli_path:
-                cli_info["command"] = cli_path
-                cli_info["is_available"] = True
-                if isinstance(cli_path, list) and len(cli_path) > 1:
-                    cli_info["source"] = "package_manager"
-                    cli_info["package_manager"] = cli_path[0]
-                    cli_info["path"] = None
-                else:
-                    cli_info["source"] = "path"
-                    cli_info["path"] = (
-                        cli_path[0] if isinstance(cli_path, list) else cli_path
-                    )
-                    cli_info["package_manager"] = None
-
-            # Store CLI info in a structured way for dynamic logging
-            summary["cli_info"] = {"claude": cli_info}
-
-        return summary
-
-    async def get_auth_summary(self) -> dict[str, Any]:
-        """Get detailed authentication status (async version for use in plugin manager)."""
-        if not self._credentials_manager:
-            return {"auth": "not_configured"}
-
-        try:
-            auth_status = await self._credentials_manager.get_auth_status()
-            summary = {"auth": "not_configured"}
-
-            if auth_status.get("auth_configured"):
-                if auth_status.get("token_available"):
-                    summary["auth"] = "authenticated"
-                    if "time_remaining" in auth_status:
-                        summary["auth_expires"] = auth_status["time_remaining"]
-                    if "token_expired" in auth_status:
-                        summary["auth_expired"] = auth_status["token_expired"]
-                    if "subscription_type" in auth_status:
-                        summary["subscription"] = auth_status["subscription_type"]
-                else:
-                    summary["auth"] = "no_token"
-            else:
-                summary["auth"] = "not_configured"
-
-            return summary
-        except Exception as e:
-            logger.warning("claude_api_auth_status_error", error=str(e), exc_info=e)
-            return {"auth": "status_error"}
-
-    async def shutdown(self) -> None:
-        """Cleanup on shutdown."""
-        if self._adapter:
-            await self._adapter.cleanup()
-        logger.debug("claude_api_plugin_shutdown", status="shutdown")
-
-    def create_adapter(self) -> BaseAdapter:
-        """Create adapter instance.
-
-        Returns:
-            ClaudeAPIAdapter instance
-
-        Raises:
-            RuntimeError: If plugin not initialized
-        """
-        if not self._adapter:
-            raise RuntimeError("Plugin not initialized")
-        return self._adapter
-
-    def create_config(self) -> ClaudeAPISettings:
-        """Create provider configuration.
-
-        Returns:
-            ClaudeAPISettings instance
-
-        Raises:
-            RuntimeError: If plugin not initialized
-        """
-        if not self._config:
-            raise RuntimeError("Plugin not initialized")
-        return self._config
-
-    async def validate(self) -> bool:
-        """Validate plugin is ready.
-
-        Always returns True - actual validation happens during initialization.
-        The plugin system calls validate() before initialize(), so we can't
-        check config here since it hasn't been loaded yet.
-
-        Returns:
-            True - validation happens during initialization
-        """
-        return True
-
-    def get_routes(self) -> APIRouter | None:
-        """Return Claude API routes.
-
-        Returns:
-            FastAPI router with Claude API endpoints
-        """
-        return claude_api_router
-
-    async def health_check(self) -> HealthCheckResult:
-        """Perform health check for Claude API plugin.
-
-        Returns:
-            HealthCheckResult with plugin status
-        """
-        return await claude_api_health_check(
-            self._config, self._detection_service, self._credentials_manager
-        )
-
-    def get_scheduled_tasks(self) -> list[Any] | None:
-        """Get scheduled task definitions.
-
-        Returns:
-            List of scheduled task definitions for Claude API plugin
-        """
-        if not self._detection_service:
-            return None
-
-        return [
-            {
-                "task_name": f"claude_api_detection_refresh_{self.name}",
-                "task_type": "claude_api_detection_refresh",
-                "task_class": ClaudeAPIDetectionRefreshTask,
-                "interval_seconds": 3600,  # Refresh every hour
-                "enabled": True,
-                "detection_service": self._detection_service,
-                "skip_initial_run": True,
-            }
-        ]
-
-    def get_config_class(self) -> type[BaseModel] | None:
-        """Get the Pydantic configuration model for this plugin.
-
-        Returns:
-            ClaudeAPISettings class for plugin configuration
-        """
-        return ClaudeAPISettings
-
-    async def get_oauth_client(self) -> "OAuthClientProtocol | None":
-        """Get OAuth client for Claude API authentication.
-
-        Returns:
-            Claude OAuth client instance
-        """
-        from ccproxy.services.credentials.oauth_client import OAuthClient
-
-        return OAuthClient()
+        return details
 
     async def get_profile_info(self) -> dict[str, Any] | None:
-        """Get Claude-specific profile information from stored credentials.
-
-        Returns:
-            Dictionary containing Claude-specific profile information
-        """
+        """Get Claude-specific profile information from stored credentials."""
         try:
-            if not self._credentials_manager:
+            if not self.credentials_manager:
                 return None
 
             # Get profile using credentials manager
-            profile = await self._credentials_manager.get_account_profile()
+            profile = await self.credentials_manager.get_account_profile()
             if not profile:
                 # Try to fetch fresh profile
-                profile = await self._credentials_manager.fetch_user_profile()
+                profile = await self.credentials_manager.fetch_user_profile()
 
             if profile:
                 profile_info = {}
@@ -359,11 +167,165 @@ class Plugin(ProviderPlugin):
 
         return None
 
-    def get_auth_commands(self) -> list[Any] | None:
-        """Get Claude-specific auth command extensions.
+
+class ClaudeAPIFactory(ProviderPluginFactory):
+    """Factory for Claude API plugin."""
+
+    def __init__(self) -> None:
+        """Initialize factory with manifest."""
+        # Create manifest with static declarations
+        manifest = PluginManifest(
+            name="claude_api",
+            version="1.0.0",
+            description="Claude API provider plugin with support for both native Anthropic format and OpenAI-compatible format",
+            is_provider=True,
+            config_class=ClaudeAPISettings,
+            dependencies=[],  # No dependencies
+            routes=[
+                RouteSpec(
+                    router=claude_api_router,
+                    prefix="/api",
+                    tags=["plugin-claude-api"],
+                )
+            ],
+            tasks=[
+                TaskSpec(
+                    task_name="claude_api_detection_refresh",
+                    task_type="claude_api_detection_refresh",
+                    task_class=ClaudeAPIDetectionRefreshTask,
+                    interval_seconds=3600,  # Refresh every hour
+                    enabled=True,
+                    kwargs={"skip_initial_run": True},
+                )
+            ],
+            oauth_client_factory=self._create_oauth_client,
+            oauth_provider_factory=self._create_oauth_provider,
+            token_manager_factory=self._create_token_manager,
+            oauth_config_class=None,  # We'll use the provider's internal config
+        )
+
+        # Initialize with manifest
+        super().__init__(manifest)
+
+    def create_runtime(self) -> ClaudeAPIRuntime:
+        """Create runtime instance."""
+        return ClaudeAPIRuntime(self.manifest)
+
+    def create_adapter(self, context: PluginContext) -> ClaudeAPIAdapter:
+        """Create the adapter for Claude API.
+
+        Args:
+            context: Plugin context
 
         Returns:
-            List of auth command definitions or None
+            ClaudeAPIAdapter instance
         """
-        # Claude API plugin doesn't need custom auth commands for now
-        return None
+        proxy_service = context.get("proxy_service")
+        http_client = context.get("http_client")
+        logger_instance = context.get("logger")
+
+        # Get detection service from context (already created by factory)
+        detection_service = context.get("detection_service")
+
+        # Get credentials manager from context (already created by factory)
+        credentials_manager = context.get("credentials_manager")
+
+        return ClaudeAPIAdapter(
+            proxy_service=proxy_service,
+            auth_manager=credentials_manager,
+            detection_service=detection_service,
+            http_client=http_client,
+            logger=logger_instance,
+        )
+
+    def create_detection_service(
+        self, context: PluginContext
+    ) -> ClaudeAPIDetectionService:
+        """Create the detection service for Claude API.
+
+        Args:
+            context: Plugin context
+
+        Returns:
+            ClaudeAPIDetectionService instance
+        """
+        settings = context.get("settings")
+        if settings is None:
+            from ccproxy.config.settings import Settings
+
+            settings = Settings()
+        return ClaudeAPIDetectionService(settings)
+
+    def create_credentials_manager(self, context: PluginContext) -> Any:
+        """Create the credentials manager for Claude API.
+
+        Args:
+            context: Plugin context
+
+        Returns:
+            ClaudeApiTokenManager instance
+        """
+        from plugins.claude_api.auth.manager import ClaudeApiTokenManager
+
+        return ClaudeApiTokenManager()
+
+    def create_context(self, core_services: Any) -> PluginContext:
+        """Create context with additional components.
+
+        Args:
+            core_services: Core services container
+
+        Returns:
+            Plugin context with Claude API components
+        """
+        # Get base context
+        context = super().create_context(core_services)
+
+        # Add detection service to context for task creation
+        detection_service = self.create_detection_service(context)
+        context["detection_service"] = detection_service
+
+        # Update task spec with detection service
+        if self.manifest.tasks:
+            for task_spec in self.manifest.tasks:
+                if task_spec.task_name == "claude_api_detection_refresh":
+                    # Add detection service to task kwargs
+                    task_spec.kwargs["detection_service"] = detection_service
+
+        return context
+
+    def _create_oauth_client(self) -> Any:
+        """Create OAuth client for Claude API authentication.
+
+        Returns:
+            Claude OAuth client instance
+        """
+        from plugins.claude_api.auth.oauth.client import ClaudeOAuthClient
+        from plugins.claude_api.auth.oauth.config import ClaudeOAuthConfig
+
+        config = ClaudeOAuthConfig()
+        return ClaudeOAuthClient(config)
+
+    def _create_oauth_provider(self) -> Any:
+        """Create OAuth provider for Claude API.
+
+        Returns:
+            Claude OAuth provider instance for registry
+        """
+        from plugins.claude_api.auth.oauth import ClaudeOAuthProvider
+
+        return ClaudeOAuthProvider()
+
+    def _create_token_manager(self) -> Any:
+        """Create token manager for Claude API.
+
+        Returns:
+            ClaudeApiTokenManager instance
+        """
+        from plugins.claude_api.auth.manager import ClaudeApiTokenManager
+
+        return ClaudeApiTokenManager()
+
+
+# Export the factory instance
+factory = ClaudeAPIFactory()

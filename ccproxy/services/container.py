@@ -12,16 +12,12 @@ import structlog
 from ccproxy.config.settings import Settings
 from ccproxy.core.http import BaseProxyClient
 from ccproxy.observability.metrics import PrometheusMetrics
-from ccproxy.plugins.registry import PluginRegistry
-from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.cache import ResponseCache
 from ccproxy.services.config import ProxyConfiguration
-from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.factories import ConcreteServiceFactory
 from ccproxy.services.http.connection_pool import ConnectionPoolManager
 from ccproxy.services.http_pool import HTTPPoolManager
 from ccproxy.services.mocking import MockResponseHandler
-from ccproxy.services.plugins import PluginManager
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
 
@@ -68,19 +64,15 @@ class ServiceContainer:
     def create_proxy_service(
         self,
         proxy_client: BaseProxyClient,
-        credentials_manager: CredentialsManager,
         metrics: PrometheusMetrics | None = None,
     ) -> "ProxyService":
         """Factory method to create fully configured ProxyService.
 
-        Uses dependency inversion with protocols to avoid circular dependencies:
-        - ProxyService depends on IPluginRegistry protocol
-        - PluginManager implements IPluginRegistry
-        - Clean dependency graph with no circles
+        Creates ProxyService with all required dependencies.
+        V2 plugins are managed separately via the FastAPI app lifecycle.
 
         Args:
             proxy_client: HTTP proxy client
-            credentials_manager: Credentials management service
             metrics: Optional metrics service
 
         Returns:
@@ -89,25 +81,15 @@ class ServiceContainer:
         # Import here to avoid circular dependency
         from ccproxy.services.proxy_service import ProxyService
 
-        # Create PluginManager first (it doesn't depend on ProxyService directly now)
-        plugin_registry = PluginRegistry()
-        plugin_manager = PluginManager(
-            plugin_registry=plugin_registry,
-            request_handler=None,  # Will be set to proxy_service after creation
-        )
-
-        # Create ProxyService with PluginManager as IPluginRegistry
+        # Create ProxyService without old plugin system
         proxy_service = ProxyService(
             proxy_client=proxy_client,
-            credentials_manager=credentials_manager,
             settings=self.settings,
             request_tracer=self.get_request_tracer(),
             mock_handler=self.get_mock_handler(),
             streaming_handler=self.get_streaming_handler(metrics),
-            auth_service=self.get_auth_service(credentials_manager),
             config=self.get_proxy_config(),
             http_client=self.get_http_client(),
-            plugin_registry=plugin_manager,  # PluginManager implements IPluginRegistry
             metrics=metrics,
             response_cache=self.get_response_cache(),
             connection_pool_manager=self.get_connection_pool_manager(),
@@ -171,22 +153,6 @@ class ServiceContainer:
                 self.settings, metrics, request_tracer
             )
         return self._services[service_key]  # type: ignore
-
-    def get_auth_service(
-        self, credentials_manager: CredentialsManager
-    ) -> AuthenticationService:
-        """Get authentication service instance.
-
-        Creates a new instance each time since it depends on credentials_manager
-        which may vary between calls.
-
-        Args:
-            credentials_manager: Credentials management service
-
-        Returns:
-            Authentication service instance
-        """
-        return self._factory.create_auth_service(credentials_manager)
 
     def get_proxy_config(self) -> ProxyConfiguration:
         """Get proxy configuration service instance.

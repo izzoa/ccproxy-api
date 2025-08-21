@@ -19,10 +19,6 @@ from ccproxy.auth.models import (
     ClaudeCredentials,
     OAuthToken,
 )
-from ccproxy.auth.storage import JsonFileTokenStorage as JsonFileStorage
-
-# Import CredentialsManager locally to avoid circular import
-from ccproxy.services.credentials.config import OAuthConfig
 
 
 logger = get_logger(__name__)
@@ -381,7 +377,9 @@ async def _exchange_code_for_tokens(
         import httpx
 
         # Create OAuth config with default values
-        oauth_config = OAuthConfig()
+        from plugins.claude_api.auth.oauth.config import ClaudeOAuthConfig
+
+        oauth_config = ClaudeOAuthConfig()
 
         # Exchange authorization code for tokens
         token_data = {
@@ -430,17 +428,19 @@ async def _exchange_code_for_tokens(
 
                 credentials = ClaudeCredentials(claudeAiOauth=OAuthToken(**oauth_data))
 
-                # Save credentials using CredentialsManager (lazy import to avoid circular import)
-                from ccproxy.services.credentials.manager import CredentialsManager
+                # Save credentials using plugin's token manager
+                # This is Claude API OAuth based on the anthropic-beta header
+                from ccproxy.auth.storage.generic import GenericJsonStorage
+                from plugins.claude_api.auth.manager import ClaudeApiTokenManager
 
                 if custom_paths:
                     # Use the first custom path for storage
-                    storage = JsonFileStorage(custom_paths[0])
-                    manager = CredentialsManager(storage=storage)
+                    storage = GenericJsonStorage(custom_paths[0], ClaudeCredentials)
+                    manager = ClaudeApiTokenManager(storage=storage)
                 else:
-                    manager = CredentialsManager()
+                    manager = ClaudeApiTokenManager()
 
-                if await manager.save(credentials):
+                if await manager.save_credentials(credentials):
                     logger.info(
                         "Successfully saved OAuth credentials",
                         subscription_type=oauth_data["subscriptionType"],

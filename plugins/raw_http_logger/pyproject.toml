@@ -17,4 +17,3 @@ raw_http_logger = "plugins.raw_http_logger.plugin:Plugin"
 
 [tool.hatch.build.targets.wheel]
 packages = ["plugins/raw_http_logger"]
-

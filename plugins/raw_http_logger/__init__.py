@@ -1,6 +1,6 @@
 """Raw HTTP Logger plugin for debugging HTTP requests and responses."""
 
-from .plugin import Plugin
+from .plugin import factory
 
 
-__all__ = ["Plugin"]
+__all__ = ["factory"]

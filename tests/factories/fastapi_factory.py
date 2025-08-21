@@ -296,25 +296,49 @@ class FastAPIAppFactory:
 
             # Get the lambda functions from the Annotated dependency types
             # These are the actual dependency functions that FastAPI calls
-            from ccproxy.api.dependencies import (
-                ClaudeAPIAdapterDep,
-                ClaudeSDKAdapterDep,
-                CodexAdapterDep,
-            )
+            # Import adapter dependencies from plugin route modules
+            ClaudeSDKAdapterDep = None
+            ClaudeAPIAdapterDep = None
+            CodexAdapterDep = None
+
+            try:
+                from plugins.claude_sdk.routes import (
+                    ClaudeSDKAdapterDep as _ClaudeSDKAdapterDep,
+                )
+
+                ClaudeSDKAdapterDep = _ClaudeSDKAdapterDep
+            except ImportError:
+                pass
+
+            try:
+                from plugins.claude_api.routes import (
+                    ClaudeAPIAdapterDep as _ClaudeAPIAdapterDep,
+                )
+
+                ClaudeAPIAdapterDep = _ClaudeAPIAdapterDep
+            except ImportError:
+                pass
+
+            try:
+                from plugins.codex.routes import CodexAdapterDep as _CodexAdapterDep
+
+                CodexAdapterDep = _CodexAdapterDep
+            except ImportError:
+                pass
 
             # Extract the dependency function from the Annotated type
             # The dependency is the second argument in the Annotated type metadata
-            if hasattr(ClaudeSDKAdapterDep, "__metadata__"):
+            if ClaudeSDKAdapterDep and hasattr(ClaudeSDKAdapterDep, "__metadata__"):
                 claude_sdk_dep_func = ClaudeSDKAdapterDep.__metadata__[0]
                 if hasattr(claude_sdk_dep_func, "dependency"):
                     overrides[claude_sdk_dep_func.dependency] = lambda: mock_adapter
 
-            if hasattr(ClaudeAPIAdapterDep, "__metadata__"):
+            if ClaudeAPIAdapterDep and hasattr(ClaudeAPIAdapterDep, "__metadata__"):
                 claude_api_dep_func = ClaudeAPIAdapterDep.__metadata__[0]
                 if hasattr(claude_api_dep_func, "dependency"):
                     overrides[claude_api_dep_func.dependency] = lambda: mock_adapter
 
-            if hasattr(CodexAdapterDep, "__metadata__"):
+            if CodexAdapterDep and hasattr(CodexAdapterDep, "__metadata__"):
                 codex_dep_func = CodexAdapterDep.__metadata__[0]
                 if hasattr(codex_dep_func, "dependency"):
                     overrides[codex_dep_func.dependency] = lambda: mock_adapter

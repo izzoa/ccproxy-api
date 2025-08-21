@@ -1015,8 +1015,10 @@ def client_with_mock_codex(
     # Mock OpenAI credentials
     from unittest.mock import patch
 
-    with patch("ccproxy.auth.openai.OpenAITokenManager.load_credentials") as mock_load:
-        from ccproxy.auth.openai import OpenAICredentials
+    with patch(
+        "plugins.codex.auth.manager.CodexTokenManager.load_credentials"
+    ) as mock_load:
+        from ccproxy.auth.models import OpenAICredentials
 
         mock_load.return_value = OpenAICredentials(**mock_openai_credentials)
 
@@ -1038,8 +1040,10 @@ def client_with_mock_codex_streaming(
     # Mock OpenAI credentials
     from unittest.mock import patch
 
-    with patch("ccproxy.auth.openai.OpenAITokenManager.load_credentials") as mock_load:
-        from ccproxy.auth.openai import OpenAICredentials
+    with patch(
+        "plugins.codex.auth.manager.CodexTokenManager.load_credentials"
+    ) as mock_load:
+        from ccproxy.auth.models import OpenAICredentials
 
         mock_load.return_value = OpenAICredentials(**mock_openai_credentials)
 

@@ -15,7 +15,12 @@ logger = get_logger(__name__)
 class RequestProcessor:
     """Processes requests through adapters and transformers."""
 
-    def __init__(self, logger: structlog.BoundLogger | None = None) -> None:
+    def __init__(
+        self,
+        logger: structlog._generic.BoundLogger
+        | structlog.stdlib.BoundLogger
+        | None = None,
+    ) -> None:
         """Initialize the request processor.
 
         Args:
@@ -65,8 +70,17 @@ class RequestProcessor:
         if handler_config.request_transformer and hasattr(
             handler_config.request_transformer, "transform_body"
         ):
+            self.logger.debug(
+                "applying_body_transformer",
+                has_body=processed_body is not None,
+                body_length=len(processed_body) if processed_body else 0,
+            )
             processed_body = handler_config.request_transformer.transform_body(
                 processed_body
+            )
+            self.logger.debug(
+                "body_transformer_applied",
+                body_length=len(processed_body) if processed_body else 0,
             )
 
         return processed_body, processed_headers, is_streaming
@@ -77,6 +91,7 @@ class RequestProcessor:
         headers: dict[str, str],
         status_code: int,
         handler_config: HandlerConfig,
+        request_headers: dict[str, str] | None = None,
     ) -> tuple[bytes, dict[str, str]]:
         """Process response through adapters and transformers.
 
@@ -85,6 +100,7 @@ class RequestProcessor:
             headers: Response headers
             status_code: HTTP status code
             handler_config: Handler configuration
+            request_headers: Original request headers for CORS processing
 
         Returns:
             Tuple of (processed_body, processed_headers)
@@ -94,8 +110,10 @@ class RequestProcessor:
         if handler_config.response_adapter and status_code < 400:
             processed_body = await self._apply_response_adapter(body, handler_config)
 
-        # Apply response transformer
-        processed_headers = self._apply_response_transformer(headers, handler_config)
+        # Apply response transformer with request headers for CORS
+        processed_headers = self._apply_response_transformer(
+            headers, handler_config, request_headers=request_headers
+        )
 
         return processed_body, processed_headers
 
@@ -233,23 +251,55 @@ class RequestProcessor:
         Returns:
             Transformed headers
         """
+        self.logger.debug(
+            "apply_request_transformer_start",
+            has_transformer=handler_config.request_transformer is not None,
+            transformer_type=type(handler_config.request_transformer).__name__
+            if handler_config.request_transformer
+            else None,
+            kwargs_keys=list(kwargs.keys()),
+            header_count=len(headers),
+        )
+
         if not handler_config.request_transformer:
+            self.logger.debug("apply_request_transformer_no_transformer")
             return headers
 
         if not hasattr(handler_config.request_transformer, "transform_headers"):
+            self.logger.debug("apply_request_transformer_no_method")
             return headers
 
         try:
             # Try with kwargs first
+            self.logger.debug(
+                "apply_request_transformer_calling_with_kwargs",
+                kwargs_keys=list(kwargs.keys()),
+            )
             transformed = handler_config.request_transformer.transform_headers(
                 headers, **kwargs
             )
+            self.logger.debug(
+                "apply_request_transformer_success",
+                original_count=len(headers),
+                transformed_count=len(transformed) if transformed else 0,
+                has_auth="authorization" in (transformed or {}),
+            )
             return transformed if transformed else headers
-        except TypeError:
+        except TypeError as te:
             # Fallback to no kwargs if transformer doesn't accept them
+            self.logger.debug(
+                "apply_request_transformer_retry_without_kwargs",
+                error=str(te),
+            )
             try:
                 transformed = handler_config.request_transformer.transform_headers(
                     headers
+                )
+                self.logger.debug(
+                    "apply_request_transformer_success_without_kwargs",
+                    original_count=len(headers),
+                    transformed_count=len(transformed) if transformed else 0,
+                    has_auth="authorization" in (transformed or {}),
                 )
                 return transformed if transformed else headers
             except Exception as e:
@@ -261,13 +311,17 @@ class RequestProcessor:
                 return headers
 
     def _apply_response_transformer(
-        self, headers: dict[str, str], handler_config: HandlerConfig
+        self,
+        headers: dict[str, str],
+        handler_config: HandlerConfig,
+        **kwargs: Any,
     ) -> dict[str, str]:
         """Apply response transformer if configured.
 
         Args:
             headers: Response headers
             handler_config: Handler configuration
+            **kwargs: Additional arguments to pass to transformer (e.g., request_headers)
 
         Returns:
             Transformed headers
@@ -278,7 +332,7 @@ class RequestProcessor:
         if hasattr(handler_config.response_transformer, "transform_headers"):
             try:
                 transformed = handler_config.response_transformer.transform_headers(
-                    headers
+                    headers, **kwargs
                 )
                 return transformed if transformed else headers
             except Exception as e:

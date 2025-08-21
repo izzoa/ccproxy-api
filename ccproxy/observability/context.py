@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+import structlog
+
 from ccproxy.core.logging import get_logger
 
 
@@ -47,7 +49,7 @@ class RequestContext:
 
     request_id: str
     start_time: float
-    logger: structlog.BoundLogger
+    logger: structlog.stdlib.BoundLogger
     metadata: dict[str, Any] = field(default_factory=dict)
     storage: Any | None = None  # Optional DuckDB storage instance
     log_timestamp: datetime | None = None  # Datetime for consistent logging filenames

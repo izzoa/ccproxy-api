@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any
 
 import httpx
 from fastapi import Depends, Request
@@ -14,13 +14,11 @@ from ccproxy.core.logging import get_logger
 from ccproxy.hooks import HookManager
 from ccproxy.observability import PrometheusMetrics, get_metrics
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage
-from ccproxy.services.credentials.manager import CredentialsManager
 from ccproxy.services.proxy_service import ProxyService
 
 
 if TYPE_CHECKING:
-    from plugins.claude_api.adapter import ClaudeAPIAdapter
-    from plugins.codex.adapter import CodexAdapter
+    pass
 
 
 logger = get_logger(__name__)
@@ -67,27 +65,9 @@ async def get_http_client(
     return await get_shared_http_client(settings)
 
 
-def get_credentials_manager(
-    settings: Annotated[Settings, Depends(get_cached_settings)],
-) -> CredentialsManager:
-    """Get credentials manager instance.
-
-    Args:
-        settings: Application settings dependency
-
-    Returns:
-        Credentials manager instance
-    """
-    logger.debug("Creating credentials manager instance")
-    return CredentialsManager(config=settings.auth)
-
-
 def get_proxy_service(
     request: Request,
     settings: Annotated[Settings, Depends(get_cached_settings)],
-    credentials_manager: Annotated[
-        CredentialsManager, Depends(get_credentials_manager)
-    ],
 ) -> ProxyService:
     """Get proxy service instance.
 
@@ -124,7 +104,6 @@ def get_proxy_service(
     container = ServiceContainer(settings)
     return container.create_proxy_service(
         proxy_client=proxy_client,
-        credentials_manager=credentials_manager,
         metrics=metrics,
     )
 
@@ -179,134 +158,63 @@ def get_hook_manager(request: Request) -> HookManager | None:
     return getattr(request.app.state, "hook_manager", None)
 
 
-# Plugin adapter dependencies
-def get_claude_api_adapter(proxy_service: ProxyService) -> ClaudeAPIAdapter:
-    """Get Claude API adapter instance.
+# V2 Plugin system dependencies
+def get_plugin_adapter(plugin_name: str) -> Any:
+    """Create a dependency function for a specific plugin's adapter.
 
     Args:
-        proxy_service: Proxy service dependency
+        plugin_name: Name of the plugin
 
     Returns:
-        Claude API adapter instance
-
-    Raises:
-        HTTPException: If plugin is not initialized
+        Dependency function that retrieves the plugin's adapter
     """
     from fastapi import HTTPException
 
-    if not proxy_service.plugin_registry:
-        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
-    adapter = proxy_service.plugin_registry.get_adapter("claude_api")
-    if not adapter:
-        raise HTTPException(status_code=503, detail="Claude API plugin not initialized")
-    return cast("ClaudeAPIAdapter", adapter)
+    from ccproxy.services.adapters.base import BaseAdapter
 
+    def _get_adapter(request: Request) -> BaseAdapter:
+        """Get adapter for the specified plugin.
 
-def get_claude_api_detection_service(proxy_service: ProxyService) -> Any | None:
-    """Get Claude API detection service.
+        Args:
+            request: FastAPI request object
 
-    Args:
-        proxy_service: Proxy service dependency
+        Returns:
+            Plugin adapter instance
 
-    Returns:
-        Claude API detection service if available, None otherwise
-    """
-    if not proxy_service.plugin_registry:
-        return None
-    # Access PluginManager's internal registry
-    from ccproxy.services.plugins import PluginManager
+        Raises:
+            HTTPException: If plugin or adapter not available
+        """
+        if not hasattr(request.app.state, "plugin_registry"):
+            raise HTTPException(
+                status_code=503, detail="Plugin registry not initialized"
+            )
 
-    if isinstance(proxy_service.plugin_registry, PluginManager):
-        plugin = proxy_service.plugin_registry.plugin_registry.get_plugin("claude_api")
-        if plugin and hasattr(plugin, "_detection_service"):
-            return plugin._detection_service
-    return None
+        from ccproxy.plugins.factory import PluginRegistry
+        from ccproxy.plugins.runtime import ProviderPluginRuntime
 
+        registry: PluginRegistry = request.app.state.plugin_registry
+        runtime = registry.get_runtime(plugin_name)
 
-def get_claude_sdk_adapter(proxy_service: ProxyService) -> Any:
-    """Get Claude SDK adapter instance.
+        if not runtime:
+            raise HTTPException(
+                status_code=503, detail=f"Plugin {plugin_name} not initialized"
+            )
 
-    Args:
-        proxy_service: Proxy service dependency
+        if not isinstance(runtime, ProviderPluginRuntime):
+            raise HTTPException(
+                status_code=503, detail=f"Plugin {plugin_name} is not a provider plugin"
+            )
 
-    Returns:
-        Claude SDK adapter instance
+        if not runtime.adapter:
+            raise HTTPException(
+                status_code=503, detail=f"Plugin {plugin_name} adapter not available"
+            )
 
-    Raises:
-        HTTPException: If plugin is not initialized
-    """
-    from fastapi import HTTPException
+        # Cast is safe because we've verified runtime is ProviderPluginRuntime
+        adapter: BaseAdapter = runtime.adapter
+        return adapter
 
-    if not proxy_service.plugin_registry:
-        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
-    adapter = proxy_service.plugin_registry.get_adapter("claude_sdk")
-    if not adapter:
-        raise HTTPException(status_code=503, detail="Claude SDK plugin not initialized")
-    return adapter
-
-
-def get_claude_sdk_detection_service(proxy_service: ProxyService) -> Any | None:
-    """Get Claude SDK detection service.
-
-    Args:
-        proxy_service: Proxy service dependency
-
-    Returns:
-        Claude SDK detection service if available, None otherwise
-    """
-    if not proxy_service.plugin_registry:
-        return None
-    # Access PluginManager's internal registry
-    from ccproxy.services.plugins import PluginManager
-
-    if isinstance(proxy_service.plugin_registry, PluginManager):
-        plugin = proxy_service.plugin_registry.plugin_registry.get_plugin("claude_sdk")
-        if plugin and hasattr(plugin, "_detection_service"):
-            return plugin._detection_service
-    return None
-
-
-def get_codex_adapter(proxy_service: ProxyService) -> CodexAdapter:
-    """Get Codex adapter instance.
-
-    Args:
-        proxy_service: Proxy service dependency
-
-    Returns:
-        Codex adapter instance
-
-    Raises:
-        HTTPException: If plugin is not initialized
-    """
-    from fastapi import HTTPException
-
-    if not proxy_service.plugin_registry:
-        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
-    adapter = proxy_service.plugin_registry.get_adapter("codex")
-    if not adapter:
-        raise HTTPException(status_code=503, detail="Codex plugin not initialized")
-    return cast("CodexAdapter", adapter)
-
-
-def get_codex_detection_service(proxy_service: ProxyService) -> Any | None:
-    """Get Codex detection service.
-
-    Args:
-        proxy_service: Proxy service dependency
-
-    Returns:
-        Codex detection service if available, None otherwise
-    """
-    if not proxy_service.plugin_registry:
-        return None
-    # Access PluginManager's internal registry
-    from ccproxy.services.plugins import PluginManager
-
-    if isinstance(proxy_service.plugin_registry, PluginManager):
-        plugin = proxy_service.plugin_registry.plugin_registry.get_plugin("codex")
-        if plugin and hasattr(plugin, "_detection_service"):
-            return plugin._detection_service
-    return None
+    return _get_adapter
 
 
 # Type aliases for service dependencies
@@ -320,28 +228,4 @@ LogStorageDep = Annotated[SimpleDuckDBStorage | None, Depends(get_log_storage)]
 DuckDBStorageDep = Annotated[SimpleDuckDBStorage | None, Depends(get_duckdb_storage)]
 HookManagerDep = Annotated[HookManager | None, Depends(get_hook_manager)]
 
-# Type aliases for plugin dependencies
-ClaudeAPIAdapterDep = Annotated[
-    "ClaudeAPIAdapter",
-    Depends(lambda ps=Depends(get_proxy_service): get_claude_api_adapter(ps)),
-]
-ClaudeAPIDetectionDep = Annotated[
-    Any | None,
-    Depends(lambda ps=Depends(get_proxy_service): get_claude_api_detection_service(ps)),
-]
-
-ClaudeSDKAdapterDep = Annotated[
-    Any, Depends(lambda ps=Depends(get_proxy_service): get_claude_sdk_adapter(ps))
-]
-ClaudeSDKDetectionDep = Annotated[
-    Any | None,
-    Depends(lambda ps=Depends(get_proxy_service): get_claude_sdk_detection_service(ps)),
-]
-
-CodexAdapterDep = Annotated[
-    "CodexAdapter", Depends(lambda ps=Depends(get_proxy_service): get_codex_adapter(ps))
-]
-CodexDetectionDep = Annotated[
-    Any | None,
-    Depends(lambda ps=Depends(get_proxy_service): get_codex_detection_service(ps)),
-]
+# Plugin-specific adapter dependencies are declared in each plugin's routes module

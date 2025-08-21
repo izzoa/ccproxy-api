@@ -115,57 +115,59 @@ class StreamingHandler:
                             message="Skipping raw HTTP logging for this streaming request",
                         )
 
-                    async with httpx.AsyncClient(**config) as local_client:
-                        async with local_client.stream(
+                    async with (
+                        httpx.AsyncClient(**config) as local_client,
+                        local_client.stream(
                             method=method,
                             url=url,
                             headers=headers,
                             content=body,
                             timeout=httpx.Timeout(300.0),
                             extensions=extensions,
-                        ) as response:
-                            # Capture response headers to pass to client and context
-                            response_headers = dict(response.headers)
+                        ) as response,
+                    ):
+                        # Capture response headers to pass to client and context
+                        response_headers = dict(response.headers)
 
-                            # Pass all response headers to the request context
-                            if request_context and hasattr(request_context, "metadata"):
-                                request_context.metadata["response_headers"] = (
-                                    response_headers
-                                )
+                        # Pass all response headers to the request context
+                        if request_context and hasattr(request_context, "metadata"):
+                            request_context.metadata["response_headers"] = (
+                                response_headers
+                            )
 
-                            # Check for error status
-                            if response.status_code >= 400:
-                                error_body = await response.aread()
-                                yield error_body
-                                return
+                        # Check for error status
+                        if response.status_code >= 400:
+                            error_body = await response.aread()
+                            yield error_body
+                            return
 
-                            # Stream the response
-                            if handler_config.response_adapter:
-                                async for chunk in self._process_sse_events(
-                                    response, handler_config.response_adapter
-                                ):
-                                    total_chunks += 1
-                                    total_bytes += len(chunk)
-                                    # Trace each chunk if tracer is available
-                                    if self.request_tracer and request_id:
-                                        await self.request_tracer.trace_stream_chunk(
-                                            request_id=request_id,
-                                            chunk=chunk,
-                                            chunk_number=total_chunks,
-                                        )
-                                    yield chunk
-                            else:
-                                async for chunk in response.aiter_bytes():
-                                    total_chunks += 1
-                                    total_bytes += len(chunk)
-                                    # Trace each chunk if tracer is available
-                                    if self.request_tracer and request_id:
-                                        await self.request_tracer.trace_stream_chunk(
-                                            request_id=request_id,
-                                            chunk=chunk,
-                                            chunk_number=total_chunks,
-                                        )
-                                    yield chunk
+                        # Stream the response
+                        if handler_config.response_adapter:
+                            async for chunk in self._process_sse_events(
+                                response, handler_config.response_adapter
+                            ):
+                                total_chunks += 1
+                                total_bytes += len(chunk)
+                                # Trace each chunk if tracer is available
+                                if self.request_tracer and request_id:
+                                    await self.request_tracer.trace_stream_chunk(
+                                        request_id=request_id,
+                                        chunk=chunk,
+                                        chunk_number=total_chunks,
+                                    )
+                                yield chunk
+                        else:
+                            async for chunk in response.aiter_bytes():
+                                total_chunks += 1
+                                total_bytes += len(chunk)
+                                # Trace each chunk if tracer is available
+                                if self.request_tracer and request_id:
+                                    await self.request_tracer.trace_stream_chunk(
+                                        request_id=request_id,
+                                        chunk=chunk,
+                                        chunk_number=total_chunks,
+                                    )
+                                yield chunk
                 else:
                     # Prepare extensions for request ID tracking
                     extensions = {}

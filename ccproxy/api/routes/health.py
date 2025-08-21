@@ -22,8 +22,6 @@ from pydantic import BaseModel
 from structlog import get_logger
 
 from ccproxy import __version__
-from ccproxy.auth.exceptions import CredentialsExpiredError, CredentialsNotFoundError
-from ccproxy.services.credentials import CredentialsManager
 
 
 router = APIRouter()
@@ -82,98 +80,18 @@ _cache_ttl_seconds = 300  # Cache for 5 minutes
 async def _check_oauth2_credentials() -> tuple[str, dict[str, Any]]:
     """Check OAuth2 credentials health status.
 
+    This function is deprecated as authentication is now handled by individual plugins.
+    Returns a pass status for backward compatibility.
+
     Returns:
-        Tuple of (status, details) where status is 'pass'/'fail'/'warn'
-        Details include token metadata without exposing sensitive data
+        Tuple of (status, details) where status is 'pass'
+        Details indicate auth is plugin-managed
     """
-    try:
-        manager = CredentialsManager()
-        validation = await manager.validate()
-
-        if validation.valid and not validation.expired:
-            # Get token metadata without exposing sensitive information
-            credentials = validation.credentials
-            oauth_token = credentials.claude_ai_oauth if credentials else None
-
-            details = {
-                "auth_status": "valid",
-                "credentials_path": str(validation.path) if validation.path else None,
-            }
-
-            if oauth_token:
-                details.update(
-                    {
-                        "expiration": oauth_token.expires_at_datetime.isoformat()
-                        if oauth_token.expires_at_datetime
-                        else None,
-                        "subscription_type": oauth_token.subscription_type,
-                        "expires_in_hours": str(
-                            int(
-                                (
-                                    oauth_token.expires_at_datetime - datetime.now(UTC)
-                                ).total_seconds()
-                                / 3600
-                            )
-                        )
-                        if oauth_token.expires_at_datetime
-                        else None,
-                    }
-                )
-
-            return "pass", details
-        else:
-            # Handle expired credentials
-            credentials = validation.credentials
-            oauth_token = credentials.claude_ai_oauth if credentials else None
-
-            details = {
-                "auth_status": "expired" if validation.expired else "invalid",
-                "credentials_path": str(validation.path) if validation.path else None,
-            }
-
-            if oauth_token and oauth_token.expires_at_datetime:
-                details.update(
-                    {
-                        "expiration": oauth_token.expires_at_datetime.isoformat(),
-                        "subscription_type": oauth_token.subscription_type,
-                        "expired_hours_ago": str(
-                            int(
-                                (
-                                    datetime.now(UTC) - oauth_token.expires_at_datetime
-                                ).total_seconds()
-                                / 3600
-                            )
-                        )
-                        if validation.expired
-                        else None,
-                    }
-                )
-
-            return "warn", details
-
-    except CredentialsNotFoundError:
-        return "warn", {
-            "auth_status": "not_configured",
-            "error": "Claude credentials file not found",
-            "credentials_path": None,
-        }
-    except CredentialsExpiredError:
-        return "warn", {
-            "auth_status": "expired",
-            "error": "Claude credentials have expired",
-        }
-    except (OSError, PermissionError) as e:
-        logger.error("oauth_credentials_check_io_failed", error=str(e), exc_info=e)
-        return "fail", {
-            "auth_status": "error",
-            "error": f"File access error: {str(e)}",
-        }
-    except Exception as e:
-        logger.error("oauth_credentials_check_failed", error=str(e), exc_info=e)
-        return "fail", {
-            "auth_status": "error",
-            "error": f"Unexpected error: {str(e)}",
-        }
+    # Authentication is now handled by individual plugins
+    return "pass", {
+        "auth_status": "plugin_managed",
+        "message": "Authentication handled by plugins",
+    }
 
 
 @functools.lru_cache(maxsize=1)

@@ -1,6 +1,6 @@
 """Codex provider plugin."""
 
-from .plugin import Plugin
+from .plugin import factory
 
 
-__all__ = ["Plugin"]
+__all__ = ["factory"]

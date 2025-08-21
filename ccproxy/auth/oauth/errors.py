@@ -245,7 +245,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
         else:
             return sync_wrapper  # type: ignore
 
-    return decorator  # type: ignore
+    return decorator
 
 
 def _extract_http_error_detail(response: httpx.Response) -> str:
@@ -264,17 +264,17 @@ def _extract_http_error_detail(response: httpx.Response) -> str:
         if isinstance(error_data, dict):
             # Standard OAuth error response
             if "error_description" in error_data:
-                return error_data["error_description"]
+                return str(error_data["error_description"])
             if "error" in error_data:
                 error = error_data["error"]
                 if isinstance(error, dict) and "message" in error:
-                    return error["message"]
+                    return str(error["message"])
                 return str(error)
             # Generic message field
             if "message" in error_data:
-                return error_data["message"]
+                return str(error_data["message"])
             if "detail" in error_data:
-                return error_data["detail"]
+                return str(error_data["detail"])
 
         # If we can't parse a specific error, return truncated response
         return _truncate_error_text(str(error_data))
@@ -396,5 +396,3 @@ class OAuthErrorContext:
                 exc_info=exc_val,
             )
             raise OAuthError(f"{self.operation} failed: {exc_val}") from exc_val
-
-        return True  # Suppress original exception

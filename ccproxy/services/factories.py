@@ -13,7 +13,6 @@ import structlog
 
 from ccproxy.adapters.openai.adapter import OpenAIAdapter
 from ccproxy.core.http_client import HTTPClientFactory
-from ccproxy.services.auth import AuthenticationService
 from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler
@@ -24,7 +23,6 @@ from ccproxy.testing import RealisticMockResponseGenerator
 if TYPE_CHECKING:
     from ccproxy.config.settings import Settings
     from ccproxy.observability.metrics import PrometheusMetrics
-    from ccproxy.services.credentials.manager import CredentialsManager
 
 
 logger = structlog.get_logger(__name__)
@@ -98,21 +96,6 @@ class ConcreteServiceFactory:
         )
         logger.debug("Created StreamingHandler")
         return handler
-
-    def create_auth_service(
-        self, credentials_manager: CredentialsManager
-    ) -> AuthenticationService:
-        """Create authentication service instance.
-
-        Args:
-            credentials_manager: Credentials management service
-
-        Returns:
-            Configured authentication service instance
-        """
-        service = AuthenticationService(credentials_manager)
-        logger.debug("Created AuthenticationService")
-        return service
 
     def create_proxy_config(self) -> ProxyConfiguration:
         """Create proxy configuration instance.

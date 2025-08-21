@@ -110,17 +110,27 @@ class PluginHTTPHandler(BaseHTTPHandler):
             handler_config: Handler configuration
             auth_headers: Authentication headers to include
             request_headers: Original request headers
-            **extra_kwargs: Additional plugin-specific parameters
+            **extra_kwargs: Additional plugin-specific parameters (e.g., access_token)
 
         Returns:
             Tuple of (transformed_body, headers, is_streaming)
         """
+        # Log what we received
+        self.logger.debug(
+            "plugin_handler_prepare_request",
+            has_auth_headers=auth_headers is not None,
+            has_request_headers=request_headers is not None,
+            extra_kwargs_keys=list(extra_kwargs.keys()),
+            has_transformer=handler_config.request_transformer is not None,
+        )
+
         # Prepare base headers
         headers = dict(request_headers or {})
         if auth_headers:
             headers.update(auth_headers)
 
         # Process request through adapters and transformers
+        # Pass all extra_kwargs (including access_token) to the processor
         (
             transformed_body,
             processed_headers,
@@ -129,7 +139,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
             body=request_body,
             headers=headers,
             handler_config=handler_config,
-            **extra_kwargs,
+            **extra_kwargs,  # This includes access_token and other plugin-specific params
         )
 
         return transformed_body, processed_headers, is_streaming

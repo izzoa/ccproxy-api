@@ -9,7 +9,7 @@ from ccproxy.config.settings import Settings
 
 
 if TYPE_CHECKING:
-    from ccproxy.plugins.registry import PluginRegistry
+    from ccproxy.plugins.factory import PluginRegistry
     from ccproxy.scheduler.core import Scheduler
     from ccproxy.services.interfaces import IRequestHandler
 
@@ -54,9 +54,9 @@ class CoreServices:
         """
         # Try to get config from plugin's config class if registry is available
         if self.plugin_registry:
-            plugin = self.plugin_registry.get_plugin(plugin_name)
-            if plugin and hasattr(plugin, "get_config_class"):
-                config_class = plugin.get_config_class()
+            runtime = self.plugin_registry.get_runtime(plugin_name)
+            if runtime and hasattr(runtime, "get_config_class"):
+                config_class = runtime.get_config_class()
                 if config_class:
                     # Get raw config from settings.plugins dictionary
                     raw_config = self.settings.plugins.get(plugin_name, {})
@@ -64,7 +64,7 @@ class CoreServices:
                     # Validate and return config using plugin's schema
                     try:
                         validated_config = config_class(**raw_config)
-                        return validated_config.model_dump()
+                        return validated_config.model_dump()  # type: ignore[no-any-return]
                     except (ValueError, TypeError) as e:
                         self.logger.error(
                             "config_validation_error",

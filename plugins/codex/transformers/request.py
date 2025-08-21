@@ -71,7 +71,7 @@ class CodexRequestTransformer:
         # Add session ID
         transformed["session_id"] = session_id
 
-        # Add authorization if provided
+        # Add authorization - Codex API expects it but we'll attempt anyway
         if access_token:
             # Remove any existing authorization headers and add the JWT token
             transformed.pop("authorization", None)  # Remove lowercase variant
@@ -83,6 +83,15 @@ class CodexRequestTransformer:
                 if len(access_token) > 20
                 else access_token,
             )
+        else:
+            # Warn about missing/expired token but still attempt the request
+            logger.warning(
+                "OpenAI token is expired or missing. Attempting request anyway. "
+                "To refresh authentication, run 'ccproxy auth login-openai'"
+            )
+            # Still set Authorization header even with no token
+            # The API will return 401 if auth is truly required
+            transformed["Authorization"] = "Bearer "
 
         # Inject detected Codex CLI headers if available
         if self.detection_service:

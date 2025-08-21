@@ -10,13 +10,11 @@ This module tests the startup helper functions extracted from the lifespan funct
 All tests use mocks to avoid external dependencies and test in isolation.
 """
 
-from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastapi import FastAPI
 
-from ccproxy.auth.exceptions import CredentialsNotFoundError
 from ccproxy.config.settings import Settings
 from ccproxy.scheduler.errors import SchedulerError
 from ccproxy.utils.startup_helpers import (
@@ -29,195 +27,64 @@ from ccproxy.utils.startup_helpers import (
     setup_scheduler_shutdown,
     setup_scheduler_startup,
     setup_session_manager_shutdown,
-    validate_claude_authentication_startup,
 )
 
 
-class TestValidateAuthenticationStartup:
-    """Test authentication validation during startup."""
+# TestValidateAuthenticationStartup removed - authentication now handled by plugins
+# class TestValidateAuthenticationStartup:
+#     """Test authentication validation during startup."""
+#
+#     @pytest.fixture
+#     def mock_app(self) -> FastAPI:
+#         """Create a mock FastAPI app."""
+#         return FastAPI()
+#
+#     @pytest.fixture
+#     def mock_settings(self) -> Mock:
+#         """Create mock settings."""
+#         settings = Mock(spec=Settings)
+#         # Configure nested attributes properly
+#         settings.auth = Mock()
+#         settings.auth.storage = Mock()
+#         settings.auth.storage.storage_paths = ["/path1", "/path2"]
+#         return settings
+#
+#     @pytest.fixture
+#     def mock_credentials_manager(self) -> Mock:
+#         """Create mock credentials manager."""
+#         return AsyncMock()
 
-    @pytest.fixture
-    def mock_app(self) -> FastAPI:
-        """Create a mock FastAPI app."""
-        return FastAPI()
-
-    @pytest.fixture
-    def mock_settings(self) -> Mock:
-        """Create mock settings."""
-        settings = Mock(spec=Settings)
-        # Configure nested attributes properly
-        settings.auth = Mock()
-        settings.auth.storage = Mock()
-        settings.auth.storage.storage_paths = ["/path1", "/path2"]
-        return settings
-
-    @pytest.fixture
-    def mock_credentials_manager(self) -> Mock:
-        """Create mock credentials manager."""
-        return AsyncMock()
-
-    async def test_valid_authentication_with_oauth_token(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test successful authentication validation with OAuth token."""
-        with patch(
-            "ccproxy.utils.startup_helpers.CredentialsManager"
-        ) as MockCredentialsManager:
-            # Setup mock validation response
-            mock_validation = Mock()
-            mock_validation.valid = True
-            mock_validation.expired = False
-            mock_validation.path = "/mock/path"
-
-            # Setup mock credentials with OAuth token
-            mock_oauth_token = Mock()
-            mock_oauth_token.expires_at_datetime = datetime.now(UTC) + timedelta(
-                hours=24
-            )
-            mock_oauth_token.subscription_type = "pro"
-
-            mock_credentials = Mock()
-            mock_credentials.claude_ai_oauth = mock_oauth_token
-            mock_validation.credentials = mock_credentials
-
-            mock_manager = AsyncMock()
-            mock_manager.validate.return_value = mock_validation
-            MockCredentialsManager.return_value = mock_manager
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_claude_authentication_startup(mock_app, mock_settings)
-
-                # Verify credentials manager was created and validated
-                MockCredentialsManager.assert_called_once()
-                mock_manager.validate.assert_called_once()
-
-                # Verify debug log was called with OAuth info
-                mock_logger.debug.assert_called_once()
-                call_args = mock_logger.debug.call_args[1]
-                assert "claude_token_valid" in mock_logger.debug.call_args[0]
-                assert "expires_in_hours" in call_args
-                assert "subscription_type" in call_args
-
-    async def test_valid_authentication_without_oauth_token(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test successful authentication validation without OAuth token."""
-        with patch(
-            "ccproxy.utils.startup_helpers.CredentialsManager"
-        ) as MockCredentialsManager:
-            # Setup mock validation response without OAuth
-            mock_validation = Mock()
-            mock_validation.valid = True
-            mock_validation.expired = False
-            mock_validation.path = "/mock/path"
-            mock_validation.credentials = None
-
-            mock_manager = AsyncMock()
-            mock_manager.validate.return_value = mock_validation
-            MockCredentialsManager.return_value = mock_manager
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_claude_authentication_startup(mock_app, mock_settings)
-
-                # Verify debug log was called without OAuth info
-                mock_logger.debug.assert_called_once_with(
-                    "claude_token_valid", credentials_path="/mock/path"
-                )
-
-    async def test_expired_authentication(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test handling of expired authentication."""
-        with patch(
-            "ccproxy.utils.startup_helpers.CredentialsManager"
-        ) as MockCredentialsManager:
-            # Setup expired validation response
-            mock_validation = Mock()
-            mock_validation.valid = False
-            mock_validation.expired = True
-            mock_validation.path = "/mock/path"
-
-            mock_manager = AsyncMock()
-            mock_manager.validate.return_value = mock_validation
-            MockCredentialsManager.return_value = mock_manager
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_claude_authentication_startup(mock_app, mock_settings)
-
-                # Verify warning was logged
-                mock_logger.warning.assert_called_once()
-                call_args = mock_logger.warning.call_args[1]
-                assert "claude_token_expired" in mock_logger.warning.call_args[0]
-                assert "credentials_path" in call_args
-
-    async def test_invalid_authentication(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test handling of invalid authentication."""
-        with patch(
-            "ccproxy.utils.startup_helpers.CredentialsManager"
-        ) as MockCredentialsManager:
-            # Setup invalid validation response
-            mock_validation = Mock()
-            mock_validation.valid = False
-            mock_validation.expired = False
-            mock_validation.path = "/mock/path"
-
-            mock_manager = AsyncMock()
-            mock_manager.validate.return_value = mock_validation
-            MockCredentialsManager.return_value = mock_manager
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_claude_authentication_startup(mock_app, mock_settings)
-
-                # Verify warning was logged
-                mock_logger.warning.assert_called_once()
-                call_args = mock_logger.warning.call_args[1]
-                assert "claude_token_invalid" in mock_logger.warning.call_args[0]
-
-    async def test_credentials_not_found(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test handling when credentials are not found."""
-        with patch(
-            "ccproxy.utils.startup_helpers.CredentialsManager"
-        ) as MockCredentialsManager:
-            mock_manager = AsyncMock()
-            mock_manager.validate.side_effect = CredentialsNotFoundError("Not found")
-            MockCredentialsManager.return_value = mock_manager
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_claude_authentication_startup(mock_app, mock_settings)
-
-                # Verify warning was logged with searched paths
-                mock_logger.warning.assert_called_once()
-                call_args = mock_logger.warning.call_args[1]
-                assert "claude_token_not_found" in mock_logger.warning.call_args[0]
-                assert call_args["searched_paths"] == ["/path1", "/path2"]
-
-    async def test_authentication_validation_error(
-        self, mock_app: FastAPI, mock_settings: Mock
-    ) -> None:
-        """Test handling of unexpected errors during validation."""
-        with patch(
-            "ccproxy.utils.startup_helpers.CredentialsManager"
-        ) as MockCredentialsManager:
-            mock_manager = AsyncMock()
-            mock_manager.validate.side_effect = Exception("Unexpected error")
-            MockCredentialsManager.return_value = mock_manager
-
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await validate_claude_authentication_startup(mock_app, mock_settings)
-
-                # Verify error was logged
-                mock_logger.error.assert_called_once()
-                call_args = mock_logger.error.call_args[1]
-                assert (
-                    "claude_token_validation_unexpected_error"
-                    in mock_logger.error.call_args[0]
-                )
-                assert call_args["error"] == "Unexpected error"
-                assert call_args["exc_info"] is not None
+# All test methods commented out - authentication now handled by plugins
+#
+#     async def test_valid_authentication_with_oauth_token(
+#         self, mock_app: FastAPI, mock_settings: Mock
+#     ) -> None:
+#         pass
+#
+#     async def test_valid_authentication_without_oauth_token(
+#         self, mock_app: FastAPI, mock_settings: Mock
+#     ) -> None:
+#         pass
+#
+#     async def test_expired_authentication(
+#         self, mock_app: FastAPI, mock_settings: Mock
+#     ) -> None:
+#         pass
+#
+#     async def test_invalid_authentication(
+#         self, mock_app: FastAPI, mock_settings: Mock
+#     ) -> None:
+#         pass
+#
+#     async def test_credentials_not_found(
+#         self, mock_app: FastAPI, mock_settings: Mock
+#     ) -> None:
+#         pass
+#
+#     async def test_authentication_validation_error(
+#         self, mock_app: FastAPI, mock_settings: Mock
+#     ) -> None:
+#         pass
 
 
 class TestCheckClaudeCLIStartup:

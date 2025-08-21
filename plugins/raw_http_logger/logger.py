@@ -1,6 +1,8 @@
 """Raw HTTP logger for direct transport-level logging."""
 
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import aiofiles
 
@@ -13,7 +15,7 @@ logger = get_logger(__name__)
 class RawHTTPLogger:
     """Direct logger for raw HTTP data without buffering."""
 
-    def __init__(self, config=None):
+    def __init__(self, config: Any = None) -> None:
         """Initialize logger with configuration.
 
         Args:
@@ -45,13 +47,13 @@ class RawHTTPLogger:
             self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # Track which files we've already logged to (to only log once)
-        self._logged_files = set()
+        self._logged_files: set[str] = set()
 
     def should_log(self) -> bool:
         """Check if logging is enabled."""
-        return self.enabled
+        return bool(self.enabled)
 
-    async def log_client_request(self, request_id: str, raw_data: bytes):
+    async def log_client_request(self, request_id: str, raw_data: bytes) -> None:
         """Log raw client request data."""
         if not self.enabled or not self._log_client_request:
             return
@@ -80,7 +82,7 @@ class RawHTTPLogger:
         async with aiofiles.open(file_path, "ab") as f:
             await f.write(raw_data)
 
-    async def log_client_response(self, request_id: str, raw_data: bytes):
+    async def log_client_response(self, request_id: str, raw_data: bytes) -> None:
         """Log raw client response data."""
         if not self.enabled or not self._log_client_response:
             return
@@ -109,7 +111,7 @@ class RawHTTPLogger:
         async with aiofiles.open(file_path, "ab") as f:
             await f.write(raw_data)
 
-    async def log_provider_request(self, request_id: str, raw_data: bytes):
+    async def log_provider_request(self, request_id: str, raw_data: bytes) -> None:
         """Log raw provider request data."""
         if not self.enabled or not self._log_provider_request:
             return
@@ -138,7 +140,7 @@ class RawHTTPLogger:
         async with aiofiles.open(file_path, "ab") as f:
             await f.write(raw_data)
 
-    async def log_provider_response(self, request_id: str, raw_data: bytes):
+    async def log_provider_response(self, request_id: str, raw_data: bytes) -> None:
         """Log raw provider response data."""
         if not self.enabled or not self._log_provider_response:
             return
@@ -168,7 +170,11 @@ class RawHTTPLogger:
             await f.write(raw_data)
 
     def build_raw_request(
-        self, method: str, url: str, headers: list, body: bytes | None = None
+        self,
+        method: str,
+        url: str,
+        headers: Sequence[tuple[bytes | str, bytes | str]],
+        body: bytes | None = None,
     ) -> bytes:
         """Build raw HTTP/1.1 request format."""
         # Parse URL to get path
@@ -206,7 +212,10 @@ class RawHTTPLogger:
         return raw
 
     def build_raw_response(
-        self, status_code: int, headers: list, reason: str = "OK"
+        self,
+        status_code: int,
+        headers: Sequence[tuple[bytes | str, bytes | str]],
+        reason: str = "OK",
     ) -> bytes:
         """Build raw HTTP/1.1 response headers."""
         # Build status line

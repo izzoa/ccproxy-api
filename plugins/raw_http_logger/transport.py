@@ -1,10 +1,11 @@
 """HTTPX transport wrapper for logging raw HTTP data."""
 
 from collections.abc import AsyncIterator
+from types import TracebackType
+from typing import Any
 
 import httpx
 import structlog
-from httpx._transports.default import AsyncByteStream
 
 from .logger import RawHTTPLogger
 
@@ -12,12 +13,12 @@ from .logger import RawHTTPLogger
 logger = structlog.get_logger(__name__)
 
 
-class LoggingResponseStream(AsyncByteStream):
+class LoggingResponseStream(httpx.AsyncByteStream):
     """Wraps response stream to log chunks without buffering."""
 
     def __init__(
         self,
-        stream: AsyncByteStream,
+        stream: Any,  # The actual httpx stream object
         logger: RawHTTPLogger,
         request_id: str,
         status_code: int,
@@ -86,7 +87,13 @@ class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
         response = await self.wrapped.handle_async_request(request)
 
         # Wrap response stream for logging only if we have request ID
-        if request_id and self.logger.should_log():
+        # Check if stream has required methods (duck typing)
+        if (
+            request_id
+            and self.logger.should_log()
+            and hasattr(response.stream, "__aiter__")
+            and hasattr(response.stream, "aclose")
+        ):
             response.stream = LoggingResponseStream(
                 response.stream,
                 self.logger,
@@ -101,7 +108,7 @@ class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
         """Extract request ID from extensions if available."""
         # Try to get from extensions (passed by plugin_handler)
         if hasattr(request, "extensions") and "request_id" in request.extensions:
-            return request.extensions["request_id"]
+            return str(request.extensions["request_id"])
 
         # Log warning and return None - we won't log this request
         logger.warning(
@@ -146,11 +153,16 @@ class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
         if hasattr(self.wrapped, "aclose"):
             await self.wrapped.aclose()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "LoggingHTTPTransport":
         """Enter async context."""
         await self.wrapped.__aenter__()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_val: BaseException | None = None,
+        exc_tb: TracebackType | None = None,
+    ) -> None:
         """Exit async context."""
         await self.wrapped.__aexit__(exc_type, exc_val, exc_tb)

@@ -2,12 +2,11 @@
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from starlette import status
 
 from ccproxy.auth.conditional import ConditionalAuthDep
-from ccproxy.services.proxy_service import ProxyService
 
 
 router = APIRouter(prefix="/plugins", tags=["plugins"])
@@ -46,32 +45,13 @@ class PluginReloadResponse(BaseModel):
     plugin: str | None = None
 
 
-# Dependency to get proxy service
-async def get_proxy_service(request: Request) -> ProxyService:
-    """Get the proxy service instance.
-
-    Args:
-        request: FastAPI request object containing app state
-
-    Returns:
-        ProxyService instance
-
-    Raises:
-        HTTPException: If proxy service not initialized
-    """
-    if not hasattr(request.app.state, "proxy_service"):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Proxy service not initialized",
-        )
-
-    proxy_service: ProxyService = request.app.state.proxy_service
-    return proxy_service
+# Note: get_proxy_service dependency removed as v2 plugins don't use ProxyService for plugin management
+# Plugin registry is accessed directly from app state
 
 
 @router.get("", response_model=PluginListResponse)
 async def list_plugins(
-    proxy: ProxyService = Depends(get_proxy_service),
+    request: Request,
     auth: ConditionalAuthDep = None,
 ) -> PluginListResponse:
     """List all loaded plugins and built-in providers.
@@ -81,24 +61,24 @@ async def list_plugins(
     """
     plugins: list[PluginInfo] = []
 
-    # No built-in providers - everything is a plugin now
-    # All providers come from the plugin system
-    if not proxy.plugin_registry:
-        return PluginListResponse(plugins=plugins, total=0)
+    # Access v2 plugin registry from app state
+    if hasattr(request.app.state, "plugin_registry"):
+        from ccproxy.plugins.factory import PluginRegistry
 
-    # Plugin providers - access internal registry
-    registry = proxy.plugin_registry.get_plugin_registry()
-    if registry:
+        registry: PluginRegistry = request.app.state.plugin_registry
+
         for name in registry.list_plugins():
-            plugin = registry.get_plugin(name)
-            plugins.append(
-                PluginInfo(
-                    name=name,
-                    type="plugin",
-                    status="active",
-                    version=plugin.version if plugin else None,
+            factory = registry.get_factory(name)
+            if factory:
+                manifest = factory.get_manifest()
+                plugins.append(
+                    PluginInfo(
+                        name=name,
+                        type="plugin",
+                        status="active",
+                        version=manifest.version,
+                    )
                 )
-            )
 
     return PluginListResponse(plugins=plugins, total=len(plugins))
 
@@ -106,7 +86,7 @@ async def list_plugins(
 @router.get("/{plugin_name}/health", response_model=PluginHealthResponse)
 async def plugin_health(
     plugin_name: str,
-    proxy: ProxyService = Depends(get_proxy_service),
+    request: Request,
     auth: ConditionalAuthDep = None,
 ) -> PluginHealthResponse:
     """Check the health status of a specific plugin.
@@ -120,83 +100,105 @@ async def plugin_health(
     Raises:
         HTTPException: If plugin not found
     """
-    # Check plugin providers
-    if not proxy.plugin_registry:
-        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
-    adapter = proxy.plugin_registry.get_adapter(plugin_name)
-    if adapter:
-        # Get the plugin and run its health check if available
-        registry = proxy.plugin_registry.get_plugin_registry()
-        plugin = registry.get_plugin(plugin_name) if registry else None
-        if plugin and hasattr(plugin, "health_check"):
-            try:
-                health_result = await plugin.health_check()
-                # Convert HealthCheckResult to PluginHealthResponse
-                return PluginHealthResponse(
-                    plugin=plugin_name,
-                    status="healthy"
-                    if health_result.status == "pass"
-                    else "unhealthy"
-                    if health_result.status == "fail"
-                    else "unknown",
-                    adapter_loaded=True,
-                    details={
-                        "type": "plugin",
-                        "active": True,
-                        "health_check": {
-                            "status": health_result.status,
-                            "output": health_result.output,
-                            "version": health_result.version,
-                            "details": health_result.details,
-                        },
-                    },
-                )
-            except (OSError, PermissionError) as e:
-                import structlog
+    # Access v2 plugin registry from app state
+    if not hasattr(request.app.state, "plugin_registry"):
+        raise HTTPException(status_code=503, detail="Plugin registry not initialized")
 
-                logger = structlog.get_logger(__name__)
-                logger.error(
-                    "plugin_health_check_io_failed",
-                    plugin=plugin_name,
-                    error=str(e),
-                    exc_info=e,
-                )
-            except Exception as e:
-                import structlog
+    from ccproxy.plugins.factory import PluginRegistry
 
-                logger = structlog.get_logger(__name__)
-                logger.error(
-                    "plugin_health_check_failed",
-                    plugin=plugin_name,
-                    error=str(e),
-                    exc_info=e,
-                )
-                return PluginHealthResponse(
-                    plugin=plugin_name,
-                    status="unhealthy",
-                    adapter_loaded=True,
-                    details={"type": "plugin", "active": True, "error": str(e)},
-                )
-        else:
-            # Plugin doesn't have health check, use basic status
+    registry: PluginRegistry = request.app.state.plugin_registry
+
+    # Check if plugin exists
+    if plugin_name not in registry.list_plugins():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plugin '{plugin_name}' not found",
+        )
+
+    # Get the plugin runtime instance
+    runtime = registry.get_runtime(plugin_name)
+    if runtime and hasattr(runtime, "health_check"):
+        try:
+            health_result = await runtime.health_check()
+            # Convert HealthCheckResult to PluginHealthResponse
+            # Handle both dict and object response
+            if isinstance(health_result, dict):
+                status_value = health_result.get("status", "unknown")
+                output_value = health_result.get("output")
+                version_value = health_result.get("version")
+                details_value = health_result.get("details")
+            else:
+                # Access attributes for non-dict responses
+                status_value = getattr(health_result, "status", "unknown")  # type: ignore[unreachable]
+                output_value = getattr(health_result, "output", None)
+                version_value = getattr(health_result, "version", None)
+                details_value = getattr(health_result, "details", None)
+
             return PluginHealthResponse(
                 plugin=plugin_name,
-                status="healthy",
+                status="healthy"
+                if status_value == "pass"
+                else "unhealthy"
+                if status_value == "fail"
+                else "unknown",
                 adapter_loaded=True,
-                details={"type": "plugin", "active": True},
+                details={
+                    "type": "plugin",
+                    "active": True,
+                    "health_check": {
+                        "status": status_value,
+                        "output": output_value,
+                        "version": version_value,
+                        "details": details_value,
+                    },
+                },
             )
+        except (OSError, PermissionError) as e:
+            import structlog
 
-    # Plugin not found
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Plugin '{plugin_name}' not found",
-    )
+            logger = structlog.get_logger(__name__)
+            logger.error(
+                "plugin_health_check_io_failed",
+                plugin=plugin_name,
+                error=str(e),
+                exc_info=e,
+            )
+            return PluginHealthResponse(
+                plugin=plugin_name,
+                status="unhealthy",
+                adapter_loaded=True,
+                details={"type": "plugin", "active": True, "io_error": str(e)},
+            )
+        except Exception as e:
+            import structlog
+
+            logger = structlog.get_logger(__name__)
+            logger.error(
+                "plugin_health_check_failed",
+                plugin=plugin_name,
+                error=str(e),
+                exc_info=e,
+            )
+            return PluginHealthResponse(
+                plugin=plugin_name,
+                status="unhealthy",
+                adapter_loaded=True,
+                details={"type": "plugin", "active": True, "error": str(e)},
+            )
+    else:
+        # Plugin doesn't have health check, use basic status
+        return PluginHealthResponse(
+            plugin=plugin_name,
+            status="healthy",
+            adapter_loaded=True,
+            details={"type": "plugin", "active": True},
+        )
 
 
 @router.post("/{plugin_name}/reload", response_model=PluginReloadResponse)
 async def reload_plugin(
     plugin_name: str,
-    proxy: ProxyService = Depends(get_proxy_service),
+    request: Request,
     auth: ConditionalAuthDep = None,
 ) -> PluginReloadResponse:
     """Reload a specific plugin.
@@ -210,50 +212,51 @@ async def reload_plugin(
     Raises:
         HTTPException: If plugin not found or reload fails
     """
+    # Access v2 plugin registry from app state
+    if not hasattr(request.app.state, "plugin_registry"):
+        raise HTTPException(status_code=503, detail="Plugin registry not initialized")
+
+    from ccproxy.plugins.factory import PluginRegistry
+
+    registry: PluginRegistry = request.app.state.plugin_registry
 
     # Check if plugin exists
-    if not proxy.plugin_registry:
-        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
-    registry = proxy.plugin_registry.get_plugin_registry()
-    if not registry or plugin_name not in registry.list_plugins():
+    if plugin_name not in registry.list_plugins():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Plugin '{plugin_name}' not found",
         )
 
-    # Plugin reloading is deprecated - plugins are loaded from entry points
-    # and would require package reinstallation to truly reload
+    # V2 plugins are discovered at startup and cannot be reloaded at runtime
+    # They are loaded from the filesystem during app creation
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Plugin reloading is no longer supported. Plugins are loaded from entry points and require package reinstallation.",
+        detail="Plugin reloading is not supported in v2 plugin system. Restart the server to reload plugins.",
     )
 
 
 @router.post("/discover", response_model=PluginListResponse)
 async def discover_plugins(
-    proxy: ProxyService = Depends(get_proxy_service),
+    request: Request,
     auth: ConditionalAuthDep = None,
 ) -> PluginListResponse:
     """Re-discover plugins from the plugin directory.
 
-    This will scan the plugin directory again and load any new plugins
-    that have been added since the last discovery.
+    Note: In v2 plugin system, plugins are discovered at app startup.
+    This endpoint returns the current list without re-discovery.
 
     Returns:
-        Updated list of all plugins
+        Current list of all plugins
     """
-    # Re-initialize plugins
-    # Re-initialize plugins by calling proxy's initialize method
-    await proxy.initialize_plugins()
-
-    # Return updated list
-    return await list_plugins(proxy, auth)
+    # V2 plugins are discovered during app creation and cannot be re-discovered at runtime
+    # Return the current list of plugins
+    return await list_plugins(request, auth)
 
 
 @router.delete("/{plugin_name}")
 async def unregister_plugin(
     plugin_name: str,
-    proxy: ProxyService = Depends(get_proxy_service),
+    request: Request,
     auth: ConditionalAuthDep = None,
 ) -> dict[str, str]:
     """Unregister a plugin.
@@ -265,27 +268,43 @@ async def unregister_plugin(
         Status message
 
     Raises:
-        HTTPException: If plugin not found or is built-in
+        HTTPException: If plugin not found
     """
+    # Access v2 plugin registry from app state
+    if not hasattr(request.app.state, "plugin_registry"):
+        raise HTTPException(status_code=503, detail="Plugin registry not initialized")
 
-    # Unregister the plugin
-    if not proxy.plugin_registry:
-        raise HTTPException(status_code=503, detail="Plugin manager not initialized")
-    registry = proxy.plugin_registry.get_plugin_registry()
-    success = await registry.unregister(plugin_name) if registry else False
+    from ccproxy.plugins.factory import PluginRegistry
 
-    if success:
-        # Also remove from proxy's adapter list
-        adapters = proxy.plugin_registry.get_adapters_dict()
-        if plugin_name in adapters:
-            del adapters[plugin_name]
+    registry: PluginRegistry = request.app.state.plugin_registry
 
-        return {
-            "status": "success",
-            "message": f"Plugin '{plugin_name}' unregistered successfully",
-        }
+    # Check if plugin exists
+    if plugin_name not in registry.list_plugins():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plugin '{plugin_name}' not found",
+        )
 
+    # Try to shutdown the plugin runtime
+    runtime = registry.get_runtime(plugin_name)
+    if runtime:
+        try:
+            await runtime.shutdown()
+            # Remove runtime from registry's internal dict
+            if plugin_name in registry.runtimes:
+                del registry.runtimes[plugin_name]
+            return {
+                "status": "success",
+                "message": f"Plugin '{plugin_name}' unregistered successfully",
+            }
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to unregister plugin '{plugin_name}': {str(e)}",
+            ) from e
+
+    # Should not reach here if plugin exists
     raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Plugin '{plugin_name}' not found",
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Failed to unregister plugin '{plugin_name}'",
     )

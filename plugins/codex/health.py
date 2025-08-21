@@ -4,7 +4,6 @@ from typing import Any, Literal
 
 import structlog
 
-from ccproxy.auth.openai import OpenAITokenManager
 from ccproxy.plugins.protocol import HealthCheckResult
 
 from .config import CodexSettings
@@ -17,7 +16,7 @@ logger = structlog.get_logger(__name__)
 async def codex_health_check(
     config: CodexSettings | None,
     detection_service: CodexDetectionService | None = None,
-    auth_manager: OpenAITokenManager | None = None,
+    auth_manager: Any | None = None,
 ) -> HealthCheckResult:
     """Perform health check for Codex plugin."""
     try:

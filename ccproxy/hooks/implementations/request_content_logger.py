@@ -22,9 +22,7 @@ class RequestContentLoggingHook(Hook):
         HookEvent.PROVIDER_ERROR,
         HookEvent.PROVIDER_STREAM_START,
         HookEvent.PROVIDER_STREAM_END,
-        HookEvent.STREAM_CHUNK_RECEIVED,
-        HookEvent.STREAM_CHUNK_TRANSFORMED,
-        HookEvent.STREAM_CHUNK_SENT,
+        HookEvent.PROVIDER_STREAM_CHUNK,
     ]
     priority = 20  # Run before access logging (priority 50)
 
@@ -52,11 +50,7 @@ class RequestContentLoggingHook(Hook):
             await self._log_stream_start(context)
         elif context.event == HookEvent.PROVIDER_STREAM_END:
             await self._log_stream_end(context)
-        elif context.event in [
-            HookEvent.STREAM_CHUNK_RECEIVED,
-            HookEvent.STREAM_CHUNK_TRANSFORMED,
-            HookEvent.STREAM_CHUNK_SENT,
-        ]:
+        elif context.event == HookEvent.PROVIDER_STREAM_CHUNK:
             await self._log_stream_chunk(context)
 
     async def _log_provider_request(self, context: HookContext) -> None:
@@ -242,15 +236,18 @@ class RequestContentLoggingHook(Hook):
             Timestamp prefix or None
         """
         # Try from request context
-        if context.request and hasattr(context.request, "state"):
-            if hasattr(context.request.state, "context"):
-                ctx = context.request.state.context
-                if hasattr(ctx, "get_log_timestamp_prefix"):
-                    try:
-                        result = ctx.get_log_timestamp_prefix()
-                        return str(result) if result is not None else None
-                    except Exception:
-                        pass
+        if (
+            context.request
+            and hasattr(context.request, "state")
+            and hasattr(context.request.state, "context")
+        ):
+            ctx = context.request.state.context
+            if hasattr(ctx, "get_log_timestamp_prefix"):
+                try:
+                    result = ctx.get_log_timestamp_prefix()
+                    return str(result) if result is not None else None
+                except Exception:
+                    pass
 
         # Try from metadata
         if context.metadata and "timestamp_prefix" in context.metadata:
@@ -322,7 +319,7 @@ class RequestContentLoggingHook(Hook):
             )
 
     async def _log_stream_chunk(self, context: HookContext) -> None:
-        """Log streaming chunk event.
+        """Log provider streaming chunk event.
 
         Args:
             context: Hook context with chunk data
@@ -333,17 +330,15 @@ class RequestContentLoggingHook(Hook):
         request_id = self._get_request_id(context)
         timestamp = self._get_timestamp(context)
 
-        # Determine log type based on event
-        if context.event == HookEvent.STREAM_CHUNK_RECEIVED:
-            log_type = "stream_chunk_received"
-        elif context.event == HookEvent.STREAM_CHUNK_TRANSFORMED:
-            log_type = "stream_chunk_transformed"
-        elif context.event == HookEvent.STREAM_CHUNK_SENT:
-            log_type = "stream_chunk_sent"
-        else:
-            log_type = "stream_chunk"
+        # Use consistent log type for provider stream chunks
+        log_type = "provider_stream_chunk"
 
-        chunk = data.get("chunk")
+        # For PROVIDER_STREAM_CHUNK events, the chunk data is in metadata
+        chunk = (
+            context.metadata.get("chunk_data")
+            if context.metadata
+            else data.get("chunk")
+        )
         chunk_type = data.get("chunk_type", "unknown")
 
         # Convert chunk to bytes for logging

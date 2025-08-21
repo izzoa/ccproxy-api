@@ -1,238 +1,187 @@
-"""Raw HTTP Logger plugin for debugging HTTP requests and responses."""
+"""Raw HTTP Logger plugin v2 implementation."""
 
 from typing import Any
 
 import structlog
-from pydantic import BaseModel
 
-from ccproxy.core.services import CoreServices
-from ccproxy.plugins.protocol import HealthCheckResult, SystemPlugin
-
-from .config import RawHTTPLoggerConfig
-from .logger import RawHTTPLogger
-from .middleware import RawHTTPLoggingMiddleware
-from .transport import LoggingHTTPTransport
+from ccproxy.plugins import (
+    MiddlewareLayer,
+    MiddlewareSpec,
+    PluginContext,
+    PluginManifest,
+    SystemPluginFactory,
+    SystemPluginRuntime,
+)
+from plugins.raw_http_logger.config import RawHTTPLoggerConfig
+from plugins.raw_http_logger.logger import RawHTTPLogger
+from plugins.raw_http_logger.middleware import RawHTTPLoggingMiddleware
+from plugins.raw_http_logger.transport import LoggingHTTPTransport
 
 
 logger = structlog.get_logger(__name__)
 
 
-class Plugin(SystemPlugin):
-    """Raw HTTP Logger plugin providing transport-level logging.
+class RawHTTPLoggerRuntime(SystemPluginRuntime):
+    """Runtime for raw HTTP logger plugin."""
 
-    This is a system plugin that provides raw HTTP logging for debugging purposes.
-    """
+    def __init__(self, manifest: PluginManifest):
+        """Initialize runtime."""
+        super().__init__(manifest)
+        self.config: RawHTTPLoggerConfig | None = None
+        self.logger_instance: RawHTTPLogger | None = None
+        self.original_transport: Any | None = None
 
-    def __init__(self) -> None:
-        """Initialize the raw HTTP logger plugin."""
-        self._name = "raw_http_logger"
-        self._version = "1.0.0"
-        self._router_prefix = "/raw-http-logger"  # Not used but required by protocol
-        self._config: RawHTTPLoggerConfig | None = None
-        self._logger_instance: RawHTTPLogger | None = None
-        self._original_transport: Any = None
-        self._services: CoreServices | None = None
-        self._middleware_added = False
+    async def _on_initialize(self) -> None:
+        """Initialize the raw HTTP logger."""
+        if not self.context:
+            raise RuntimeError("Context not set")
 
-    @property
-    def name(self) -> str:
-        """Plugin name."""
-        return self._name
+        # Get configuration
+        config = self.context.get("config")
+        if not isinstance(config, RawHTTPLoggerConfig):
+            logger.warning("raw_http_logger_no_config", plugin=self.name)
+            return
+        self.config = config
 
-    @property
-    def version(self) -> str:
-        """Plugin version."""
-        return self._version
+        # Create logger instance
+        self.logger_instance = RawHTTPLogger(self.config)
 
-    @property
-    def dependencies(self) -> list[str]:
-        """List of plugin names this plugin depends on."""
-        return []  # No dependencies
-
-    @property
-    def router_prefix(self) -> str:
-        """Route prefix for this plugin."""
-        return self._router_prefix
-
-    async def initialize(self, services: CoreServices) -> None:
-        """Initialize plugin with shared services.
-
-        Args:
-            services: Core services container
-        """
-        logger.info("initializing_raw_http_logger_plugin")
-
-        self._services = services
-
-        # Load plugin configuration
-        plugin_config = services.get_plugin_config(self.name)
-        self._config = RawHTTPLoggerConfig.model_validate(plugin_config)
-
-        # Create logger instance with configuration
-        self._logger_instance = RawHTTPLogger(self._config)
-
-        if self._config.enabled:
+        if self.config.enabled:
             # Wrap HTTP client transport for provider logging
-            await self._wrap_http_client_transport(services)
-
-            # Note: ASGI middleware will be added separately through app
-            # We'll need to expose a method for the app to call
+            await self._wrap_http_client_transport()
 
             logger.info(
                 "raw_http_logger_enabled",
-                log_dir=self._config.log_dir,
-                log_client_request=self._config.log_client_request,
-                log_client_response=self._config.log_client_response,
-                log_provider_request=self._config.log_provider_request,
-                log_provider_response=self._config.log_provider_response,
-                max_body_size=self._config.max_body_size,
-                exclude_paths=self._config.exclude_paths,
-                exclude_headers=self._config.exclude_headers,
+                log_dir=self.config.log_dir,
+                log_client_request=self.config.log_client_request,
+                log_client_response=self.config.log_client_response,
+                log_provider_request=self.config.log_provider_request,
+                log_provider_response=self.config.log_provider_response,
+                max_body_size=self.config.max_body_size,
+                exclude_paths=self.config.exclude_paths,
+                exclude_headers=self.config.exclude_headers,
             )
         else:
             logger.info("raw_http_logger_disabled")
 
-    async def _wrap_http_client_transport(self, services: CoreServices) -> None:
-        """Wrap the shared HTTP client's transport with logging.
+    async def _wrap_http_client_transport(self) -> None:
+        """Wrap the shared HTTP client's transport with logging."""
+        if not self.context:
+            return
 
-        Args:
-            services: Core services container
-        """
-        if not services.http_client:
+        http_client = self.context.get("http_client")
+        if not http_client:
             logger.warning("no_http_client_to_wrap")
             return
 
         # Get the current transport
-        current_transport = services.http_client._transport
+        current_transport = http_client._transport
 
         # Only wrap if not already wrapped
         if not isinstance(current_transport, LoggingHTTPTransport):
             # Store original for potential unwrapping
-            self._original_transport = current_transport
+            self.original_transport = current_transport
 
             # Create and set logging transport
-            logging_transport = LoggingHTTPTransport(
-                wrapped_transport=current_transport, logger=self._logger_instance
+            # Cast to AsyncHTTPTransport if it's the expected type
+            from httpx import AsyncHTTPTransport
+
+            wrapped = (
+                current_transport
+                if isinstance(current_transport, AsyncHTTPTransport)
+                else None
             )
-            services.http_client._transport = logging_transport
+            logging_transport = LoggingHTTPTransport(
+                wrapped_transport=wrapped, logger=self.logger_instance
+            )
+            http_client._transport = logging_transport
 
             logger.debug("http_client_transport_wrapped")
 
-    def create_middleware(self) -> RawHTTPLoggingMiddleware:
-        """Create ASGI middleware instance.
-
-        Returns:
-            RawHTTPLoggingMiddleware instance configured with plugin settings
-        """
-        if not self._logger_instance:
-            # Create with default config if not initialized
-            self._logger_instance = RawHTTPLogger(self._config)
-
-        return RawHTTPLoggingMiddleware(
-            app=None,  # Will be set by FastAPI
-            logger=self._logger_instance,
-        )
-
-    def is_enabled(self) -> bool:
-        """Check if logging is enabled.
-
-        Returns:
-            True if logging is enabled, False otherwise
-        """
-        return self._config.enabled if self._config else False
-
-    async def shutdown(self) -> None:
-        """Shutdown the plugin and cleanup resources."""
-        logger.info("shutting_down_raw_http_logger_plugin")
-
+    async def _on_shutdown(self) -> None:
+        """Cleanup on shutdown."""
         # Restore original transport if we wrapped it
-        if self._services and self._services.http_client and self._original_transport:
-            self._services.http_client._transport = self._original_transport
-            logger.debug("http_client_transport_restored")
+        if self.context and self.original_transport:
+            http_client = self.context.get("http_client")
+            if http_client:
+                http_client._transport = self.original_transport
+                logger.debug("http_client_transport_restored")
 
-        logger.info("raw_http_logger_plugin_shutdown_complete")
-
-    async def validate(self) -> bool:
-        """Validate plugin is ready."""
-        # Plugin is always valid
-        return True
-
-    def get_routes(self) -> None:
-        """Get plugin routes.
-
-        Returns:
-            None - this plugin doesn't expose any routes
-        """
-        return None
-
-    async def health_check(self) -> HealthCheckResult:
-        """Perform health check."""
-        try:
-            details = {
-                "enabled": self._config.enabled if self._config else False,
-            }
-
-            if self._config and self._config.enabled:
-                from pathlib import Path
-
-                log_dir = (
-                    self._config.log_dir
-                    if isinstance(self._config.log_dir, Path)
-                    else Path(self._config.log_dir)
-                )
-                details.update(
-                    {
-                        "log_dir": str(log_dir),
-                        "log_dir_exists": log_dir.exists(),
-                    }
-                )
-
-            return HealthCheckResult(
-                status="pass",
-                componentId=self.name,
-                componentType="system_plugin",
-                output="Raw HTTP logger is operational",
-                version=self.version,
-                details=details,
-            )
-        except Exception as e:
-            return HealthCheckResult(
-                status="fail",
-                componentId=self.name,
-                componentType="system_plugin",
-                output=str(e),
-                version=self.version,
-            )
-
-    def get_scheduled_tasks(self) -> list[Any] | None:
-        """Raw HTTP logger plugin doesn't need scheduled tasks."""
-        return None
-
-    def get_config_class(self) -> type[BaseModel] | None:
-        """Get configuration class."""
-        return RawHTTPLoggerConfig
-
-    def get_summary(self) -> dict[str, Any]:
-        """Get plugin summary for logging."""
-        summary = {
-            "router_prefix": self.router_prefix,
-            "enabled": self._config.enabled if self._config else False,
+    async def _get_health_details(self) -> dict[str, Any]:
+        """Get health check details."""
+        details = {
+            "type": "system",
+            "initialized": self.initialized,
+            "enabled": self.config.enabled if self.config else False,
         }
 
-        if self._config and self._config.enabled:
+        if self.config and self.config.enabled:
             from pathlib import Path
 
-            log_dir = (
-                self._config.log_dir
-                if isinstance(self._config.log_dir, Path)
-                else Path(self._config.log_dir)
-            )
-            summary.update(
+            log_dir = Path(self.config.log_dir)
+            details.update(
                 {
                     "log_dir": str(log_dir),
-                    "log_client": f"req={self._config.log_client_request}, res={self._config.log_client_response}",
-                    "log_provider": f"req={self._config.log_provider_request}, res={self._config.log_provider_response}",
+                    "log_dir_exists": log_dir.exists(),
                 }
             )
 
-        return summary
+        return details
+
+
+class RawHTTPLoggerFactory(SystemPluginFactory):
+    """Factory for raw HTTP logger plugin."""
+
+    def __init__(self) -> None:
+        """Initialize factory with manifest."""
+        # Create manifest with static declarations
+        manifest = PluginManifest(
+            name="raw_http_logger",
+            version="1.0.0",
+            description="Raw HTTP Logger plugin for debugging HTTP requests and responses",
+            is_provider=False,
+            config_class=RawHTTPLoggerConfig,
+        )
+
+        # Initialize with manifest and runtime class
+        super().__init__(manifest)
+
+        # Store reference to logger instance for middleware creation
+        self._logger_instance: RawHTTPLogger | None = None
+
+    def create_runtime(self) -> RawHTTPLoggerRuntime:
+        """Create runtime instance."""
+        return RawHTTPLoggerRuntime(self.manifest)
+
+    def create_context(self, core_services: Any) -> PluginContext:
+        """Create context and update manifest with middleware if enabled."""
+        # Get base context
+        context = super().create_context(core_services)
+
+        # Check if plugin is enabled
+        config = context.get("config")
+        if isinstance(config, RawHTTPLoggerConfig) and config.enabled:
+            # Create logger instance for middleware
+            self._logger_instance = RawHTTPLogger(config)
+
+            # Add middleware to manifest
+            # This is safe because it happens during app creation phase
+            if not self.manifest.middleware:
+                self.manifest.middleware = []
+
+            # Create middleware spec with proper configuration
+            middleware_spec = MiddlewareSpec(
+                middleware_class=RawHTTPLoggingMiddleware,  # type: ignore[arg-type]
+                priority=MiddlewareLayer.OBSERVABILITY
+                - 10,  # Early in observability layer
+                kwargs={"logger": self._logger_instance},
+            )
+
+            self.manifest.middleware.append(middleware_spec)
+            logger.debug("raw_http_logger_middleware_added_to_manifest")
+
+        return context
+
+
+# Export the factory instance
+factory = RawHTTPLoggerFactory()

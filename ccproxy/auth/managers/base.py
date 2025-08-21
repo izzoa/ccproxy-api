@@ -2,13 +2,11 @@
 
 import json
 from abc import ABC, abstractmethod
-from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 from ccproxy.auth.exceptions import (
-    AuthenticationError,
     CredentialsInvalidError,
     CredentialsStorageError,
 )
@@ -41,6 +39,7 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
         """
         self.storage = storage
         self._auth_cache = AuthStatusCache(ttl=60.0)  # 1 minute TTL for auth status
+        self._profile_cache: Any = None  # For subclasses that cache profiles
 
     # ==================== Core Operations ====================
 
@@ -119,16 +118,23 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
         """
         return self.storage.get_location()
 
-    # ==================== Abstract Methods ====================
+    # ==================== Common Implementations ====================
 
-    @abstractmethod
     async def validate_token(self) -> bool:
         """Check if stored token is valid and not expired.
 
         Returns:
             True if valid, False otherwise
         """
-        pass
+        credentials = await self.load_credentials()
+        if not credentials:
+            return False
+
+        if self.is_expired(credentials):
+            logger.info("Token is expired")
+            return False
+
+        return True
 
     @abstractmethod
     async def refresh_token(self, oauth_client: Any) -> CredentialsT | None:
@@ -142,14 +148,57 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
         """
         pass
 
-    @abstractmethod
     async def get_auth_status(self) -> dict[str, Any]:
         """Get current authentication status.
 
         Returns:
             Dictionary with authentication status information
         """
-        pass
+        credentials = await self.load_credentials()
+
+        if not credentials:
+            return {
+                "authenticated": False,
+                "reason": "No credentials found",
+            }
+
+        if self.is_expired(credentials):
+            status = {
+                "authenticated": False,
+                "reason": "Token expired",
+            }
+
+            # Add expiration info if available
+            expires_at = self.get_expiration_time(credentials)
+            if expires_at:
+                status["expires_at"] = expires_at.isoformat()
+
+            # Add account ID if available
+            account_id = self.get_account_id(credentials)
+            if account_id:
+                status["account_id"] = account_id
+
+            return status
+
+        # Token is valid
+        status = {"authenticated": True}
+
+        # Add expiration info if available
+        expires_at = self.get_expiration_time(credentials)
+        if expires_at:
+            from datetime import UTC, datetime
+
+            now = datetime.now(UTC)
+            delta = expires_at - now
+            status["expires_at"] = expires_at.isoformat()
+            status["expires_in"] = max(0, int(delta.total_seconds()))
+
+        # Add account ID if available
+        account_id = self.get_account_id(credentials)
+        if account_id:
+            status["account_id"] = account_id
+
+        return status
 
     @abstractmethod
     def is_expired(self, credentials: CredentialsT) -> bool:
@@ -174,6 +223,89 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
             Account ID if available, None otherwise
         """
         pass
+
+    def get_expiration_time(self, credentials: CredentialsT) -> Any:
+        """Get expiration time from credentials.
+
+        Args:
+            credentials: Credentials to extract expiration time from
+
+        Returns:
+            Expiration datetime if available, None otherwise
+        """
+        # Default implementation - plugins can override
+        from datetime import UTC, datetime
+
+        if hasattr(credentials, "expires_at"):
+            if isinstance(credentials.expires_at, datetime):
+                return credentials.expires_at
+            elif isinstance(credentials.expires_at, int | float):
+                # Assume Unix timestamp in seconds
+                return datetime.fromtimestamp(credentials.expires_at, tz=UTC)
+        elif hasattr(credentials, "claude_ai_oauth"):
+            # Handle Claude credentials format
+            expires_at = credentials.claude_ai_oauth.expires_at
+            if expires_at:
+                return datetime.fromtimestamp(
+                    expires_at / 1000, tz=UTC
+                )  # Convert from milliseconds
+        return None
+
+    # ==================== Unified Profile Support ====================
+
+    async def get_profile(self) -> Any:
+        """Get profile information.
+
+        To be implemented by provider-specific managers.
+        Returns provider-specific profile model.
+        """
+        return None
+
+    async def get_unified_profile(self) -> dict[str, Any]:
+        """Get profile in a unified format across all providers.
+
+        Returns:
+            Dictionary with standardized fields plus provider-specific extras
+        """
+        profile = await self.get_profile()
+        if not profile:
+            return {}
+
+        # Handle both old UserProfile and new BaseProfileInfo
+        if hasattr(profile, "provider_type"):
+            # New BaseProfileInfo-based profile
+            return {
+                "account_id": profile.account_id,
+                "email": profile.email,
+                "display_name": profile.display_name,
+                "provider": profile.provider_type,
+                "extras": profile.extras,  # All provider-specific data
+            }
+        else:
+            # Legacy UserProfile format
+            account = getattr(profile, "account", None)
+            if account:
+                return {
+                    "account_id": account.uuid,
+                    "email": account.email,
+                    "display_name": account.full_name,
+                    "provider": "unknown",
+                    "extras": account.extras if hasattr(account, "extras") else {},
+                }
+            return {}
+
+    async def clear_cache(self) -> None:
+        """Clear any cached data (profiles, etc.).
+
+        Should be called after token refresh or logout.
+        """
+        # Clear auth status cache
+        if hasattr(self, "_auth_cache"):
+            self._auth_cache.clear()
+
+        # Clear profile cache if exists
+        if hasattr(self, "_profile_cache"):
+            self._profile_cache = None
 
     # ==================== Common Utility Methods ====================
 

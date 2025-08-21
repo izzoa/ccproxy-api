@@ -9,4 +9,4 @@ This module contains standard hook implementations for common use cases:
 - StreamingCaptureHook: Streaming response capture
 """
 
-__all__ = []
+__all__: list[str] = []
