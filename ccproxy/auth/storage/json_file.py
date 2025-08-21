@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
+
 from ccproxy.auth.exceptions import (
     CredentialsInvalidError,
     CredentialsStorageError,
@@ -19,7 +20,7 @@ from ccproxy.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-class JsonFileTokenStorage(TokenStorage):
+class JsonFileTokenStorage(TokenStorage[ClaudeCredentials]):
     """JSON file storage implementation for Claude credentials with keyring fallback."""
 
     def __init__(self, file_path: Path):
@@ -42,7 +43,7 @@ class JsonFileTokenStorage(TokenStorage):
         """
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
-        
+
         if not await self.exists():
             logger.debug("credentials_file_not_found", path=str(self.file_path))
             return None

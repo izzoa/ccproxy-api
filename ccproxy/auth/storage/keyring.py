@@ -16,7 +16,7 @@ from ccproxy.auth.storage.base import TokenStorage
 logger = get_logger(__name__)
 
 
-class KeyringTokenStorage(TokenStorage):
+class KeyringTokenStorage(TokenStorage[ClaudeCredentials]):
     """OS keyring storage implementation for Claude credentials."""
 
     def __init__(
