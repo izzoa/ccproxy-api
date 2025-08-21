@@ -4,6 +4,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+
 from ccproxy.config.constants import (
     DEFAULT_TASK_INTERVAL,
     PLUGIN_SUMMARY_CACHE_SIZE,

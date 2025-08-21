@@ -74,16 +74,14 @@ class PluginHTTPHandler(BaseHTTPHandler):
 
         if is_streaming and streaming_handler:
             # Delegate to streaming handler
-            response: StreamingResponse = (
-                await streaming_handler.handle_streaming_request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    body=body,
-                    handler_config=handler_config,
-                    request_context=request_context or {},
-                    client=self._http_client,  # use shared client so logging transport applies
-                )
+            response: StreamingResponse = await streaming_handler.handle_streaming_request(
+                method=method,
+                url=url,
+                headers=headers,
+                body=body,
+                handler_config=handler_config,
+                request_context=request_context or {},
+                client=self._http_client,  # use shared client so logging transport applies
             )
             return response
 
@@ -236,10 +234,10 @@ class PluginHTTPHandler(BaseHTTPHandler):
         # Pass request ID via extensions for internal tracking (not sent upstream)
         extensions = {}
         request_id = None
-        if request_context and hasattr(request_context, 'request_id'):
+        if request_context and hasattr(request_context, "request_id"):
             request_id = request_context.request_id
-            extensions['request_id'] = request_id
-        
+            extensions["request_id"] = request_id
+
         # Trace the outgoing request if tracer is available
         if self._request_tracer and request_id:
             await self._request_tracer.trace_request(
@@ -249,7 +247,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
                 headers=headers,
                 body=body,
             )
-        
+
         # Use shared HTTP client
         response = await self._http_client.request(
             method=method,
@@ -259,7 +257,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
             timeout=httpx.Timeout(120.0),
             extensions=extensions,
         )
-        
+
         # Trace the response if tracer is available
         if self._request_tracer and request_id:
             await self._request_tracer.trace_response(
@@ -268,7 +266,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
                 headers=dict(response.headers),
                 body=response.content,
             )
-        
+
         return response
 
     async def cleanup(self) -> None:

@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import httpx
 from fastapi import Depends, Request
-from ccproxy.core.logging import get_logger
 
 from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.http import BaseProxyClient
 from ccproxy.core.http_client import get_shared_http_client
+from ccproxy.core.logging import get_logger
 from ccproxy.hooks import HookManager
 from ccproxy.observability import PrometheusMetrics, get_metrics
 from ccproxy.observability.storage.duckdb_simple import SimpleDuckDBStorage

@@ -12,7 +12,6 @@ import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any, Literal, cast
 
-import structlog
 from pydantic import ValidationError
 
 from ccproxy.adapters.base import APIAdapter
@@ -58,7 +57,7 @@ class OpenAIAdapter(APIAdapter):
         """
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
-        
+
         try:
             # Parse OpenAI request
             openai_req = OpenAIChatCompletionRequest(**request)
@@ -264,7 +263,7 @@ class OpenAIAdapter(APIAdapter):
         """Log warnings for unsupported OpenAI parameters."""
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
-        
+
         if openai_req.seed is not None:
             logger.debug(
                 "unsupported_parameter_ignored",
@@ -341,7 +340,7 @@ class OpenAIAdapter(APIAdapter):
         """
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
-        
+
         try:
             # Extract original model from response metadata if available
             original_model = response.get("model", "gpt-4")
@@ -522,7 +521,7 @@ class OpenAIAdapter(APIAdapter):
         """
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
-        
+
         # Create stream processor with dict output format
         processor = OpenAIStreamProcessor(
             enable_usage=True,

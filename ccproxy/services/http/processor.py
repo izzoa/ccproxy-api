@@ -44,7 +44,7 @@ class RequestProcessor:
         # Get logger with current request context at the start of the function
         logger = get_logger(__name__)
         self.logger = logger
-        
+
         # Parse body and check streaming flag
         request_data, is_streaming = self._parse_request_body(body)
 
@@ -181,10 +181,10 @@ class RequestProcessor:
 
     def _filter_internal_headers(self, headers: dict[str, str]) -> dict[str, str]:
         """Filter out internal headers that shouldn't be sent upstream.
-        
+
         Args:
             headers: Original request headers
-            
+
         Returns:
             Filtered headers dictionary
         """
@@ -192,29 +192,29 @@ class RequestProcessor:
         # These are either internal tracking headers or headers that will be
         # replaced by the plugin transformers (but we remove them here as a safety net)
         internal_headers = {
-            'x-request-id',
-            'x-correlation-id',
-            'x-ccproxy-internal',
-            'user-agent',  # Will be replaced by plugin transformer, but filter here for safety
+            "x-request-id",
+            "x-correlation-id",
+            "x-ccproxy-internal",
+            "user-agent",  # Will be replaced by plugin transformer, but filter here for safety
             # Add more internal headers as needed
         }
-        
+
         # Filter headers (case-insensitive comparison)
         filtered = {
-            key: value 
-            for key, value in headers.items() 
+            key: value
+            for key, value in headers.items()
             if key.lower() not in internal_headers
         }
-        
+
         # Log if we filtered any headers
         removed_headers = set(headers.keys()) - set(filtered.keys())
         if removed_headers:
             self.logger.debug(
                 "filtered_internal_headers",
                 removed=list(removed_headers),
-                count=len(removed_headers)
+                count=len(removed_headers),
             )
-        
+
         return filtered
 
     def _apply_request_transformer(

@@ -102,7 +102,7 @@ class Settings(BaseSettings):
         default_factory=CORSSettings,
         description="CORS configuration settings",
     )
-    
+
     http: HTTPSettings = Field(
         default_factory=HTTPSettings,
         description="HTTP client configuration settings",
@@ -298,16 +298,16 @@ class Settings(BaseSettings):
 
         # Create Settings instance with merged config
         settings = cls(**merged_config)
-        
+
         # Log final HTTP settings
-        if hasattr(settings, 'http'):
+        if hasattr(settings, "http"):
             logger = structlog.get_logger(__name__)
             logger.info(
                 "final_http_settings",
                 compression_enabled=settings.http.compression_enabled,
                 accept_encoding=settings.http.accept_encoding,
             )
-        
+
         return settings
 
 

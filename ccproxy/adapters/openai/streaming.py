@@ -289,7 +289,7 @@ class OpenAIStreamProcessor:
         """
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
-        
+
         try:
             chunk_count = 0
             processed_count = 0

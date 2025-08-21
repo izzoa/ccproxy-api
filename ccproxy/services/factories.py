@@ -76,8 +76,10 @@ class ConcreteServiceFactory:
         return handler
 
     def create_streaming_handler(
-        self, settings: Settings, metrics: PrometheusMetrics | None = None,
-        request_tracer: CoreRequestTracer | None = None
+        self,
+        settings: Settings,
+        metrics: PrometheusMetrics | None = None,
+        request_tracer: CoreRequestTracer | None = None,
     ) -> StreamingHandler:
         """Create streaming handler instance.
 

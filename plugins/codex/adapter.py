@@ -88,8 +88,7 @@ class CodexAdapter(BaseAdapter):
                 raise RuntimeError("ProxyService must have http_client attribute")
             request_tracer = getattr(self.proxy_service, "request_tracer", None)
             self._http_handler = PluginHTTPHandler(
-                http_client=shared_client,
-                request_tracer=request_tracer
+                http_client=shared_client, request_tracer=request_tracer
             )
 
             # Initialize transformers

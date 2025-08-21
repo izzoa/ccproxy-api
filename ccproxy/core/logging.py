@@ -284,22 +284,23 @@ def setup_logging(
 # Create a convenience function for getting loggers
 def get_logger(name: str | None = None) -> BoundLogger:
     """Get a structlog logger instance with request context automatically bound.
-    
+
     This function checks for an active RequestContext and automatically binds
     the request_id to the logger if available, ensuring all logs are correlated
     with the current request.
-    
+
     Args:
         name: Logger name (typically __name__)
-        
+
     Returns:
         BoundLogger with request_id bound if available
     """
     logger = structlog.get_logger(name)  # type: ignore[no-any-return]
-    
+
     # Try to get request context and bind request_id if available
     try:
         from ccproxy.observability.context import RequestContext
+
         context = RequestContext.get_current()
         if context and context.request_id:
             logger = logger.bind(request_id=context.request_id)
@@ -307,5 +308,5 @@ def get_logger(name: str | None = None) -> BoundLogger:
         # If anything fails, just return the regular logger
         # This ensures backward compatibility
         pass
-    
+
     return logger

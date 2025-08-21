@@ -43,7 +43,7 @@ class ClaudeAPIResponseTransformer:
         """
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
-        
+
         transformed = {}
 
         # Headers to exclude from passthrough

@@ -4,7 +4,6 @@ import time
 from typing import Any
 
 import structlog
-from fastapi import Request
 
 from ccproxy.hooks.base import Hook, HookContext
 from ccproxy.hooks.events import HookEvent

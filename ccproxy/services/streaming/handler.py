@@ -82,7 +82,7 @@ class StreamingHandler:
         - Processes SSE events with adapter if provided
         - Returns StreamingResponseWithLogging wrapper
         """
-        
+
         # Store response headers to pass to client
         response_headers: dict[str, str] = {}
 
@@ -96,8 +96,7 @@ class StreamingHandler:
             # Trace stream start
             if self.request_tracer and request_id:
                 await self.request_tracer.trace_stream_start(
-                    request_id=request_id,
-                    headers=headers
+                    request_id=request_id, headers=headers
                 )
 
             try:
@@ -106,16 +105,16 @@ class StreamingHandler:
                 if client is None:
                     # Prepare extensions for request ID tracking
                     extensions = {}
-                    if request_context and hasattr(request_context, 'request_id'):
-                        extensions['request_id'] = request_context.request_id
+                    if request_context and hasattr(request_context, "request_id"):
+                        extensions["request_id"] = request_context.request_id
                     else:
                         logger.warning(
                             "streaming_request_missing_request_id",
                             url=url,
                             method=method,
-                            message="Skipping raw HTTP logging for this streaming request"
+                            message="Skipping raw HTTP logging for this streaming request",
                         )
-                    
+
                     async with httpx.AsyncClient(**config) as local_client:
                         async with local_client.stream(
                             method=method,
@@ -127,11 +126,13 @@ class StreamingHandler:
                         ) as response:
                             # Capture response headers to pass to client and context
                             response_headers = dict(response.headers)
-                            
+
                             # Pass all response headers to the request context
                             if request_context and hasattr(request_context, "metadata"):
-                                request_context.metadata["response_headers"] = response_headers
-                            
+                                request_context.metadata["response_headers"] = (
+                                    response_headers
+                                )
+
                             # Check for error status
                             if response.status_code >= 400:
                                 error_body = await response.aread()
@@ -150,7 +151,7 @@ class StreamingHandler:
                                         await self.request_tracer.trace_stream_chunk(
                                             request_id=request_id,
                                             chunk=chunk,
-                                            chunk_number=total_chunks
+                                            chunk_number=total_chunks,
                                         )
                                     yield chunk
                             else:
@@ -162,22 +163,22 @@ class StreamingHandler:
                                         await self.request_tracer.trace_stream_chunk(
                                             request_id=request_id,
                                             chunk=chunk,
-                                            chunk_number=total_chunks
+                                            chunk_number=total_chunks,
                                         )
                                     yield chunk
                 else:
                     # Prepare extensions for request ID tracking
                     extensions = {}
-                    if request_context and hasattr(request_context, 'request_id'):
-                        extensions['request_id'] = request_context.request_id
+                    if request_context and hasattr(request_context, "request_id"):
+                        extensions["request_id"] = request_context.request_id
                     else:
                         logger.warning(
                             "streaming_request_missing_request_id",
                             url=url,
                             method=method,
-                            message="Skipping raw HTTP logging for this streaming request"
+                            message="Skipping raw HTTP logging for this streaming request",
                         )
-                    
+
                     async with client.stream(
                         method=method,
                         url=url,
@@ -188,11 +189,13 @@ class StreamingHandler:
                     ) as response:
                         # Capture response headers to pass to client and context
                         response_headers = dict(response.headers)
-                        
+
                         # Pass all response headers to the request context
                         if request_context and hasattr(request_context, "metadata"):
-                            request_context.metadata["response_headers"] = response_headers
-                        
+                            request_context.metadata["response_headers"] = (
+                                response_headers
+                            )
+
                         # Check for error status
                         if response.status_code >= 400:
                             error_body = await response.aread()
@@ -211,7 +214,7 @@ class StreamingHandler:
                                     await self.request_tracer.trace_stream_chunk(
                                         request_id=request_id,
                                         chunk=chunk,
-                                        chunk_number=total_chunks
+                                        chunk_number=total_chunks,
                                     )
                                 yield chunk
                         else:
@@ -223,10 +226,9 @@ class StreamingHandler:
                                     await self.request_tracer.trace_stream_chunk(
                                         request_id=request_id,
                                         chunk=chunk,
-                                        chunk_number=total_chunks
+                                        chunk_number=total_chunks,
                                     )
                                 yield chunk
-                    
 
                 # Update metrics if available
                 if request_context and hasattr(request_context, "metrics"):
@@ -238,7 +240,7 @@ class StreamingHandler:
                     await self.request_tracer.trace_stream_complete(
                         request_id=request_id,
                         total_chunks=total_chunks,
-                        total_bytes=total_bytes
+                        total_bytes=total_bytes,
                     )
 
             except httpx.TimeoutException as e:
@@ -275,7 +277,7 @@ class StreamingHandler:
             "X-Accel-Buffering": "no",  # Disable nginx buffering
             "Content-Type": "text/event-stream",  # Ensure correct content type
         }
-        
+
         # Return streaming response with all headers
         return StreamingResponseWithLogging(
             stream_generator(),

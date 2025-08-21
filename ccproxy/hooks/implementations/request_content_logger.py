@@ -1,7 +1,6 @@
 """Request content logging hook that captures provider request/response bodies."""
 
 import json
-from typing import Any
 
 import structlog
 
@@ -67,11 +66,11 @@ class RequestContentLoggingHook(Hook):
             context: Hook context with request data
         """
         data = context.data or {}
-        
+
         # Extract request ID from context if available
         request_id = self._get_request_id(context)
         timestamp = self._get_timestamp(context)
-        
+
         # Create request log data
         request_data = {
             "method": data.get("method"),
@@ -80,7 +79,7 @@ class RequestContentLoggingHook(Hook):
             "body_size": data.get("body_size", 0),
             "body": None,
         }
-        
+
         # Try to parse body
         body = data.get("body")
         if body:
@@ -99,7 +98,7 @@ class RequestContentLoggingHook(Hook):
                         request_data["body"] = str(body)
                 except Exception:
                     request_data["body"] = f"<binary data of length {len(body)}>"
-        
+
         try:
             await write_request_log(
                 request_id=request_id,
@@ -122,11 +121,11 @@ class RequestContentLoggingHook(Hook):
             context: Hook context with response data
         """
         data = context.data or {}
-        
+
         # Extract request ID from context if available
         request_id = self._get_request_id(context)
         timestamp = self._get_timestamp(context)
-        
+
         # Create response log data
         response_data = {
             "status_code": data.get("status_code"),
@@ -134,7 +133,7 @@ class RequestContentLoggingHook(Hook):
             "body_size": data.get("body_size", 0),
             "body": None,
         }
-        
+
         # Try to parse body
         body = data.get("body")
         if body:
@@ -153,7 +152,7 @@ class RequestContentLoggingHook(Hook):
                         response_data["body"] = str(body)
                 except Exception:
                     response_data["body"] = f"<binary data of length {len(body)}>"
-        
+
         try:
             await write_request_log(
                 request_id=request_id,
@@ -176,11 +175,11 @@ class RequestContentLoggingHook(Hook):
             context: Hook context with error information
         """
         data = context.data or {}
-        
+
         # Extract request ID from context if available
         request_id = self._get_request_id(context)
         timestamp = self._get_timestamp(context)
-        
+
         # Create error log data
         error_data = {
             "method": data.get("method"),
@@ -189,7 +188,7 @@ class RequestContentLoggingHook(Hook):
             "error_message": data.get("error_message"),
             "error_details": str(context.error) if context.error else None,
         }
-        
+
         try:
             await write_request_log(
                 request_id=request_id,
@@ -222,15 +221,15 @@ class RequestContentLoggingHook(Hook):
                 ctx = context.request.state.context
                 if hasattr(ctx, "request_id"):
                     return str(ctx.request_id)
-        
+
         # Try from metadata
         if context.metadata and "request_id" in context.metadata:
             return str(context.metadata["request_id"])
-        
+
         # Try from data
         if context.data and "request_id" in context.data:
             return str(context.data["request_id"])
-        
+
         return "unknown"
 
     def _get_timestamp(self, context: HookContext) -> str | None:
@@ -252,11 +251,11 @@ class RequestContentLoggingHook(Hook):
                         return str(result) if result is not None else None
                     except Exception:
                         pass
-        
+
         # Try from metadata
         if context.metadata and "timestamp_prefix" in context.metadata:
             return str(context.metadata["timestamp_prefix"])
-        
+
         return None
 
     async def _log_stream_start(self, context: HookContext) -> None:
@@ -268,14 +267,14 @@ class RequestContentLoggingHook(Hook):
         data = context.data or {}
         request_id = self._get_request_id(context)
         timestamp = self._get_timestamp(context)
-        
+
         stream_data = {
             "event": "stream_start",
             "url": data.get("url"),
             "method": data.get("method"),
             "headers": data.get("headers", {}),
         }
-        
+
         try:
             await write_request_log(
                 request_id=request_id,
@@ -300,13 +299,13 @@ class RequestContentLoggingHook(Hook):
         data = context.data or {}
         request_id = self._get_request_id(context)
         timestamp = self._get_timestamp(context)
-        
+
         stream_data = {
             "event": "stream_end",
             "total_chunks": data.get("total_chunks"),
             "total_bytes": data.get("total_bytes"),
         }
-        
+
         try:
             await write_request_log(
                 request_id=request_id,
@@ -329,11 +328,11 @@ class RequestContentLoggingHook(Hook):
             context: Hook context with chunk data
         """
         from ccproxy.utils.simple_request_logger import append_streaming_log
-        
+
         data = context.data or {}
         request_id = self._get_request_id(context)
         timestamp = self._get_timestamp(context)
-        
+
         # Determine log type based on event
         if context.event == HookEvent.STREAM_CHUNK_RECEIVED:
             log_type = "stream_chunk_received"
@@ -343,10 +342,10 @@ class RequestContentLoggingHook(Hook):
             log_type = "stream_chunk_sent"
         else:
             log_type = "stream_chunk"
-        
+
         chunk = data.get("chunk")
         chunk_type = data.get("chunk_type", "unknown")
-        
+
         # Convert chunk to bytes for logging
         chunk_bytes = b""
         if chunk:
@@ -357,7 +356,9 @@ class RequestContentLoggingHook(Hook):
                     chunk_bytes = chunk.encode("utf-8")
                 elif isinstance(chunk, dict):
                     # JSON chunk - serialize it
-                    chunk_bytes = json.dumps(chunk, separators=(",", ":")).encode("utf-8")
+                    chunk_bytes = json.dumps(chunk, separators=(",", ":")).encode(
+                        "utf-8"
+                    )
                 else:
                     chunk_bytes = str(chunk).encode("utf-8")
             except Exception as e:
@@ -368,7 +369,7 @@ class RequestContentLoggingHook(Hook):
                     error=str(e),
                 )
                 return
-        
+
         try:
             # Use append_streaming_log for chunk data
             await append_streaming_log(

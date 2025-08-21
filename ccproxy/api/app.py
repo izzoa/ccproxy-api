@@ -3,10 +3,8 @@
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
-import os
 
-import httpx
-from fastapi import APIRouter, FastAPI
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from structlog import get_logger
 from typing_extensions import TypedDict
@@ -33,8 +31,6 @@ from ccproxy.core.http_client import close_shared_http_client
 from ccproxy.core.logging import setup_logging
 from ccproxy.hooks import HookManager, HookRegistry
 from ccproxy.hooks.events import HookEvent
-from ccproxy.observability import get_metrics
-from ccproxy.utils.models_provider import get_models_list
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
     check_version_updates_startup,
@@ -131,10 +127,10 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
             # Access the internal PluginRegistry from PluginManager
             for plugin_name in plugin_manager.plugin_registry.list_plugins():
                 plugin = plugin_manager.plugin_registry.get_plugin(plugin_name)
-                
+
                 # Note: raw_http_logger middleware is added during app creation
                 # to ensure proper ordering (must be added before app starts)
-                
+
                 # Register routes
                 if plugin and hasattr(plugin, "get_routes"):
                     routes = plugin.get_routes()
@@ -183,7 +179,6 @@ async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
     # Create hook system
     hook_registry = HookRegistry()
     hook_manager = HookManager(hook_registry)
-
 
     # Load plugin hooks from plugin registry
     if hasattr(app.state, "proxy_service"):
@@ -486,7 +481,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.include_router(dashboard_router, tags=["dashboard"])
 
     app.include_router(oauth_router, prefix="/oauth", tags=["oauth"])
-
 
     # Plugin management endpoints (conditional on plugin system)
     if settings.enable_plugins:

@@ -61,16 +61,14 @@ class ClaudeAPIAdapter(BaseAdapter):
         request_tracer = None
         if proxy_service and hasattr(proxy_service, "request_tracer"):
             request_tracer = proxy_service.request_tracer
-            
+
         if http_client:
             self._http_handler: PluginHTTPHandler = PluginHTTPHandler(
-                http_client=http_client,
-                request_tracer=request_tracer
+                http_client=http_client, request_tracer=request_tracer
             )
         elif proxy_service and hasattr(proxy_service, "http_client"):
             self._http_handler = PluginHTTPHandler(
-                http_client=proxy_service.http_client,
-                request_tracer=request_tracer
+                http_client=proxy_service.http_client, request_tracer=request_tracer
             )
         else:
             raise RuntimeError(
@@ -322,53 +320,58 @@ class ClaudeAPIAdapter(BaseAdapter):
 
         # Create metrics collector for usage extraction
         from ccproxy.utils.streaming_metrics import StreamingMetricsCollector
+
         collector = StreamingMetricsCollector(request_id=request_context.request_id)
-        
+
         async def wrapped_iterator() -> AsyncIterator[bytes]:
             """Wrap the stream iterator to accumulate chunks."""
             nonlocal headers_extracted
-            
+
             async for chunk in original_iterator:
                 # Extract headers on first chunk (after streaming has started)
                 if not headers_extracted:
                     headers_extracted = True
                     if "response_headers" in request_context.metadata:
                         response_headers = request_context.metadata["response_headers"]
-                        
+
                         # Extract relevant headers and put them directly in metadata for access_logger
                         headers_for_log = {}
                         for k, v in response_headers.items():
                             k_lower = k.lower()
                             # Include Anthropic headers and request IDs
-                            if k_lower.startswith('anthropic-ratelimit'):
+                            if k_lower.startswith("anthropic-ratelimit"):
                                 # Put rate limit headers directly in metadata for access_logger
                                 request_context.metadata[k_lower] = v
                                 headers_for_log[k] = v
-                            elif k_lower == 'anthropic-request-id':
+                            elif k_lower == "anthropic-request-id":
                                 # Also store request ID
                                 request_context.metadata["anthropic_request_id"] = v
                                 headers_for_log[k] = v
-                            elif 'request' in k_lower and 'id' in k_lower:
+                            elif "request" in k_lower and "id" in k_lower:
                                 headers_for_log[k] = v
-                        
+
                         # Also store the headers dictionary for display
                         request_context.metadata["headers"] = headers_for_log
-                        
+
                         self.logger.debug(
                             "claude_api_headers_extracted",
                             headers_count=len(headers_for_log),
                             headers=headers_for_log,
-                            direct_metadata_keys=[k for k in request_context.metadata.keys() if 'anthropic' in k.lower()],
+                            direct_metadata_keys=[
+                                k
+                                for k in request_context.metadata
+                                if "anthropic" in k.lower()
+                            ],
                         )
-                
-                if isinstance(chunk, (str, memoryview)):
+
+                if isinstance(chunk, str | memoryview):
                     chunk = chunk.encode() if isinstance(chunk, str) else bytes(chunk)
                 chunks.append(chunk)
-                
+
                 # Process this chunk for usage data
                 chunk_str = chunk.decode("utf-8", errors="ignore")
                 is_final = collector.process_chunk(chunk_str)
-                
+
                 # If we got final metrics, update context
                 if is_final:
                     usage_metrics = collector.get_metrics()
@@ -379,27 +382,35 @@ class ClaudeAPIAdapter(BaseAdapter):
                             cost_usd = collector.calculate_final_cost(model)
                         else:
                             cost_usd = usage_metrics.get("cost_usd")
-                        
+
                         # Update request context with usage data
-                        request_context.metadata.update({
-                            "tokens_input": usage_metrics.get("tokens_input", 0),
-                            "tokens_output": usage_metrics.get("tokens_output", 0),
-                            "tokens_total": (
-                                (usage_metrics.get("tokens_input") or 0) +
-                                (usage_metrics.get("tokens_output") or 0)
-                            ),
-                            "cost_usd": cost_usd or 0.0,
-                            "cache_read_tokens": usage_metrics.get("cache_read_tokens"),
-                            "cache_write_tokens": usage_metrics.get("cache_write_tokens"),
-                        })
-                
+                        request_context.metadata.update(
+                            {
+                                "tokens_input": usage_metrics.get("tokens_input", 0),
+                                "tokens_output": usage_metrics.get("tokens_output", 0),
+                                "tokens_total": (
+                                    (usage_metrics.get("tokens_input") or 0)
+                                    + (usage_metrics.get("tokens_output") or 0)
+                                ),
+                                "cost_usd": cost_usd or 0.0,
+                                "cache_read_tokens": usage_metrics.get(
+                                    "cache_read_tokens"
+                                ),
+                                "cache_write_tokens": usage_metrics.get(
+                                    "cache_write_tokens"
+                                ),
+                            }
+                        )
+
                 yield chunk
 
             # Mark that stream processing is complete
-            request_context.metadata.update({
-                "stream_accumulated": True,
-                "stream_chunks_count": len(chunks),
-            })
+            request_context.metadata.update(
+                {
+                    "stream_accumulated": True,
+                    "stream_chunks_count": len(chunks),
+                }
+            )
 
         # Create new streaming response with wrapped iterator
         return StreamingResponse(

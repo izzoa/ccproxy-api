@@ -75,7 +75,7 @@ class HTTPClientFactory:
             max_keepalive_connections=max_keepalive_connections,
             max_connections=max_connections,
         )
-        
+
         # Create transport
         transport = httpx.AsyncHTTPTransport(
             limits=limits,
@@ -83,12 +83,12 @@ class HTTPClientFactory:
             verify=verify,
             proxy=proxy,
         )
-        
+
         # Note: Transport wrapping for logging is now handled by the raw_http_logger plugin
-        
+
         # Handle compression settings
         default_headers = {}
-        if settings and hasattr(settings, 'http'):
+        if settings and hasattr(settings, "http"):
             http_settings = settings.http
             # Log the HTTP settings to verify they're being loaded
             logger.info(
@@ -104,11 +104,15 @@ class HTTPClientFactory:
             elif http_settings.accept_encoding:
                 # Use custom Accept-Encoding value
                 default_headers["accept-encoding"] = http_settings.accept_encoding
-                logger.info("compression_custom", accept_encoding=http_settings.accept_encoding)
+                logger.info(
+                    "compression_custom", accept_encoding=http_settings.accept_encoding
+                )
             # else: let httpx use its default compression handling
         else:
-            logger.warning("http_settings_not_found", settings_present=settings is not None)
-        
+            logger.warning(
+                "http_settings_not_found", settings_present=settings is not None
+            )
+
         # Merge headers with any provided in kwargs
         if "headers" in kwargs:
             default_headers.update(kwargs["headers"])
@@ -131,7 +135,9 @@ class HTTPClientFactory:
             max_connections=max_connections,
             http2=http2,
             has_proxy=proxy is not None,
-            compression_enabled=settings.http.compression_enabled if settings and hasattr(settings, 'http') else True,
+            compression_enabled=settings.http.compression_enabled
+            if settings and hasattr(settings, "http")
+            else True,
             accept_encoding=default_headers.get("accept-encoding", "httpx default"),
         )
 

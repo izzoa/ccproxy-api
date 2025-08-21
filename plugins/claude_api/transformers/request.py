@@ -44,7 +44,7 @@ class ClaudeAPIRequestTransformer:
         """
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
-        
+
         transformed = headers.copy()
 
         # Remove hop-by-hop headers and x-api-key (client auth header)
@@ -115,7 +115,7 @@ class ClaudeAPIRequestTransformer:
         """
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
-        
+
         if not body:
             return body
 

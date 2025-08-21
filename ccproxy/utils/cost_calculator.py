@@ -34,7 +34,7 @@ def calculate_token_cost(
     """
     # Get logger with request context at the start of the function
     logger = get_logger(__name__)
-    
+
     if not model or (
         not tokens_input
         and not tokens_output

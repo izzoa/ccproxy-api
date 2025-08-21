@@ -210,7 +210,9 @@ def _run_docker_server(
     )
 
 
-def _run_local_server(settings: Settings, cli_overrides: dict[str, Any], config: Path | None = None) -> None:
+def _run_local_server(
+    settings: Settings, cli_overrides: dict[str, Any], config: Path | None = None
+) -> None:
     """Run the server locally."""
     in_docker = is_running_in_docker()
     toolkit = get_rich_toolkit()
@@ -242,7 +244,7 @@ def _run_local_server(settings: Settings, cli_overrides: dict[str, Any], config:
     # Set environment variables for server to access CLI overrides
     if cli_overrides:
         os.environ["CCPROXY_CONFIG_OVERRIDES"] = json.dumps(cli_overrides)
-    
+
     # Set config file path for the app to use
     if config:
         os.environ["CONFIG_FILE"] = str(config)

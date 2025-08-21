@@ -328,7 +328,7 @@ class ProxyService:
             try:
                 async for chunk in original_iterator:
                     # Ensure chunk is bytes
-                    if isinstance(chunk, (str, memoryview)):
+                    if isinstance(chunk, str | memoryview):
                         chunk = (
                             chunk.encode() if isinstance(chunk, str) else bytes(chunk)
                         )
