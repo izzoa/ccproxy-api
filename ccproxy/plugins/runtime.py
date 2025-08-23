@@ -48,7 +48,9 @@ class BasePluginRuntime(PluginRuntimeProtocol):
             context: Runtime context with services and configuration
         """
         if self.initialized:
-            logger.warning("plugin_already_initialized", plugin=self.name)
+            logger.warning(
+                "plugin_already_initialized", plugin=self.name, category="plugin"
+            )
             return
 
         self.context = context
@@ -57,7 +59,12 @@ class BasePluginRuntime(PluginRuntimeProtocol):
         await self._on_initialize()
 
         self.initialized = True
-        logger.info("plugin_initialized", plugin=self.name, version=self.version)
+        logger.info(
+            "plugin_initialized",
+            plugin=self.name,
+            version=self.version,
+            category="plugin",
+        )
 
     async def _on_initialize(self) -> None:
         """Hook for subclasses to perform custom initialization.
@@ -75,7 +82,7 @@ class BasePluginRuntime(PluginRuntimeProtocol):
         await self._on_shutdown()
 
         self.initialized = False
-        logger.info("plugin_shutdown", plugin=self.name)
+        logger.info("plugin_shutdown", plugin=self.name, category="plugin")
 
     async def _on_shutdown(self) -> None:
         """Hook for subclasses to perform custom cleanup.
@@ -131,7 +138,11 @@ class BasePluginRuntime(PluginRuntimeProtocol):
             }
         except Exception as e:
             logger.error(
-                "plugin_health_check_failed", plugin=self.name, error=str(e), exc_info=e
+                "plugin_health_check_failed",
+                plugin=self.name,
+                error=str(e),
+                exc_info=e,
+                category="plugin",
             )
             return {
                 "status": "fail",
@@ -185,7 +196,7 @@ class SystemPluginRuntime(BasePluginRuntime):
 
     async def _on_initialize(self) -> None:
         """System plugin initialization."""
-        logger.debug("system_plugin_initializing", plugin=self.name)
+        logger.debug("system_plugin_initializing", plugin=self.name, category="plugin")
         # System plugins typically don't need special initialization
         # but can override this method if needed
 
@@ -214,7 +225,9 @@ class ProviderPluginRuntime(BasePluginRuntime):
 
     async def _on_initialize(self) -> None:
         """Provider plugin initialization."""
-        logger.debug("provider_plugin_initializing", plugin=self.name)
+        logger.debug(
+            "provider_plugin_initializing", plugin=self.name, category="plugin"
+        )
 
         if not self.context:
             raise RuntimeError("Context not set")
@@ -229,7 +242,9 @@ class ProviderPluginRuntime(BasePluginRuntime):
             self.detection_service, "initialize_detection"
         ):
             await self.detection_service.initialize_detection()
-            logger.debug("detection_service_initialized", plugin=self.name)
+            logger.debug(
+                "detection_service_initialized", plugin=self.name, category="plugin"
+            )
 
         # Register OAuth provider if factory is provided
         if self.manifest.oauth_provider_factory:
@@ -255,6 +270,7 @@ class ProviderPluginRuntime(BasePluginRuntime):
                 "oauth_provider_registered",
                 plugin=self.name,
                 provider=oauth_provider.provider_name,
+                category="plugin",
             )
         except Exception as e:
             logger.error(
@@ -262,6 +278,7 @@ class ProviderPluginRuntime(BasePluginRuntime):
                 plugin=self.name,
                 error=str(e),
                 exc_info=e,
+                category="plugin",
             )
 
     async def _unregister_oauth_provider(self) -> None:
@@ -286,6 +303,7 @@ class ProviderPluginRuntime(BasePluginRuntime):
                 "oauth_provider_unregistered",
                 plugin=self.name,
                 provider=provider_name,
+                category="plugin",
             )
         except Exception as e:
             logger.error(
@@ -293,6 +311,7 @@ class ProviderPluginRuntime(BasePluginRuntime):
                 plugin=self.name,
                 error=str(e),
                 exc_info=e,
+                category="plugin",
             )
 
     async def _on_shutdown(self) -> None:
@@ -303,13 +322,15 @@ class ProviderPluginRuntime(BasePluginRuntime):
         # Cleanup adapter if present
         if self.adapter and hasattr(self.adapter, "cleanup"):
             await self.adapter.cleanup()
-            logger.debug("adapter_cleaned_up", plugin=self.name)
+            logger.debug("adapter_cleaned_up", plugin=self.name, category="plugin")
 
     async def _on_validate(self) -> bool:
         """Provider plugin validation."""
         # Check that required components are present
         if self.manifest.is_provider and not self.adapter:
-            logger.warning("provider_plugin_missing_adapter", plugin=self.name)
+            logger.warning(
+                "provider_plugin_missing_adapter", plugin=self.name, category="plugin"
+            )
             return False
         return True
 
@@ -356,7 +377,11 @@ class ProviderPluginRuntime(BasePluginRuntime):
 
         except Exception as e:
             logger.debug(
-                "profile_fetch_error", plugin=self.name, error=str(e), exc_info=e
+                "profile_fetch_error",
+                plugin=self.name,
+                error=str(e),
+                exc_info=e,
+                category="plugin",
             )
 
         return None
@@ -431,7 +456,11 @@ class ProviderPluginRuntime(BasePluginRuntime):
 
         except Exception as e:
             logger.warning(
-                "auth_status_error", plugin=self.name, error=str(e), exc_info=e
+                "auth_status_error",
+                plugin=self.name,
+                error=str(e),
+                exc_info=e,
+                category="plugin",
             )
 
         return {"auth": "status_error"}

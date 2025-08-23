@@ -77,6 +77,7 @@ class RawHTTPLogger:
                 request_id=request_id,
                 log_type="client_request",
                 file_path=str(file_path),
+                category="middleware",
             )
 
         async with aiofiles.open(file_path, "ab") as f:
@@ -106,6 +107,7 @@ class RawHTTPLogger:
                 request_id=request_id,
                 log_type="client_response",
                 file_path=str(file_path),
+                category="middleware",
             )
 
         async with aiofiles.open(file_path, "ab") as f:
@@ -135,6 +137,7 @@ class RawHTTPLogger:
                 request_id=request_id,
                 log_type="provider_request",
                 file_path=str(file_path),
+                category="middleware",
             )
 
         async with aiofiles.open(file_path, "ab") as f:
@@ -164,6 +167,7 @@ class RawHTTPLogger:
                 request_id=request_id,
                 log_type="provider_response",
                 file_path=str(file_path),
+                category="middleware",
             )
 
         async with aiofiles.open(file_path, "ab") as f:

@@ -65,7 +65,9 @@ async def codex_health_check(
                 # Use the new helper method to get auth status
                 auth_details = await auth_manager.get_auth_status()
             except Exception as e:
-                logger.debug("Failed to check auth status", error=str(e))
+                logger.debug(
+                    "Failed to check auth status", error=str(e), category="auth"
+                )
                 auth_details = {
                     "auth_configured": False,
                     "auth_error": str(e),

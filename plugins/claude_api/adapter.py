@@ -274,12 +274,14 @@ class ClaudeAPIAdapter(BaseAdapter):
             )
 
         self.logger.info(
-            "claude_api_request",
+            "plugin_request",
+            plugin="claude_api",
             endpoint=endpoint,
             target_url=target_url,
             needs_conversion=needs_conversion,
             is_streaming=is_streaming,
             model=request_context.metadata.get("model"),
+            category="http",
         )
 
         # Get streaming handler if needed
@@ -305,6 +307,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             self.logger.debug(
                 "claude_api_using_deferred_response",
                 response_type=type(response).__name__,
+                category="http",
             )
             return response
 
@@ -379,6 +382,7 @@ class ClaudeAPIAdapter(BaseAdapter):
                                 for k in request_context.metadata
                                 if "anthropic" in k.lower()
                             ],
+                            category="http",
                         )
 
                 if isinstance(chunk, str | memoryview):

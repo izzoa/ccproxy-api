@@ -44,7 +44,8 @@ def get_cached_settings(request: Request) -> Settings:
         # Fallback to get_settings() for safety, but this should not happen
         # in normal operation after lifespan startup
         logger.warning(
-            "Settings not found in app state, falling back to get_settings()"
+            "Settings not found in app state, falling back to get_settings()",
+            category="lifecycle",
         )
         settings = get_settings()
     return settings
@@ -61,7 +62,7 @@ async def get_http_client(
     Returns:
         Shared HTTP client instance
     """
-    logger.debug("Getting shared HTTP client instance")
+    logger.debug("Getting shared HTTP client instance", category="lifecycle")
     return await get_shared_http_client(settings)
 
 
@@ -79,7 +80,7 @@ def get_proxy_service(
     Returns:
         Proxy service instance
     """
-    logger.debug("get_proxy_service")
+    logger.debug("get_proxy_service", category="lifecycle")
 
     # Check if proxy service is already initialized in app state
     proxy_service = getattr(request.app.state, "proxy_service", None)
@@ -88,7 +89,10 @@ def get_proxy_service(
         return typed_proxy_service
 
     # Fallback to creating a new instance (for backward compatibility)
-    logger.warning("Proxy service not found in app state, creating new instance")
+    logger.warning(
+        "Proxy service not found in app state, creating new instance",
+        category="lifecycle",
+    )
 
     # Create HTTP client for proxy
     from ccproxy.core.http import HTTPXClient
@@ -114,7 +118,7 @@ def get_observability_metrics() -> PrometheusMetrics:
     Returns:
         PrometheusMetrics instance
     """
-    logger.debug("get_observability_metrics")
+    logger.debug("get_observability_metrics", category="lifecycle")
     return get_metrics()
 
 

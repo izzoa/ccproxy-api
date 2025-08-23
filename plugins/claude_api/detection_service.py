@@ -47,7 +47,11 @@ class ClaudeAPIDetectionService:
             detected_data = self._load_from_cache(current_version)
             cached = detected_data is not None
             if cached:
-                logger.debug("detection_claude_headers_debug", version=current_version)
+                logger.debug(
+                    "detection_claude_headers_debug",
+                    version=current_version,
+                    category="plugin",
+                )
             else:
                 # No cache or version changed - detect fresh
                 detected_data = await self._detect_claude_headers(current_version)
@@ -60,6 +64,7 @@ class ClaudeAPIDetectionService:
                 "detection_claude_headers_completed",
                 version=current_version,
                 cached=cached,
+                category="plugin",
             )
 
             # TODO: add proper testing without claude cli installed
@@ -68,7 +73,12 @@ class ClaudeAPIDetectionService:
             return detected_data
 
         except Exception as e:
-            logger.warning("detection_claude_headers_failed", fallback=True, error=e)
+            logger.warning(
+                "detection_claude_headers_failed",
+                fallback=True,
+                error=e,
+                category="plugin",
+            )
             # Return fallback data
             fallback_data = self._get_fallback_data()
             self._cached_data = fallback_data
@@ -115,7 +125,9 @@ class ClaudeAPIDetectionService:
                 raise FileNotFoundError("Claude CLI not found")
 
         except Exception as e:
-            logger.warning("claude_version_detection_failed", error=str(e))
+            logger.warning(
+                "claude_version_detection_failed", error=str(e), category="plugin"
+            )
             return "unknown"
 
     async def _detect_claude_headers(self, version: str) -> ClaudeCacheData:
@@ -225,17 +237,25 @@ class ClaudeAPIDetectionService:
             with cache_file.open("w") as f:
                 json.dump(data.model_dump(), f, indent=2, default=str)
             logger.debug(
-                "cache_saved", file=str(cache_file), version=data.claude_version
+                "cache_saved",
+                file=str(cache_file),
+                version=data.claude_version,
+                category="plugin",
             )
         except Exception as e:
-            logger.warning("cache_save_failed", file=str(cache_file), error=str(e))
+            logger.warning(
+                "cache_save_failed",
+                file=str(cache_file),
+                error=str(e),
+                category="plugin",
+            )
 
     def _extract_headers(self, headers: dict[str, str]) -> ClaudeCodeHeaders:
         """Extract Claude CLI headers from captured request."""
         try:
             return ClaudeCodeHeaders.model_validate(headers)
         except Exception as e:
-            logger.error("header_extraction_failed", error=str(e))
+            logger.error("header_extraction_failed", error=str(e), category="plugin")
             raise ValueError(f"Failed to extract required headers: {e}") from e
 
     def _extract_system_prompt(self, body: bytes) -> SystemPromptData:
@@ -250,12 +270,14 @@ class ClaudeAPIDetectionService:
             return SystemPromptData(system_field=system_content)
 
         except Exception as e:
-            logger.error("system_prompt_extraction_failed", error=str(e))
+            logger.error(
+                "system_prompt_extraction_failed", error=str(e), category="plugin"
+            )
             raise ValueError(f"Failed to extract system prompt: {e}") from e
 
     def _get_fallback_data(self) -> ClaudeCacheData:
         """Get fallback data when detection fails."""
-        logger.warning("using_fallback_claude_data")
+        logger.warning("using_fallback_claude_data", category="plugin")
 
         # Load fallback data from package data file
         package_data_file = (
@@ -270,4 +292,4 @@ class ClaudeAPIDetectionService:
         # Clear the async cache for _get_claude_version
         if hasattr(self._get_claude_version, "cache_clear"):
             self._get_claude_version.cache_clear()
-        logger.debug("claude_api_detection_cache_cleared")
+        logger.debug("claude_api_detection_cache_cleared", category="plugin")

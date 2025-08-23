@@ -64,6 +64,7 @@ class MiddlewareManager:
             "core_middleware_added",
             middleware=middleware_class.__name__,
             priority=priority,
+            category="middleware",
         )
 
     def add_plugin_middleware(
@@ -88,6 +89,7 @@ class MiddlewareManager:
                 plugin=plugin_name,
                 middleware=spec.middleware_class.__name__,
                 priority=spec.priority,
+                category="middleware",
             )
 
     def get_ordered_middleware(self) -> list[CoreMiddlewareSpec]:
@@ -123,6 +125,7 @@ class MiddlewareManager:
                     middleware=spec.middleware_class.__name__,
                     priority=spec.priority,
                     source=spec.source,
+                    category="middleware",
                 )
             except Exception as e:
                 logger.error(
@@ -131,6 +134,7 @@ class MiddlewareManager:
                     source=spec.source,
                     error=str(e),
                     exc_info=e,
+                    category="middleware",
                 )
 
     def get_middleware_summary(self) -> dict[str, Any]:
@@ -206,4 +210,4 @@ def setup_default_middleware(manager: MiddlewareManager) -> None:
         server_name="ccproxy",
     )
 
-    logger.debug("default_middleware_configured")
+    logger.debug("default_middleware_configured", category="middleware")

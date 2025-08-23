@@ -92,11 +92,14 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
                 )
 
         logger.info(
-            "claude_api_plugin_initialized",
+            "plugin_initialized",
+            plugin="claude_api",
             status="initialized",
             base_url=self.config.base_url,
             models_count=len(self.config.models) if self.config.models else 0,
-            has_credentials_manager=self.credentials_manager is not None,
+            has_credentials=self.credentials_manager is not None,
+            has_adapter=self.adapter is not None,
+            category="plugin",
         )
 
     async def _get_health_details(self) -> dict[str, Any]:

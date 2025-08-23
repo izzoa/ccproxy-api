@@ -123,6 +123,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
             has_request_headers=request_headers is not None,
             extra_kwargs_keys=list(extra_kwargs.keys()),
             has_transformer=handler_config.request_transformer is not None,
+            category="request",
         )
 
         # Prepare base headers

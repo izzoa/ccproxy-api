@@ -91,21 +91,34 @@ class CodexFormatAdapter(APIAdapter):
         """
         # Extract the stream processing logic from OpenAI adapter pattern
         import time
+        from collections import defaultdict
 
         from ccproxy.adapters.openai.models import generate_openai_response_id
 
         message_id = generate_openai_response_id()
         created = int(time.time())
         role_sent = False
+        event_counts: dict[str, int] = defaultdict(int)
+        start_time = time.time()
 
-        logger.info("codex_stream_processing_started", message_id=message_id)
+        logger.info(
+            "codex_stream_processing_started",
+            message_id=message_id,
+            category="streaming",
+        )
 
         async for event in stream:
-            logger.debug(
-                "processing_response_event",
-                event_type=event.get("type"),
-                message_id=message_id,
-            )
+            event_type = event.get("type", "unknown")
+            event_counts[event_type] += 1
+
+            # Log at TRACE level for each event
+            if hasattr(logger, "trace"):
+                logger.trace(
+                    "stream_event",
+                    event_type=event_type,
+                    message_id=message_id,
+                    category="streaming",
+                )
 
             # Send initial role chunk if not sent yet
             if not role_sent:
@@ -129,8 +142,25 @@ class CodexFormatAdapter(APIAdapter):
                 event, message_id, created
             )
             if chunk:
-                logger.debug("yielding_chat_chunk", message_id=message_id)
+                if hasattr(logger, "trace"):
+                    logger.trace(
+                        "yielding_chat_chunk",
+                        message_id=message_id,
+                        category="streaming",
+                    )
                 yield chunk
+
+        # Log streaming summary
+        duration = time.time() - start_time
+        logger.info(
+            "streaming_complete",
+            plugin="codex",
+            message_id=message_id,
+            category="streaming",
+            duration_seconds=round(duration, 2),
+            event_summary=dict(event_counts),
+            total_events=sum(event_counts.values()),
+        )
 
     def _convert_response_event_to_chat_delta(
         self, event: dict[str, Any], stream_id: str, created: int
@@ -207,8 +237,11 @@ class CodexFormatAdapter(APIAdapter):
 
             return chunk_data
 
-        # Skip other event types
-        logger.debug("skipping_event_type", event_type=event_type)
+        # Skip other event types - log at TRACE level to reduce noise
+        if hasattr(logger, "trace"):
+            logger.trace(
+                "skipping_event_type", event_type=event_type, category="streaming"
+            )
         return None
 
     def _is_response_api_format(self, response_data: dict[str, Any]) -> bool:

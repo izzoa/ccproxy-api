@@ -119,12 +119,14 @@ class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
                         "openai_id_token_decoded",
                         sub=user_info.get("sub"),
                         email=user_info.get("email"),
+                        category="auth",
                     )
                 except Exception as e:
                     logger.warning(
                         "openai_id_token_decode_error",
                         error=str(e),
                         exc_info=e,
+                        category="auth",
                     )
 
             # Extract account ID from ID token or use a default
@@ -146,6 +148,7 @@ class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
                 expires_in=expires_in,
                 has_id_token=bool(data.get("id_token")),
                 account_id=account_id,
+                category="auth",
             )
 
             return credentials
@@ -155,6 +158,7 @@ class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
                 "openai_token_response_missing_field",
                 missing_field=str(e),
                 response_keys=list(data.keys()),
+                category="auth",
             )
             raise OAuthError(f"Missing required field in token response: {e}") from e
         except Exception as e:
@@ -162,6 +166,7 @@ class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
                 "openai_token_response_parse_error",
                 error=str(e),
                 error_type=type(e).__name__,
+                category="auth",
             )
             raise OAuthError(f"Failed to parse OpenAI token response: {e}") from e
 
@@ -202,5 +207,7 @@ class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
                 return await self.parse_token_response(token_response)
 
         except Exception as e:
-            logger.error("openai_token_refresh_failed", error=str(e), exc_info=e)
+            logger.error(
+                "openai_token_refresh_failed", error=str(e), exc_info=e, category="auth"
+            )
             raise OAuthError(f"Failed to refresh OpenAI token: {e}") from e

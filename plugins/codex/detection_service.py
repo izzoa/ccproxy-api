@@ -48,7 +48,11 @@ class CodexDetectionService:
             detected_data = self._load_from_cache(current_version)
             cached = detected_data is not None
             if cached:
-                logger.debug("detection_codex_headers_debug", version=current_version)
+                logger.debug(
+                    "detection_codex_headers_debug",
+                    version=current_version,
+                    category="plugin",
+                )
             else:
                 # No cache or version changed - detect fresh
                 detected_data = await self._detect_codex_headers(current_version)
@@ -61,6 +65,7 @@ class CodexDetectionService:
                 "detection_codex_headers_completed",
                 version=current_version,
                 cached=cached,
+                category="plugin",
             )
 
             # TODO: add proper testing without codex cli installed
@@ -69,7 +74,12 @@ class CodexDetectionService:
             return detected_data
 
         except Exception as e:
-            logger.warning("detection_codex_headers_failed", fallback=True, exc_info=e)
+            logger.warning(
+                "detection_codex_headers_failed",
+                fallback=True,
+                exc_info=e,
+                category="plugin",
+            )
             # Return fallback data
             fallback_data = self._get_fallback_data()
             self._cached_data = fallback_data
@@ -127,7 +137,9 @@ class CodexDetectionService:
                 raise FileNotFoundError("Codex CLI not found")
 
         except Exception as e:
-            logger.warning("codex_version_detection_failed", error=str(e))
+            logger.warning(
+                "codex_version_detection_failed", error=str(e), category="plugin"
+            )
             return "unknown"
 
     async def _detect_codex_headers(self, version: str) -> CodexCacheData:
@@ -162,7 +174,7 @@ class CodexDetectionService:
         config = Config(temp_app, host="127.0.0.1", port=port, log_level="error")
         server = Server(config)
 
-        logger.debug("start")
+        logger.debug("start", category="plugin")
         server_task = asyncio.create_task(server.serve())
 
         try:
@@ -212,6 +224,7 @@ class CodexDetectionService:
                     "failed_to_capture_codex_cli_request",
                     stdout=stdout.decode(errors="ignore"),
                     stderr=stderr.decode(errors="ignore"),
+                    category="plugin",
                 )
                 raise RuntimeError("Failed to capture Codex CLI request")
 
@@ -252,17 +265,25 @@ class CodexDetectionService:
             with cache_file.open("w") as f:
                 json.dump(data.model_dump(), f, indent=2, default=str)
             logger.debug(
-                "cache_saved", file=str(cache_file), version=data.codex_version
+                "cache_saved",
+                file=str(cache_file),
+                version=data.codex_version,
+                category="plugin",
             )
         except Exception as e:
-            logger.warning("cache_save_failed", file=str(cache_file), error=str(e))
+            logger.warning(
+                "cache_save_failed",
+                file=str(cache_file),
+                error=str(e),
+                category="plugin",
+            )
 
     def _extract_headers(self, headers: dict[str, str]) -> CodexHeaders:
         """Extract Codex CLI headers from captured request."""
         try:
             return CodexHeaders.model_validate(headers)
         except Exception as e:
-            logger.error("header_extraction_failed", error=str(e))
+            logger.error("header_extraction_failed", error=str(e), category="plugin")
             raise ValueError(f"Failed to extract required headers: {e}") from e
 
     def _extract_instructions(self, body: bytes) -> CodexInstructionsData:
@@ -277,12 +298,14 @@ class CodexDetectionService:
             return CodexInstructionsData(instructions_field=instructions_content)
 
         except Exception as e:
-            logger.error("instructions_extraction_failed", error=str(e))
+            logger.error(
+                "instructions_extraction_failed", error=str(e), category="plugin"
+            )
             raise ValueError(f"Failed to extract instructions: {e}") from e
 
     def _get_fallback_data(self) -> CodexCacheData:
         """Get fallback data when detection fails."""
-        logger.warning("using_fallback_codex_data")
+        logger.warning("using_fallback_codex_data", category="plugin")
 
         # Load fallback data from package data file
         package_data_file = (
@@ -297,4 +320,4 @@ class CodexDetectionService:
         # Clear the async cache for _get_codex_version
         if hasattr(self._get_codex_version, "cache_clear"):
             self._get_codex_version.cache_clear()
-        logger.debug("codex_detection_cache_cleared")
+        logger.debug("codex_detection_cache_cleared", category="plugin")

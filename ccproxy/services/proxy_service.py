@@ -78,7 +78,8 @@ class ProxyService:
         self.hook_manager = hook_manager
 
         logger.debug(
-            "ProxyService initialized with injected services and performance optimizations"
+            "ProxyService initialized with injected services and performance optimizations",
+            category="lifecycle",
         )
 
     def set_hook_manager(self, hook_manager: HookManager) -> None:
@@ -88,7 +89,7 @@ class ProxyService:
         since the hook system is initialized after the proxy service.
         """
         self.hook_manager = hook_manager
-        logger.debug("Hook manager set on ProxyService")
+        logger.debug("Hook manager set on ProxyService", category="lifecycle")
 
     async def handle_request(
         self,
@@ -372,9 +373,16 @@ class ProxyService:
             if self.response_cache:
                 self.response_cache.clear()
 
-            logger.info("ProxyService cleanup complete")
+            logger.info("ProxyService cleanup complete", category="lifecycle")
 
         except (AttributeError, TypeError) as e:
-            logger.error("cleanup_attribute_error", error=str(e), exc_info=e)
+            logger.error(
+                "cleanup_attribute_error",
+                error=str(e),
+                exc_info=e,
+                category="lifecycle",
+            )
         except Exception as e:
-            logger.error("error_during_cleanup", error=str(e), exc_info=e)
+            logger.error(
+                "error_during_cleanup", error=str(e), exc_info=e, category="lifecycle"
+            )

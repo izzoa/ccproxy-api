@@ -47,13 +47,13 @@ class ClaudeApiTokenManager(BaseTokenManager[ClaudeCredentials]):
         """
         credentials = await self.load_credentials()
         if not credentials:
-            logger.error("No credentials to refresh")
+            logger.error("No credentials to refresh", category="auth")
             return None
 
         wrapper = ClaudeTokenWrapper(credentials=credentials)
         refresh_token = wrapper.refresh_token_value
         if not refresh_token:
-            logger.error("No refresh token available")
+            logger.error("No refresh token available", category="auth")
             return None
 
         try:
@@ -64,12 +64,12 @@ class ClaudeApiTokenManager(BaseTokenManager[ClaudeCredentials]):
 
             # Save updated credentials
             if await self.save_credentials(new_credentials):
-                logger.info("Token refreshed successfully")
+                logger.info("Token refreshed successfully", category="auth")
                 # Clear profile cache as token changed
                 self._profile_cache = None
                 return new_credentials
 
-            logger.error("Failed to save refreshed credentials")
+            logger.error("Failed to save refreshed credentials", category="auth")
             return None
 
         except Exception as e:
@@ -77,6 +77,7 @@ class ClaudeApiTokenManager(BaseTokenManager[ClaudeCredentials]):
                 "Token refresh failed",
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             return None
 

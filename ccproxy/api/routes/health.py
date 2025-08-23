@@ -121,10 +121,10 @@ async def check_claude_code() -> tuple[str, dict[str, Any]]:
     if _claude_cli_cache is not None:
         cache_time, cached_result = _claude_cli_cache
         if current_time - cache_time < _cache_ttl_seconds:
-            logger.debug("claude_cli_check_cache_hit")
+            logger.debug("claude_cli_check_cache_hit", category="cache")
             return cached_result
 
-    logger.debug("claude_cli_check_cache_miss")
+    logger.debug("claude_cli_check_cache_miss", category="cache")
 
     # First check if claude binary exists in PATH (cached)
     claude_path = _get_claude_cli_path()
@@ -294,10 +294,10 @@ async def check_codex_cli() -> tuple[str, dict[str, Any]]:
     if _codex_cli_cache is not None:
         cache_time, cached_result = _codex_cli_cache
         if current_time - cache_time < _cache_ttl_seconds:
-            logger.debug("codex_cli_check_cache_hit")
+            logger.debug("codex_cli_check_cache_hit", category="cache")
             return cached_result
 
-    logger.debug("codex_cli_check_cache_miss")
+    logger.debug("codex_cli_check_cache_miss", category="cache")
 
     # First check if codex binary exists in PATH (cached)
     codex_path = _get_codex_cli_path()

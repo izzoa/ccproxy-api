@@ -74,6 +74,7 @@ class RequestProcessor:
                 "applying_body_transformer",
                 has_body=processed_body is not None,
                 body_length=len(processed_body) if processed_body else 0,
+                category="request",
             )
             processed_body = handler_config.request_transformer.transform_body(
                 processed_body
@@ -81,6 +82,7 @@ class RequestProcessor:
             self.logger.debug(
                 "body_transformer_applied",
                 body_length=len(processed_body) if processed_body else 0,
+                category="request",
             )
 
         return processed_body, processed_headers, is_streaming
@@ -231,6 +233,7 @@ class RequestProcessor:
                 "filtered_internal_headers",
                 removed=list(removed_headers),
                 count=len(removed_headers),
+                category="request",
             )
 
         return filtered
@@ -259,14 +262,15 @@ class RequestProcessor:
             else None,
             kwargs_keys=list(kwargs.keys()),
             header_count=len(headers),
+            category="request",
         )
 
         if not handler_config.request_transformer:
-            self.logger.debug("apply_request_transformer_no_transformer")
+            self.logger.debug("apply_request_transformer_no_transformer", category="request")
             return headers
 
         if not hasattr(handler_config.request_transformer, "transform_headers"):
-            self.logger.debug("apply_request_transformer_no_method")
+            self.logger.debug("apply_request_transformer_no_method", category="request")
             return headers
 
         try:
@@ -274,6 +278,7 @@ class RequestProcessor:
             self.logger.debug(
                 "apply_request_transformer_calling_with_kwargs",
                 kwargs_keys=list(kwargs.keys()),
+                category="request",
             )
             transformed = handler_config.request_transformer.transform_headers(
                 headers, **kwargs
@@ -283,6 +288,7 @@ class RequestProcessor:
                 original_count=len(headers),
                 transformed_count=len(transformed) if transformed else 0,
                 has_auth="authorization" in (transformed or {}),
+                category="request",
             )
             return transformed if transformed else headers
         except TypeError as te:

@@ -28,7 +28,11 @@ class OAuthSessionManager:
         """
         self._sessions: dict[str, dict[str, Any]] = {}
         self._ttl_seconds = ttl_seconds
-        logger.info("oauth_session_manager_initialized", ttl_seconds=ttl_seconds)
+        logger.info(
+            "oauth_session_manager_initialized",
+            ttl_seconds=ttl_seconds,
+            category="auth",
+        )
 
     async def create_session(self, state: str, data: dict[str, Any]) -> None:
         """Create a new OAuth session.
@@ -46,6 +50,7 @@ class OAuthSessionManager:
             state=state,
             provider=data.get("provider"),
             has_pkce=bool(data.get("code_verifier")),
+            category="auth",
         )
 
         # Clean up expired sessions
@@ -63,13 +68,13 @@ class OAuthSessionManager:
         session = self._sessions.get(state)
 
         if not session:
-            logger.debug("oauth_session_not_found", state=state)
+            logger.debug("oauth_session_not_found", state=state, category="auth")
             return None
 
         # Check if session expired
         created_at = session.get("created_at", 0)
         if time.time() - created_at > self._ttl_seconds:
-            logger.debug("oauth_session_expired", state=state)
+            logger.debug("oauth_session_expired", state=state, category="auth")
             await self.delete_session(state)
             return None
 
@@ -77,6 +82,7 @@ class OAuthSessionManager:
             "oauth_session_retrieved",
             state=state,
             provider=session.get("provider"),
+            category="auth",
         )
         return session
 
@@ -89,7 +95,9 @@ class OAuthSessionManager:
         if state in self._sessions:
             provider = self._sessions[state].get("provider")
             del self._sessions[state]
-            logger.debug("oauth_session_deleted", state=state, provider=provider)
+            logger.debug(
+                "oauth_session_deleted", state=state, provider=provider, category="auth"
+            )
 
     async def _cleanup_expired(self) -> None:
         """Remove expired sessions."""
@@ -104,13 +112,15 @@ class OAuthSessionManager:
             await self.delete_session(state)
 
         if expired_states:
-            logger.debug("oauth_sessions_cleaned", count=len(expired_states))
+            logger.debug(
+                "oauth_sessions_cleaned", count=len(expired_states), category="auth"
+            )
 
     def clear_all(self) -> None:
         """Clear all sessions (mainly for testing)."""
         count = len(self._sessions)
         self._sessions.clear()
-        logger.info("oauth_sessions_cleared", count=count)
+        logger.info("oauth_sessions_cleared", count=count, category="auth")
 
 
 # Global session manager instance

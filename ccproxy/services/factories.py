@@ -49,7 +49,7 @@ class ConcreteServiceFactory:
             verbose_api=settings.server.verbose_api,
             request_log_dir=settings.server.request_log_dir,
         )
-        logger.debug("Created CoreRequestTracer")
+        logger.debug("Created CoreRequestTracer", category="lifecycle")
         return tracer
 
     def create_mock_handler(self, settings: Settings) -> MockResponseHandler:
@@ -70,7 +70,7 @@ class ConcreteServiceFactory:
             error_rate=0.05,
             latency_range=(0.5, 2.0),
         )
-        logger.debug("Created MockResponseHandler")
+        logger.debug("Created MockResponseHandler", category="lifecycle")
         return handler
 
     def create_streaming_handler(
@@ -94,7 +94,9 @@ class ConcreteServiceFactory:
             verbose_streaming=settings.server.verbose_api,
             request_tracer=request_tracer,
         )
-        logger.info("Created StreamingHandler with header preservation")
+        logger.info(
+            "Created StreamingHandler with header preservation", category="lifecycle"
+        )
         return handler
 
     def create_proxy_config(self) -> ProxyConfiguration:
@@ -104,7 +106,7 @@ class ConcreteServiceFactory:
             Configured proxy configuration instance
         """
         config = ProxyConfiguration()
-        logger.debug("Created ProxyConfiguration")
+        logger.debug("Created ProxyConfiguration", category="config")
         return config
 
     def create_http_client(self, settings: Settings) -> httpx.AsyncClient:
@@ -117,5 +119,5 @@ class ConcreteServiceFactory:
             Configured HTTP client instance
         """
         client = HTTPClientFactory.create_shared_client(settings)
-        logger.debug("Created shared HTTP client")
+        logger.debug("Created shared HTTP client", category="lifecycle")
         return client

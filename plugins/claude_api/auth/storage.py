@@ -49,10 +49,13 @@ class ClaudeApiTokenStorage(TokenStorage[ClaudeCredentials]):
                 "claude_credentials_saved",
                 has_oauth=bool(credentials.claude_ai_oauth),
                 storage_path=str(self.file_path),
+                category="auth",
             )
             return True
         except Exception as e:
-            logger.error("Failed to save credentials", error=str(e), exc_info=e)
+            logger.error(
+                "Failed to save credentials", error=str(e), exc_info=e, category="auth"
+            )
             return False
 
     async def load(self) -> ClaudeCredentials | None:
@@ -68,7 +71,9 @@ class ClaudeApiTokenStorage(TokenStorage[ClaudeCredentials]):
         try:
             data = json.loads(self.file_path.read_text())
         except Exception as e:
-            logger.error("Failed to load credentials", error=str(e), exc_info=e)
+            logger.error(
+                "Failed to load credentials", error=str(e), exc_info=e, category="auth"
+            )
             return None
 
         try:
@@ -76,6 +81,7 @@ class ClaudeApiTokenStorage(TokenStorage[ClaudeCredentials]):
             logger.info(
                 "claude_credentials_loaded",
                 has_oauth=bool(credentials.claude_ai_oauth),
+                category="auth",
             )
             return credentials
         except Exception as e:
@@ -83,6 +89,7 @@ class ClaudeApiTokenStorage(TokenStorage[ClaudeCredentials]):
                 "claude_credentials_load_error",
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             return None
 
@@ -103,10 +110,15 @@ class ClaudeApiTokenStorage(TokenStorage[ClaudeCredentials]):
         if self.file_path.exists():
             try:
                 self.file_path.unlink()
-                logger.info("claude_credentials_deleted")
+                logger.info("claude_credentials_deleted", category="auth")
                 return True
             except Exception as e:
-                logger.error("Failed to delete credentials", error=str(e), exc_info=e)
+                logger.error(
+                    "Failed to delete credentials",
+                    error=str(e),
+                    exc_info=e,
+                    category="auth",
+                )
                 return False
         return False
 

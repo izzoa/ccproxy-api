@@ -234,6 +234,7 @@ class PluginRegistry:
             plugin=manifest.name,
             version=manifest.version,
             is_provider=manifest.is_provider,
+            category="plugin",
         )
 
     def get_factory(self, name: str) -> PluginFactory | None:
@@ -356,7 +357,9 @@ class PluginRegistry:
         """
         order = self.resolve_dependencies()
 
-        logger.info("initializing_plugins", count=len(order), order=order)
+        logger.info(
+            "initializing_plugins", count=len(order), order=order, category="plugin"
+        )
 
         for name in order:
             try:
@@ -367,6 +370,7 @@ class PluginRegistry:
                     plugin=name,
                     error=str(e),
                     exc_info=e,
+                    category="plugin",
                 )
                 # Continue with other plugins
 
@@ -380,7 +384,11 @@ class PluginRegistry:
                     await runtime.shutdown()
                 except Exception as e:
                     logger.error(
-                        "plugin_shutdown_failed", plugin=name, error=str(e), exc_info=e
+                        "plugin_shutdown_failed",
+                        plugin=name,
+                        error=str(e),
+                        exc_info=e,
+                        category="plugin",
                     )
 
         # Clear runtimes

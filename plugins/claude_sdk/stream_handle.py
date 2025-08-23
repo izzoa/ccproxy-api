@@ -101,6 +101,7 @@ class StreamHandle:
             listener_id=listener.listener_id,
             total_listeners=len(self._listeners),
             worker_status=self._worker.status.value,
+            category="streaming",
         )
 
         try:
@@ -158,6 +159,7 @@ class StreamHandle:
                     handle_id=self.handle_id,
                     worker_id=worker_id,
                     session_id=self.session_id,
+                    category="streaming",
                 )
 
     async def _remove_listener(self, listener_id: str) -> None:
@@ -179,6 +181,7 @@ class StreamHandle:
                 handle_id=self.handle_id,
                 listener_id=listener_id,
                 remaining_listeners=len(self._listeners),
+                category="streaming",
             )
 
     async def _check_cleanup(self) -> None:

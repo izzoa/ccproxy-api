@@ -97,6 +97,7 @@ class CodexOAuthProvider:
             state=state,
             has_pkce=bool(code_verifier and self.config.use_pkce),
             audience=self.config.audience,
+            category="auth",
         )
 
         return auth_url
@@ -129,6 +130,7 @@ class CodexOAuthProvider:
             state=state,
             has_credentials=bool(credentials),
             has_id_token=bool(credentials.id_token),
+            category="auth",
         )
 
         return credentials
@@ -148,7 +150,7 @@ class CodexOAuthProvider:
         if self.storage:
             await self.storage.save_credentials(credentials)
 
-        logger.info("openai_token_refreshed")
+        logger.info("openai_token_refreshed", category="auth")
 
         return credentials
 
@@ -162,7 +164,7 @@ class CodexOAuthProvider:
         if self.storage:
             await self.storage.delete_credentials()
 
-        logger.info("openai_token_revoked_locally")
+        logger.info("openai_token_revoked_locally", category="auth")
 
     def get_provider_info(self) -> OAuthProviderInfo:
         """Get provider information for discovery.

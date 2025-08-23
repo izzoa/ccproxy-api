@@ -96,7 +96,9 @@ class SSEConfirmationHandler:
         if handler:
             await handler(data)
         else:
-            logger.warning("unhandled_sse_event", event_type=event_type)
+            logger.warning(
+                "unhandled_sse_event", event_type=event_type, category="streaming"
+            )
 
     async def _handle_permission_request(self, data: dict[str, Any]) -> None:
         """Handle a confirmation request event.
@@ -423,7 +425,9 @@ class SSEConfirmationHandler:
                 continue
 
             except Exception as e:
-                logger.error("sse_client_error", error=str(e), exc_info=e)
+                logger.error(
+                    "sse_client_error", error=str(e), exc_info=e, category="streaming"
+                )
                 raise typer.Exit(1) from e
 
     async def _connect_and_handle_stream(self, stream_url: str) -> None:

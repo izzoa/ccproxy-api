@@ -57,6 +57,7 @@ class ClaudeAPIRequestTransformer:
             header_count=len(headers),
             has_x_api_key="x-api-key" in headers,
             has_authorization="Authorization" in headers,
+            category="transform",
         )
 
         transformed = headers.copy()
@@ -89,6 +90,7 @@ class ClaudeAPIRequestTransformer:
                     "injecting_detected_headers",
                     version=cached_data.claude_version,
                     header_count=len(detected_headers),
+                    category="transform",
                 )
                 # Detected headers take precedence
                 transformed.update(detected_headers)
@@ -103,16 +105,16 @@ class ClaudeAPIRequestTransformer:
                 transformed["x-api-key"] = access_token
                 # Remove any Authorization header since we're using x-api-key
                 transformed.pop("Authorization", None)
-                logger.debug("converted_bearer_to_api_key")
+                logger.debug("converted_bearer_to_api_key", category="transform")
             # Fallback to old method if no access_token parameter
             elif "Authorization" in transformed and "x-api-key" not in transformed:
                 auth_header = transformed.pop("Authorization")
                 if auth_header.startswith("Bearer "):
                     token = auth_header.replace("Bearer ", "")
                     transformed["x-api-key"] = token
-                    logger.debug("converted_bearer_to_api_key")
+                    logger.debug("converted_bearer_to_api_key", category="transform")
         else:
-            logger.debug("using_detected_headers_for_auth")
+            logger.debug("using_detected_headers_for_auth", category="transform")
 
         # Debug logging - what headers are we returning?
         logger.debug(
@@ -121,6 +123,7 @@ class ClaudeAPIRequestTransformer:
             has_authorization="Authorization" in transformed,
             header_count=len(transformed),
             detected_headers_used=has_detected_headers,
+            category="transform",
         )
 
         return transformed
@@ -144,6 +147,7 @@ class ClaudeAPIRequestTransformer:
             has_body=body is not None,
             body_length=len(body) if body else 0,
             has_detection_service=self.detection_service is not None,
+            category="transform",
         )
 
         if not body:
@@ -158,6 +162,7 @@ class ClaudeAPIRequestTransformer:
                 body_preview=body[:100].decode("utf-8", errors="replace")
                 if body
                 else None,
+                category="transform",
             )
             return body
 
@@ -174,6 +179,7 @@ class ClaudeAPIRequestTransformer:
                 if cached_data and cached_data.system_prompt
                 else False,
                 system_already_in_data="system" in data,
+                category="transform",
             )
             if cached_data and cached_data.system_prompt and "system" not in data:
                 # Inject the detected system prompt (as list or string)
@@ -183,6 +189,7 @@ class ClaudeAPIRequestTransformer:
                     version=cached_data.claude_version,
                     system_type=type(cached_data.system_prompt.system_field).__name__,
                     system_length=len(str(cached_data.system_prompt.system_field)),
+                    category="transform",
                 )
             else:
                 logger.debug(
@@ -194,9 +201,10 @@ class ClaudeAPIRequestTransformer:
                     else "system_already_exists"
                     if "system" in data
                     else "unknown",
+                    category="transform",
                 )
         else:
-            logger.debug("no_detection_service_available")
+            logger.debug("no_detection_service_available", category="transform")
 
         return json.dumps(data).encode("utf-8")
 

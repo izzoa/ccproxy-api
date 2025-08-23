@@ -48,11 +48,14 @@ class CodexRuntime(ProviderPluginRuntime):
         await super()._on_initialize()
 
         logger.info(
-            "codex_plugin_initialized",
-            plugin=self.name,
+            "plugin_initialized",
+            plugin="codex",
+            status="initialized",
+            cli_available=bool(self.detection_service and self.detection_service.get_cli_path()),
+            has_credentials=self.auth_manager is not None,
             has_adapter=self.adapter is not None,
             has_detection=self.detection_service is not None,
-            has_auth=self.auth_manager is not None,
+            category="plugin",
         )
 
     async def get_profile_info(self) -> dict[str, Any] | None:
@@ -146,7 +149,9 @@ class CodexRuntime(ProviderPluginRuntime):
 
             return summary
         except Exception as e:
-            logger.warning("codex_auth_status_error", error=str(e), exc_info=e)
+            logger.warning(
+                "codex_auth_status_error", error=str(e), exc_info=e, category="auth"
+            )
             return {"auth": "status_error"}
 
     async def _get_health_details(self) -> dict[str, Any]:

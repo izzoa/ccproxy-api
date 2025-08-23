@@ -54,6 +54,7 @@ class KeyringTokenStorage(TokenStorage[ClaudeCredentials]):
                 "credentials_load_start",
                 source="keyring",
                 service_name=self.service_name,
+                category="auth",
             )
             password = keyring.get_password(self.service_name, self.username)
 
@@ -82,6 +83,7 @@ class KeyringTokenStorage(TokenStorage[ClaudeCredentials]):
                 service_name=self.service_name,
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             raise CredentialsStorageError(f"Invalid keyring data structure: {e}") from e
         except ValidationError as e:
@@ -90,6 +92,7 @@ class KeyringTokenStorage(TokenStorage[ClaudeCredentials]):
                 service_name=self.service_name,
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             raise CredentialsInvalidError(f"Invalid credentials format: {e}") from e
         except Exception as e:
@@ -114,6 +117,7 @@ class KeyringTokenStorage(TokenStorage[ClaudeCredentials]):
                 service_name=self.service_name,
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             raise CredentialsStorageError(
                 f"Unexpected error loading credentials from keyring: {e}"
@@ -172,6 +176,7 @@ class KeyringTokenStorage(TokenStorage[ClaudeCredentials]):
                 service_name=self.service_name,
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             raise CredentialsStorageError(
                 f"Failed to encode credentials as JSON: {e}"
@@ -182,6 +187,7 @@ class KeyringTokenStorage(TokenStorage[ClaudeCredentials]):
                 service_name=self.service_name,
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             raise CredentialsInvalidError(f"Invalid credentials format: {e}") from e
         except Exception as e:
@@ -206,6 +212,7 @@ class KeyringTokenStorage(TokenStorage[ClaudeCredentials]):
                 service_name=self.service_name,
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             raise CredentialsStorageError(
                 f"Unexpected error saving credentials to keyring: {e}"
@@ -231,6 +238,7 @@ class KeyringTokenStorage(TokenStorage[ClaudeCredentials]):
                 service_name=self.service_name,
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             return False
 
@@ -283,6 +291,7 @@ class KeyringTokenStorage(TokenStorage[ClaudeCredentials]):
                 service_name=self.service_name,
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             raise CredentialsStorageError(
                 f"Unexpected error deleting credentials from keyring: {e}"

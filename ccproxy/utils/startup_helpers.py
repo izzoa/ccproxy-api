@@ -38,7 +38,7 @@ async def validate_claude_authentication_startup(
         settings: Application settings
     """
     # Authentication is now handled by individual plugins
-    logger.debug("Authentication validation moved to plugins")
+    logger.debug("Authentication validation moved to plugins", category="auth")
 
 
 async def check_version_updates_startup(app: FastAPI, settings: Settings) -> None:

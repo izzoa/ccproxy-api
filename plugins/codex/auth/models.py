@@ -76,9 +76,11 @@ class OpenAIProfileInfo(BaseProfileInfo):
         try:
             # Decode without verification to extract claims
             claims = jwt.decode(token_to_decode, options={"verify_signature": False})
-            logger.debug("Extracted JWT claims", num_claims=len(claims))
+            logger.debug(
+                "Extracted JWT claims", num_claims=len(claims), category="auth"
+            )
         except Exception as e:
-            logger.warning("Failed to decode JWT token", error=str(e))
+            logger.warning("Failed to decode JWT token", error=str(e), category="auth")
             claims = {}
 
         # Use the account_id already extracted by OpenAICredentials validator

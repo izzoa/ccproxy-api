@@ -314,7 +314,12 @@ async def query_logs(
                 import structlog
 
                 logger = structlog.get_logger(__name__)
-                logger.error("sqlmodel_query_io_error", error=str(e), exc_info=e)
+                logger.error(
+                    "sqlmodel_query_io_error",
+                    error=str(e),
+                    exc_info=e,
+                    category="metrics",
+                )
                 raise HTTPException(
                     status_code=500, detail=f"Database access error: {str(e)}"
                 ) from e
@@ -322,7 +327,9 @@ async def query_logs(
                 import structlog
 
                 logger = structlog.get_logger(__name__)
-                logger.error("sqlmodel_query_error", error=str(e), exc_info=e)
+                logger.error(
+                    "sqlmodel_query_error", error=str(e), exc_info=e, category="metrics"
+                )
                 raise HTTPException(
                     status_code=500, detail=f"Query execution failed: {str(e)}"
                 ) from e
@@ -669,7 +676,12 @@ async def get_logs_analytics(
                 import structlog
 
                 logger = structlog.get_logger(__name__)
-                logger.error("sqlmodel_analytics_io_error", error=str(e), exc_info=e)
+                logger.error(
+                    "sqlmodel_analytics_io_error",
+                    error=str(e),
+                    exc_info=e,
+                    category="metrics",
+                )
                 raise HTTPException(
                     status_code=500, detail=f"Database access error: {str(e)}"
                 ) from e
@@ -677,7 +689,12 @@ async def get_logs_analytics(
                 import structlog
 
                 logger = structlog.get_logger(__name__)
-                logger.error("sqlmodel_analytics_error", error=str(e), exc_info=e)
+                logger.error(
+                    "sqlmodel_analytics_error",
+                    error=str(e),
+                    exc_info=e,
+                    category="metrics",
+                )
                 raise HTTPException(
                     status_code=500, detail=f"Analytics query failed: {str(e)}"
                 ) from e
@@ -1019,7 +1036,12 @@ async def get_logs_entries(
                 import structlog
 
                 logger = structlog.get_logger(__name__)
-                logger.error("sqlmodel_entries_io_error", error=str(e), exc_info=e)
+                logger.error(
+                    "sqlmodel_entries_io_error",
+                    error=str(e),
+                    exc_info=e,
+                    category="metrics",
+                )
                 raise HTTPException(
                     status_code=500, detail=f"Database access error: {str(e)}"
                 ) from e
@@ -1027,7 +1049,12 @@ async def get_logs_entries(
                 import structlog
 
                 logger = structlog.get_logger(__name__)
-                logger.error("sqlmodel_entries_error", error=str(e), exc_info=e)
+                logger.error(
+                    "sqlmodel_entries_error",
+                    error=str(e),
+                    exc_info=e,
+                    category="metrics",
+                )
                 raise HTTPException(
                     status_code=500, detail=f"Failed to retrieve entries: {str(e)}"
                 ) from e

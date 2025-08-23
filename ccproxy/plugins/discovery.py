@@ -38,21 +38,38 @@ class PluginDiscovery:
         self.discovered_plugins.clear()
 
         if not self.plugins_dir.exists():
-            logger.warning("plugins_directory_not_found", path=str(self.plugins_dir))
+            logger.warning(
+                "plugins_directory_not_found",
+                path=str(self.plugins_dir),
+                category="plugin",
+            )
             return {}
 
-        # Look for plugin directories
+        # Collect all plugin discoveries first
+        discovered = []
         for item in self.plugins_dir.iterdir():
             if item.is_dir() and not item.name.startswith("_"):
                 # Check for plugin.py file
                 plugin_file = item / "plugin.py"
                 if plugin_file.exists():
                     self.discovered_plugins[item.name] = plugin_file
-                    logger.debug(
-                        "plugin_discovered", name=item.name, path=str(plugin_file)
-                    )
+                    discovered.append(item.name)
+                    # Log individual discoveries at TRACE level
+                    if hasattr(logger, "trace"):
+                        logger.trace(
+                            "plugin_found",
+                            name=item.name,
+                            path=str(plugin_file),
+                            category="plugin",
+                        )
 
-        logger.info("plugins_discovered", count=len(self.discovered_plugins))
+        # Single consolidated log for all discoveries
+        logger.info(
+            "plugins_discovered",
+            count=len(discovered),
+            names=discovered if discovered else [],
+            category="plugin",
+        )
         return self.discovered_plugins
 
     def load_plugin_factory(self, name: str) -> PluginFactory | None:
@@ -65,7 +82,7 @@ class PluginDiscovery:
             Plugin factory or None if not found or failed to load
         """
         if name not in self.discovered_plugins:
-            logger.warning("plugin_not_discovered", name=name)
+            logger.warning("plugin_not_discovered", name=name, category="plugin")
             return None
 
         plugin_path = self.discovered_plugins[name]
@@ -77,7 +94,9 @@ class PluginDiscovery:
             )
 
             if not spec or not spec.loader:
-                logger.error("plugin_spec_creation_failed", name=name)
+                logger.error(
+                    "plugin_spec_creation_failed", name=name, category="plugin"
+                )
                 return None
 
             module = importlib.util.module_from_spec(spec)
@@ -89,6 +108,7 @@ class PluginDiscovery:
                     "plugin_factory_not_found",
                     name=name,
                     msg="Module must export 'factory' variable",
+                    category="plugin",
                 )
                 return None
 
@@ -99,6 +119,7 @@ class PluginDiscovery:
                     "plugin_factory_invalid_type",
                     name=name,
                     type=type(factory).__name__,
+                    category="plugin",
                 )
                 return None
 
@@ -106,12 +127,19 @@ class PluginDiscovery:
                 "plugin_factory_loaded",
                 name=name,
                 version=factory.get_manifest().version,
+                category="plugin",
             )
 
             return factory
 
         except Exception as e:
-            logger.error("plugin_load_failed", name=name, error=str(e), exc_info=e)
+            logger.error(
+                "plugin_load_failed",
+                name=name,
+                error=str(e),
+                exc_info=e,
+                category="plugin",
+            )
             return None
 
     def load_all_factories(self) -> dict[str, PluginFactory]:
@@ -131,6 +159,7 @@ class PluginDiscovery:
             "plugin_factories_loaded",
             count=len(factories),
             names=list(factories.keys()),
+            category="plugin",
         )
 
         return factories
@@ -189,9 +218,9 @@ class PluginFilter:
         for name, factory in factories.items():
             if self.is_enabled(name):
                 filtered[name] = factory
-                logger.debug("plugin_enabled", name=name)
+                logger.debug("plugin_enabled", name=name, category="plugin")
             else:
-                logger.info("plugin_disabled", name=name)
+                logger.info("plugin_disabled", name=name, category="plugin")
 
         return filtered
 
@@ -224,7 +253,10 @@ def discover_and_load_plugins(settings: Any) -> dict[str, PluginFactory]:
     filtered_factories = filter_config.filter_factories(all_factories)
 
     logger.info(
-        "plugins_ready", discovered=len(all_factories), enabled=len(filtered_factories)
+        "plugins_ready",
+        discovered=len(all_factories),
+        enabled=len(filtered_factories),
+        category="plugin",
     )
 
     return filtered_factories

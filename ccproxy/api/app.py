@@ -75,19 +75,19 @@ class ShutdownComponent(TypedDict):
 async def setup_task_manager_startup(app: FastAPI, settings: Settings) -> None:
     """Start the async task manager."""
     await start_task_manager()
-    logger.debug("task_manager_startup_completed")
+    logger.debug("task_manager_startup_completed", category="lifecycle")
 
 
 async def setup_task_manager_shutdown(app: FastAPI) -> None:
     """Stop the async task manager."""
     await stop_task_manager()
-    logger.debug("task_manager_shutdown_completed")
+    logger.debug("task_manager_shutdown_completed", category="lifecycle")
 
 
 async def setup_http_client_shutdown(app: FastAPI) -> None:
     """Close the shared HTTP client."""
     await close_shared_http_client()
-    logger.debug("shared_http_client_shutdown_completed")
+    logger.debug("shared_http_client_shutdown_completed", category="lifecycle")
 
 
 async def setup_proxy_service_shutdown(app: FastAPI) -> None:
@@ -97,24 +97,25 @@ async def setup_proxy_service_shutdown(app: FastAPI) -> None:
         if hasattr(proxy_service, "close"):
             try:
                 await proxy_service.close()
-                logger.debug("proxy_service_shutdown_completed")
+                logger.debug("proxy_service_shutdown_completed", category="lifecycle")
             except Exception as e:
                 logger.error(
                     "proxy_service_shutdown_failed",
                     error=str(e),
                     exc_info=e,
+                    category="lifecycle",
                 )
 
 
 async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
     """Initialize plugins during startup (runtime phase)."""
     if not settings.enable_plugins:
-        logger.info("plugin_system_disabled")
+        logger.info("plugin_system_disabled", category="lifecycle")
         return
 
     # Get plugin registry from app state (set during app creation)
     if not hasattr(app.state, "plugin_registry"):
-        logger.warning("plugin_registry_not_found")
+        logger.warning("plugin_registry_not_found", category="lifecycle")
         return
 
     plugin_registry: PluginRegistry = app.state.plugin_registry
@@ -161,6 +162,7 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
         "plugins_initialization_completed",
         total_plugins=len(plugin_registry.list_plugins()),
         provider_plugins=len(plugin_registry.list_provider_plugins()),
+        category="lifecycle",
     )
 
 
@@ -169,13 +171,13 @@ async def shutdown_plugins(app: FastAPI) -> None:
     if hasattr(app.state, "plugin_registry"):
         plugin_registry: PluginRegistry = app.state.plugin_registry
         await plugin_registry.shutdown_all()
-        logger.debug("plugins_shutdown_completed")
+        logger.debug("plugins_shutdown_completed", category="lifecycle")
 
 
 async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
     """Initialize hook system with plugins."""
     if not settings.hooks.enabled:
-        logger.info("hook_system_disabled")
+        logger.info("hook_system_disabled", category="lifecycle")
         return
 
     # Create hook system
@@ -197,6 +199,7 @@ async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
                         "plugin_hook_registered",
                         plugin_name=name,
                         hook_class=hook_spec.hook_class.__name__,
+                        category="lifecycle",
                     )
                 except Exception as e:
                     logger.error(
@@ -205,6 +208,7 @@ async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
                         hook_class=hook_spec.hook_class.__name__,
                         error=str(e),
                         exc_info=e,
+                        category="lifecycle",
                     )
 
     # Store hook manager in app state
@@ -216,10 +220,16 @@ async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
         # Use the APP_STARTUP event from the enum
         await hook_manager.emit(HookEvent.APP_STARTUP, {"phase": "startup"})
     except Exception as e:
-        logger.error("startup_hook_failed", error=str(e), exc_info=e)
+        logger.error(
+            "startup_hook_failed", error=str(e), exc_info=e, category="lifecycle"
+        )
 
     # Use _hooks to get the count (or better, add a method to get count)
-    logger.info("hook_system_initialized", hook_count=len(hook_registry._hooks))
+    logger.info(
+        "hook_system_initialized",
+        hook_count=len(hook_registry._hooks),
+        category="lifecycle",
+    )
 
 
 # Define lifecycle components in order
@@ -302,9 +312,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         host=settings.server.host,
         port=settings.server.port,
         url=f"http://{settings.server.host}:{settings.server.port}",
+        category="lifecycle",
     )
     logger.debug(
-        "server_configured", host=settings.server.host, port=settings.server.port
+        "server_configured",
+        host=settings.server.host,
+        port=settings.server.port,
+        category="config",
     )
 
     # Execute startup components in order
@@ -312,7 +326,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if component["startup"]:
             component_name = component["name"]
             try:
-                logger.debug(f"starting_{component_name.lower().replace(' ', '_')}")
+                logger.debug(
+                    f"starting_{component_name.lower().replace(' ', '_')}",
+                    category="lifecycle",
+                )
                 await component["startup"](app, settings)
             except (OSError, PermissionError) as e:
                 logger.error(
@@ -320,6 +337,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     error=str(e),
                     component=component_name,
                     exc_info=e,
+                    category="lifecycle",
                 )
                 # Continue with graceful degradation
             except Exception as e:
@@ -328,20 +346,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     error=str(e),
                     component=component_name,
                     exc_info=e,
+                    category="lifecycle",
                 )
                 # Continue with graceful degradation
 
     yield
 
     # Shutdown
-    logger.debug("server_stop")
+    logger.debug("server_stop", category="lifecycle")
 
     # Execute shutdown-only components first
     for shutdown_component in SHUTDOWN_ONLY_COMPONENTS:
         if shutdown_component["shutdown"]:
             component_name = shutdown_component["name"]
             try:
-                logger.debug(f"stopping_{component_name.lower().replace(' ', '_')}")
+                logger.debug(
+                    f"stopping_{component_name.lower().replace(' ', '_')}",
+                    category="lifecycle",
+                )
                 await shutdown_component["shutdown"](app)
             except (OSError, PermissionError) as e:
                 logger.error(
@@ -349,6 +371,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     error=str(e),
                     component=component_name,
                     exc_info=e,
+                    category="lifecycle",
                 )
             except Exception as e:
                 logger.error(
@@ -356,6 +379,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     error=str(e),
                     component=component_name,
                     exc_info=e,
+                    category="lifecycle",
                 )
 
     # Execute shutdown components in reverse order
@@ -363,7 +387,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if component["shutdown"]:
             component_name = component["name"]
             try:
-                logger.debug(f"stopping_{component_name.lower().replace(' ', '_')}")
+                logger.debug(
+                    f"stopping_{component_name.lower().replace(' ', '_')}",
+                    category="lifecycle",
+                )
                 # Some shutdown functions need settings, others don't
                 if component_name == "Permission Service":
                     await component["shutdown"](app, settings)  # type: ignore
@@ -375,6 +402,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     error=str(e),
                     component=component_name,
                     exc_info=e,
+                    category="lifecycle",
                 )
             except Exception as e:
                 logger.error(
@@ -382,6 +410,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     error=str(e),
                     component=component_name,
                     exc_info=e,
+                    category="lifecycle",
                 )
 
 
@@ -463,6 +492,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "plugin_middleware_collected",
                     plugin=name,
                     count=len(manifest.middleware),
+                    category="lifecycle",
                 )
 
         # Register plugin routes (static registration during app creation)
@@ -481,6 +511,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "plugin_routes_registered",
                     plugin=name,
                     prefix=route_spec.prefix,
+                    category="lifecycle",
                 )
 
     # Store plugin registry in app state for runtime initialization
@@ -530,7 +561,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             StaticFiles(directory=str(dashboard_static_path)),
             name="dashboard-static",
         )
-        logger.debug("dashboard_static_files_mounted", path=str(dashboard_static_path))
+        logger.debug(
+            "dashboard_static_files_mounted",
+            path=str(dashboard_static_path),
+            category="config",
+        )
 
     return app
 

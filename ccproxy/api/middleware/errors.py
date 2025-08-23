@@ -37,17 +37,27 @@ def setup_error_handlers(app: FastAPI) -> None:
     Args:
         app: FastAPI application instance
     """
-    logger.debug("error_handlers_setup_start")
+    logger.debug("error_handlers_setup_start", category="lifecycle")
 
     # Get metrics instance for error recording
     try:
         metrics = get_metrics()
-        logger.debug("error_handlers_metrics_loaded")
+        logger.debug("error_handlers_metrics_loaded", category="lifecycle")
     except ImportError as e:
-        logger.warning("error_handlers_metrics_import_failed", error=str(e), exc_info=e)
+        logger.warning(
+            "error_handlers_metrics_import_failed",
+            error=str(e),
+            exc_info=e,
+            category="lifecycle",
+        )
         metrics = None
     except (AttributeError, TypeError) as e:
-        logger.warning("error_handlers_metrics_unavailable", error=str(e), exc_info=e)
+        logger.warning(
+            "error_handlers_metrics_unavailable",
+            error=str(e),
+            exc_info=e,
+            category="lifecycle",
+        )
         metrics = None
 
     # Define error type mappings with status codes and error types
@@ -116,7 +126,11 @@ def setup_error_handlers(app: FastAPI) -> None:
                 log_kwargs["user_agent"] = request.headers.get("user-agent", "unknown")
 
         # Log the error
-        logger.error(f"{error_type.replace('_', ' ').title()}", **log_kwargs)
+        logger.error(
+            f"{error_type.replace('_', ' ').title()}",
+            **log_kwargs,
+            category="middleware",
+        )
 
         # Record error in metrics
         if metrics:
@@ -186,6 +200,7 @@ def setup_error_handlers(app: FastAPI) -> None:
                 status_code=exc.status_code,
                 request_method=request.method,
                 request_url=str(request.url.path),
+                category="middleware",
             )
         else:
             # Log with basic stack trace (no local variables)
@@ -201,6 +216,7 @@ def setup_error_handlers(app: FastAPI) -> None:
                 request_method=request.method,
                 request_url=str(request.url.path),
                 stack_trace=stack_trace,
+                category="middleware",
             )
 
         # Record error in metrics
@@ -243,6 +259,7 @@ def setup_error_handlers(app: FastAPI) -> None:
                 status_code=404,
                 request_method=request.method,
                 request_url=str(request.url.path),
+                category="middleware",
             )
         else:
             logger.error(
@@ -252,6 +269,7 @@ def setup_error_handlers(app: FastAPI) -> None:
                 status_code=exc.status_code,
                 request_method=request.method,
                 request_url=str(request.url.path),
+                category="middleware",
             )
 
         # Record error in metrics
@@ -297,6 +315,7 @@ def setup_error_handlers(app: FastAPI) -> None:
             request_method=request.method,
             request_url=str(request.url.path),
             exc_info=True,
+            category="middleware",
         )
 
         # Record error in metrics
@@ -317,4 +336,4 @@ def setup_error_handlers(app: FastAPI) -> None:
             },
         )
 
-    logger.debug("error_handlers_setup_completed")
+    logger.debug("error_handlers_setup_completed", category="lifecycle")

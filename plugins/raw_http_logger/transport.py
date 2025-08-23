@@ -70,7 +70,9 @@ class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
             self._pool = self.wrapped._pool
         logger_module = structlog.get_logger(__name__)
         logger_module.info(
-            "LoggingHTTPTransport initialized", enabled=self.logger.enabled
+            "LoggingHTTPTransport initialized",
+            enabled=self.logger.enabled,
+            category="middleware",
         )
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -116,6 +118,7 @@ class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
             url=str(request.url),
             method=request.method,
             message="Skipping raw HTTP logging for this request",
+            category="middleware",
         )
         return None
 

@@ -59,6 +59,7 @@ class ClaudeSDKRequestTransformer:
             original_count=len(headers),
             transformed_count=len(transformed),
             session_id=session_id,
+            category="http",
         )
 
         return transformed

@@ -64,7 +64,9 @@ class CodexResponseTransformer:
             transformed.update(cors_headers)
         else:
             # Fallback to secure defaults if no CORS settings available
-            logger.warning("cors_settings_not_available_using_fallback")
+            logger.warning(
+                "cors_settings_not_available_using_fallback", category="transform"
+            )
             # Only add CORS headers if Origin header is present in request
             request_headers = kwargs.get("request_headers", {})
             request_origin = get_request_origin(request_headers)

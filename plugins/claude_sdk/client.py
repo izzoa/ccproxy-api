@@ -538,7 +538,9 @@ class ClaudeSDKClient:
         """
         try:
             # Wait for the first chunk with timeout - don't care about message type
-            logger.debug("waiting_for_first_chunk", timeout=timeout_seconds)
+            logger.debug(
+                "waiting_for_first_chunk", timeout=timeout_seconds, category="streaming"
+            )
             first_message = await asyncio.wait_for(
                 anext(message_iterator), timeout=timeout_seconds
             )

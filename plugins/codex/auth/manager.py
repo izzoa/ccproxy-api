@@ -57,11 +57,11 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
         """
         credentials = await self.load_credentials()
         if not credentials:
-            logger.error("No credentials to refresh")
+            logger.error("No credentials to refresh", category="auth")
             return None
 
         if not credentials.refresh_token:
-            logger.error("No refresh token available")
+            logger.error("No refresh token available", category="auth")
             return None
 
         try:
@@ -87,12 +87,13 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
                 logger.info(
                     "Token refreshed successfully",
                     account_id=new_credentials.account_id,
+                    category="auth",
                 )
                 # Clear profile cache as token changed
                 self._profile_cache = None
                 return new_credentials
 
-            logger.error("Failed to save refreshed credentials")
+            logger.error("Failed to save refreshed credentials", category="auth")
             return None
 
         except Exception as e:
@@ -100,6 +101,7 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
                 "Token refresh failed",
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             return None
 
@@ -151,12 +153,12 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
         """
         credentials = await self.load_credentials()
         if not credentials:
-            logger.debug("No credentials found")
+            logger.debug("No credentials found", category="auth")
             return None
 
         # Check if token is expired
         if self.is_expired(credentials):
-            logger.info("OpenAI token is expired, attempting refresh")
+            logger.info("OpenAI token is expired, attempting refresh", category="auth")
 
             # Use provided oauth_client or fallback to stored one
             client = oauth_client or self._oauth_client
@@ -166,19 +168,24 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
                 try:
                     refreshed = await self.refresh_token(client)
                     if refreshed:
-                        logger.info("OpenAI token refreshed successfully")
+                        logger.info(
+                            "OpenAI token refreshed successfully", category="auth"
+                        )
                         return refreshed.access_token
                     else:
-                        logger.error("OpenAI token refresh failed")
+                        logger.error("OpenAI token refresh failed", category="auth")
                         return None
                 except Exception as e:
-                    logger.error("Error refreshing OpenAI token", error=str(e))
+                    logger.error(
+                        "Error refreshing OpenAI token", error=str(e), category="auth"
+                    )
                     return None
             else:
                 logger.warning(
                     "Cannot refresh OpenAI token",
                     has_oauth_client=bool(oauth_client),
                     has_refresh_token=bool(credentials.refresh_token),
+                    category="auth",
                 )
                 return None
 
@@ -196,13 +203,14 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
         """
         credentials = await self.load_credentials()
         if not credentials:
-            logger.debug("No credentials found")
+            logger.debug("No credentials found", category="auth")
             return None
 
         # Check if token is expired
         if self.is_expired(credentials):
             logger.warning(
-                "OpenAI token is expired. Will attempt refresh but continue with expired token if needed."
+                "OpenAI token is expired. Will attempt refresh but continue with expired token if needed.",
+                category="auth",
             )
 
             # Try to refresh if we have OAuth client
@@ -211,19 +219,24 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
                 try:
                     refreshed = await self.refresh_token(client)
                     if refreshed:
-                        logger.info("OpenAI token refreshed successfully")
+                        logger.info(
+                            "OpenAI token refreshed successfully", category="auth"
+                        )
                         return refreshed.access_token
                     else:
                         logger.warning(
-                            "OpenAI token refresh failed, using expired token"
+                            "OpenAI token refresh failed, using expired token",
+                            category="auth",
                         )
                 except Exception as e:
                     logger.warning(
-                        f"Error refreshing OpenAI token, using expired token: {e}"
+                        f"Error refreshing OpenAI token, using expired token: {e}",
+                        category="auth",
                     )
             else:
                 logger.warning(
-                    "Cannot refresh expired OpenAI token (no OAuth client or refresh token), using expired token"
+                    "Cannot refresh expired OpenAI token (no OAuth client or refresh token), using expired token",
+                    category="auth",
                 )
 
         # Return the token regardless of expiration status

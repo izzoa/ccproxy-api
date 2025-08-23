@@ -74,6 +74,7 @@ class BaseOAuthClient(ABC, Generic[CredentialsT]):
             "pkce_pair_generated",
             verifier_length=len(code_verifier),
             challenge_length=len(code_challenge),
+            category="auth",
         )
         return code_verifier, code_challenge
 
@@ -152,6 +153,7 @@ class BaseOAuthClient(ABC, Generic[CredentialsT]):
                     endpoint=token_endpoint,
                     has_code=bool(code),
                     has_verifier=bool(code_verifier),
+                    category="auth",
                 )
 
                 response = await client.post(
@@ -186,11 +188,18 @@ class BaseOAuthClient(ABC, Generic[CredentialsT]):
                 ) from e
 
             except httpx.TimeoutException as e:
-                logger.error("token_exchange_timeout", error=str(e), exc_info=e)
+                logger.error(
+                    "token_exchange_timeout", error=str(e), exc_info=e, category="auth"
+                )
                 raise OAuthTokenRefreshError("Token exchange timed out") from e
 
             except httpx.HTTPError as e:
-                logger.error("token_exchange_http_error", error=str(e), exc_info=e)
+                logger.error(
+                    "token_exchange_http_error",
+                    error=str(e),
+                    exc_info=e,
+                    category="auth",
+                )
                 raise OAuthTokenRefreshError(
                     f"HTTP error during token exchange: {e}"
                 ) from e

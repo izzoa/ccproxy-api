@@ -96,7 +96,7 @@ class RawHTTPLoggerRuntime(SystemPluginRuntime):
             )
             http_client._transport = logging_transport
 
-            logger.debug("http_client_transport_wrapped")
+            logger.debug("http_client_transport_wrapped", category="middleware")
 
     async def _on_shutdown(self) -> None:
         """Cleanup on shutdown."""
@@ -105,7 +105,7 @@ class RawHTTPLoggerRuntime(SystemPluginRuntime):
             http_client = self.context.get("http_client")
             if http_client:
                 http_client._transport = self.original_transport
-                logger.debug("http_client_transport_restored")
+                logger.debug("http_client_transport_restored", category="middleware")
 
     async def _get_health_details(self) -> dict[str, Any]:
         """Get health check details."""
@@ -178,7 +178,9 @@ class RawHTTPLoggerFactory(SystemPluginFactory):
             )
 
             self.manifest.middleware.append(middleware_spec)
-            logger.debug("raw_http_logger_middleware_added_to_manifest")
+            logger.debug(
+                "raw_http_logger_middleware_added_to_manifest", category="middleware"
+            )
 
         return context
 

@@ -142,6 +142,7 @@ def ttl_cache(maxsize: int = 128, ttl: float = 300.0) -> Callable[[F], F]:
                     "cache_hit",
                     function=func.__name__,
                     key_hash=hash(key) if isinstance(key, tuple) else key,
+                    category="cache",
                 )
                 return cached_result
 
@@ -154,6 +155,7 @@ def ttl_cache(maxsize: int = 128, ttl: float = 300.0) -> Callable[[F], F]:
                 function=func.__name__,
                 key_hash=hash(key) if isinstance(key, tuple) else key,
                 cache_size=len(cache._cache),
+                category="cache",
             )
 
             return result
@@ -192,6 +194,7 @@ def async_ttl_cache(
                     "async_cache_hit",
                     function=func.__name__,
                     key_hash=hash(key) if isinstance(key, tuple) else key,
+                    category="cache",
                 )
                 return cached_result
 
@@ -204,6 +207,7 @@ def async_ttl_cache(
                 function=func.__name__,
                 key_hash=hash(key) if isinstance(key, tuple) else key,
                 cache_size=len(cache._cache),
+                category="cache",
             )
 
             return result
@@ -306,7 +310,7 @@ def clear_all_caches() -> None:
     _detection_cache.clear()
     _auth_cache.clear()
     _config_cache.clear()
-    logger.info("all_caches_cleared")
+    logger.info("all_caches_cleared", category="cache")
 
 
 def get_cache_stats() -> dict[str, Any]:

@@ -123,6 +123,7 @@ class ClaudeOAuthClient(BaseOAuthClient[ClaudeCredentials]):
                 expires_in=expires_in,
                 subscription_type=oauth_token.subscription_type,
                 scopes=oauth_token.scopes,
+                category="auth",
             )
 
             return credentials
@@ -132,6 +133,7 @@ class ClaudeOAuthClient(BaseOAuthClient[ClaudeCredentials]):
                 "claude_token_response_missing_field",
                 missing_field=str(e),
                 response_keys=list(data.keys()),
+                category="auth",
             )
             raise OAuthError(f"Missing required field in token response: {e}") from e
         except Exception as e:
@@ -139,6 +141,7 @@ class ClaudeOAuthClient(BaseOAuthClient[ClaudeCredentials]):
                 "claude_token_response_parse_error",
                 error=str(e),
                 error_type=type(e).__name__,
+                category="auth",
             )
             raise OAuthError(f"Failed to parse Claude token response: {e}") from e
 
@@ -179,7 +182,9 @@ class ClaudeOAuthClient(BaseOAuthClient[ClaudeCredentials]):
                 return await self.parse_token_response(token_response)
 
         except Exception as e:
-            logger.error("claude_token_refresh_failed", error=str(e), exc_info=e)
+            logger.error(
+                "claude_token_refresh_failed", error=str(e), exc_info=e, category="auth"
+            )
             raise OAuthError(f"Failed to refresh Claude token: {e}") from e
 
     def _extract_subscription_info(self, token_data: dict[str, Any]) -> str:

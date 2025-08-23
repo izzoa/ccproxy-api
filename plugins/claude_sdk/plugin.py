@@ -78,12 +78,16 @@ class ClaudeSDKRuntime(ProviderPluginRuntime):
                 raise RuntimeError(error_msg)
 
         logger.info(
-            "claude_sdk_plugin_initialized",
+            "plugin_initialized",
+            plugin="claude_sdk",
             status="initialized",
             cli_available=self.detection_service.is_claude_available()
             if self.detection_service
             else False,
+            has_credentials=True,  # SDK handles its own auth
+            has_adapter=self.adapter is not None,
             has_session_manager=self.session_manager is not None,
+            category="plugin",
         )
 
     async def _on_shutdown(self) -> None:

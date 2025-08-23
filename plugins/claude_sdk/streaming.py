@@ -326,4 +326,9 @@ class ClaudeStreamProcessor:
         # NOTE: Access logging is now handled by StreamingResponseWithLogging
         # No need for manual access logging here anymore
 
-        logger.debug("claude_sdk_stream_processing_completed", request_id=request_id)
+        logger.info(
+            "streaming_complete",
+            request_id=request_id,
+            plugin="claude_sdk",
+            category="streaming",
+        )

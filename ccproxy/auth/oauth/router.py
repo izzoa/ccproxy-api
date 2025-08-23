@@ -54,7 +54,7 @@ async def list_oauth_providers() -> OAuthProvidersResponse:
     registry = get_oauth_registry()
     providers = registry.list_providers()
 
-    logger.info("oauth_providers_listed", count=len(providers))
+    logger.info("oauth_providers_listed", count=len(providers), category="auth")
 
     return OAuthProvidersResponse(providers=providers)
 
@@ -86,7 +86,7 @@ async def initiate_oauth_login(
     oauth_provider = registry.get_provider(provider)
 
     if not oauth_provider:
-        logger.error("oauth_provider_not_found", provider=provider)
+        logger.error("oauth_provider_not_found", provider=provider, category="auth")
         raise HTTPException(
             status_code=404,
             detail=f"OAuth provider '{provider}' not found",
@@ -129,13 +129,20 @@ async def initiate_oauth_login(
             provider=provider,
             state=state,
             has_pkce=bool(code_verifier),
+            category="auth",
         )
 
         # Redirect to provider's authorization page
         return RedirectResponse(url=auth_url, status_code=302)
 
     except Exception as e:
-        logger.error("oauth_login_error", provider=provider, error=str(e), exc_info=e)
+        logger.error(
+            "oauth_login_error",
+            provider=provider,
+            error=str(e),
+            exc_info=e,
+            category="auth",
+        )
         await session_manager.delete_session(state)
         raise HTTPException(
             status_code=500,
@@ -175,6 +182,7 @@ async def handle_oauth_callback(
             provider=provider,
             error=error,
             error_description=error_description,
+            category="auth",
         )
 
         return OAuthTemplates.callback_error(
@@ -189,6 +197,7 @@ async def handle_oauth_callback(
             provider=provider,
             has_code=bool(code),
             has_state=bool(state),
+            category="auth",
         )
         return OAuthTemplates.error(
             error_message="No authorization code was received.",
@@ -202,7 +211,12 @@ async def handle_oauth_callback(
     session_data = await session_manager.get_session(state)
 
     if not session_data:
-        logger.error("oauth_callback_invalid_state", provider=provider, state=state)
+        logger.error(
+            "oauth_callback_invalid_state",
+            provider=provider,
+            state=state,
+            category="auth",
+        )
         return OAuthTemplates.error(
             error_message="The authentication state is invalid or has expired.",
             title="Invalid State",
@@ -216,6 +230,7 @@ async def handle_oauth_callback(
             "oauth_callback_provider_mismatch",
             expected=session_data.get("provider"),
             actual=provider,
+            category="auth",
         )
         await session_manager.delete_session(state)
         return OAuthTemplates.error(
@@ -227,7 +242,7 @@ async def handle_oauth_callback(
     oauth_provider = registry.get_provider(provider)
 
     if not oauth_provider:
-        logger.error("oauth_provider_not_found", provider=provider)
+        logger.error("oauth_provider_not_found", provider=provider, category="auth")
         await session_manager.delete_session(state)
         raise HTTPException(
             status_code=404,
@@ -246,6 +261,7 @@ async def handle_oauth_callback(
             "oauth_callback_success",
             provider=provider,
             has_credentials=bool(credentials),
+            category="auth",
         )
 
         # Return success page
@@ -255,7 +271,11 @@ async def handle_oauth_callback(
 
     except Exception as e:
         logger.error(
-            "oauth_callback_exchange_error", provider=provider, error=str(e), exc_info=e
+            "oauth_callback_exchange_error",
+            provider=provider,
+            error=str(e),
+            exc_info=e,
+            category="auth",
         )
         await session_manager.delete_session(state)
 
@@ -288,7 +308,7 @@ async def refresh_oauth_token(
     oauth_provider = registry.get_provider(provider)
 
     if not oauth_provider:
-        logger.error("oauth_provider_not_found", provider=provider)
+        logger.error("oauth_provider_not_found", provider=provider, category="auth")
         raise HTTPException(
             status_code=404,
             detail=f"OAuth provider '{provider}' not found",
@@ -297,12 +317,18 @@ async def refresh_oauth_token(
     try:
         new_tokens = await oauth_provider.refresh_access_token(refresh_token)
 
-        logger.info("oauth_token_refreshed", provider=provider)
+        logger.info("oauth_token_refreshed", provider=provider, category="auth")
 
         return JSONResponse(content=new_tokens, status_code=200)
 
     except Exception as e:
-        logger.error("oauth_refresh_error", provider=provider, error=str(e), exc_info=e)
+        logger.error(
+            "oauth_refresh_error",
+            provider=provider,
+            error=str(e),
+            exc_info=e,
+            category="auth",
+        )
         raise HTTPException(
             status_code=500,
             detail=f"Failed to refresh token: {str(e)}",
@@ -330,7 +356,7 @@ async def revoke_oauth_token(
     oauth_provider = registry.get_provider(provider)
 
     if not oauth_provider:
-        logger.error("oauth_provider_not_found", provider=provider)
+        logger.error("oauth_provider_not_found", provider=provider, category="auth")
         raise HTTPException(
             status_code=404,
             detail=f"OAuth provider '{provider}' not found",
@@ -339,12 +365,18 @@ async def revoke_oauth_token(
     try:
         await oauth_provider.revoke_token(token)
 
-        logger.info("oauth_token_revoked", provider=provider)
+        logger.info("oauth_token_revoked", provider=provider, category="auth")
 
         return Response(status_code=204)
 
     except Exception as e:
-        logger.error("oauth_revoke_error", provider=provider, error=str(e), exc_info=e)
+        logger.error(
+            "oauth_revoke_error",
+            provider=provider,
+            error=str(e),
+            exc_info=e,
+            category="auth",
+        )
         raise HTTPException(
             status_code=500,
             detail=f"Failed to revoke token: {str(e)}",

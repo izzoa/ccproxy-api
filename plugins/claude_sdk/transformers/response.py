@@ -71,7 +71,9 @@ class ClaudeSDKResponseTransformer:
             transformed.update(cors_headers)
         else:
             # Fallback to secure defaults if no CORS settings available
-            self.logger.warning("cors_settings_not_available_using_fallback")
+            self.logger.warning(
+                "cors_settings_not_available_using_fallback", category="transform"
+            )
             # Only add CORS headers if Origin header is present in request
             request_headers = kwargs.get("request_headers", {})
             from ccproxy.utils.cors import get_request_origin
@@ -93,6 +95,7 @@ class ClaudeSDKResponseTransformer:
             "claude_sdk_response_headers_transformed",
             original_count=len(headers),
             transformed_count=len(transformed),
+            category="http",
         )
 
         return transformed

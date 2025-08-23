@@ -51,7 +51,7 @@ class ClaudeSDKDetectionService:
         Note:
             No fallback support - SDK requires actual CLI presence
         """
-        logger.debug("claude_sdk_detection_starting")
+        logger.debug("claude_sdk_detection_starting", category="plugin")
 
         # Use centralized CLI detection service
         # For SDK, we don't want fallback - require actual CLI
@@ -78,12 +78,14 @@ class ClaudeSDKDetectionService:
                     version=self._version,
                     source=result.source,
                     cached=hasattr(result, "cached") and result.cached,
+                    category="plugin",
                 )
             else:
                 self._is_available = False
                 logger.error(
                     "claude_sdk_detection_failed",
                     message="Claude CLI not found - SDK plugin cannot function without CLI",
+                    category="plugin",
                 )
         finally:
             # Restore original fallback setting
@@ -124,4 +126,4 @@ class ClaudeSDKDetectionService:
         # Clear the async cache for initialize_detection
         if hasattr(self.initialize_detection, "cache_clear"):
             self.initialize_detection.cache_clear()
-        logger.debug("claude_sdk_detection_cache_cleared")
+        logger.debug("claude_sdk_detection_cache_cleared", category="plugin")

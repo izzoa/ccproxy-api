@@ -49,10 +49,13 @@ class CodexTokenStorage(TokenStorage[OpenAICredentials]):
                 "openai_credentials_saved",
                 has_refresh_token=bool(credentials.refresh_token),
                 storage_path=str(self.file_path),
+                category="auth",
             )
             return True
         except Exception as e:
-            logger.error("Failed to save credentials", error=str(e), exc_info=e)
+            logger.error(
+                "Failed to save credentials", error=str(e), exc_info=e, category="auth"
+            )
             return False
 
     async def load(self) -> OpenAICredentials | None:
@@ -68,7 +71,9 @@ class CodexTokenStorage(TokenStorage[OpenAICredentials]):
         try:
             data = json.loads(self.file_path.read_text())
         except Exception as e:
-            logger.error("Failed to load credentials", error=str(e), exc_info=e)
+            logger.error(
+                "Failed to load credentials", error=str(e), exc_info=e, category="auth"
+            )
             return None
 
         try:
@@ -76,6 +81,7 @@ class CodexTokenStorage(TokenStorage[OpenAICredentials]):
             logger.info(
                 "openai_credentials_loaded",
                 has_refresh_token=bool(credentials.refresh_token),
+                category="auth",
             )
             return credentials
         except Exception as e:
@@ -83,6 +89,7 @@ class CodexTokenStorage(TokenStorage[OpenAICredentials]):
                 "openai_credentials_load_error",
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             return None
 
@@ -103,10 +110,15 @@ class CodexTokenStorage(TokenStorage[OpenAICredentials]):
         if self.file_path.exists():
             try:
                 self.file_path.unlink()
-                logger.info("openai_credentials_deleted")
+                logger.info("openai_credentials_deleted", category="auth")
                 return True
             except Exception as e:
-                logger.error("Failed to delete credentials", error=str(e), exc_info=e)
+                logger.error(
+                    "Failed to delete credentials",
+                    error=str(e),
+                    exc_info=e,
+                    category="auth",
+                )
                 return False
         return False
 

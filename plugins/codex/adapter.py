@@ -173,13 +173,24 @@ class CodexAdapter(BaseAdapter):
             access_token=access_token,
         )
 
+        # Parse request body for model extraction
+        parsed_body = {}
+        if body:
+            try:
+                parsed_body = json.loads(body)
+            except json.JSONDecodeError:
+                parsed_body = {}
+
         self.logger.info(
-            "codex_request",
-            session_id=session_id,
-            needs_conversion=needs_conversion,
+            "plugin_request",
+            plugin="codex",
             endpoint=endpoint,
-            is_streaming=is_streaming,
             target_url=target_url,
+            needs_conversion=needs_conversion,
+            is_streaming=is_streaming,
+            session_id=session_id,
+            model=parsed_body.get("model") if isinstance(parsed_body, dict) else None,
+            category="http",
         )
 
         # Make the actual HTTP request using the shared handler

@@ -40,7 +40,7 @@ class HTTPPoolManager:
         self._shared_client: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()
 
-        logger.debug("http_pool_manager_initialized")
+        logger.debug("http_pool_manager_initialized", category="lifecycle")
 
     async def get_client(
         self,
@@ -75,6 +75,7 @@ class HTTPPoolManager:
                     "reusing_existing_pool",
                     base_url=base_url,
                     pool_key=pool_key,
+                    category="lifecycle",
                 )
                 return self._pools[pool_key]
 

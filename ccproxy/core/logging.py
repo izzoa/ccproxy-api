@@ -1,4 +1,5 @@
 import logging
+import os
 import shutil
 import sys
 from collections.abc import MutableMapping
@@ -12,11 +13,176 @@ from structlog.stdlib import BoundLogger
 from structlog.typing import ExcInfo, Processor
 
 
+# Import LogCategory locally to avoid circular import
+
+
+# Add TRACE level below DEBUG
+TRACE_LEVEL = 5
+logging.addLevelName(TRACE_LEVEL, "TRACE")
+
+# Register TRACE level with structlog
+structlog.stdlib.LEVEL_TO_NAME[TRACE_LEVEL] = "trace"  # type: ignore[attr-defined]
+structlog.stdlib.NAME_TO_LEVEL["trace"] = TRACE_LEVEL  # type: ignore[attr-defined]
+
+
+# Monkey-patch trace method to Logger class
+def trace(self: logging.Logger, message: str, *args: Any, **kwargs: Any) -> None:
+    """Log at TRACE level (below DEBUG)."""
+    if self.isEnabledFor(TRACE_LEVEL):
+        self._log(TRACE_LEVEL, message, args, **kwargs)
+
+
+logging.Logger.trace = trace  # type: ignore[attr-defined]
+
+
 suppress_debug = [
     "ccproxy.scheduler",
     "ccproxy.observability.context",
     "ccproxy.utils.simple_request_logger",
 ]
+
+
+def category_filter(
+    logger: Any, method_name: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """Filter logs by category based on environment configuration."""
+    # Get filter settings from environment
+    included_channels = os.getenv("CCPROXY_LOG_CHANNELS", "").strip()
+    excluded_channels = os.getenv("CCPROXY_LOG_EXCLUDE_CHANNELS", "").strip()
+
+    if not included_channels and not excluded_channels:
+        return event_dict  # No filtering
+
+    included = (
+        [c.strip() for c in included_channels.split(",") if c.strip()]
+        if included_channels
+        else []
+    )
+    excluded = (
+        [c.strip() for c in excluded_channels.split(",") if c.strip()]
+        if excluded_channels
+        else []
+    )
+
+    category = event_dict.get("category")
+    
+    # For foreign (stdlib) logs without category, check if logger name suggests a category
+    if category is None:
+        logger_name = event_dict.get("logger", "")
+        # Map common logger names to categories
+        if logger_name.startswith(("uvicorn", "fastapi", "starlette")):
+            category = "general"  # Allow uvicorn/fastapi logs through as general
+        elif logger_name.startswith("httpx"):
+            category = "http"
+        else:
+            category = "general"  # Default fallback
+        
+        # Add the category to the event dict for consistent handling
+        event_dict["category"] = category
+
+    # Apply filters - be more permissive with foreign logs that got "general" as fallback
+    # and ALWAYS allow errors and warnings through regardless of category filtering
+    log_level = event_dict.get("level", "").lower()
+    is_critical_message = log_level in ("error", "warning", "critical")
+    
+    if included and category not in included:
+        # Always allow critical messages through regardless of category filtering
+        if is_critical_message:
+            return event_dict
+            
+        # If it's a foreign log with "general" fallback, and "general" is not in included channels,
+        # still allow it through to prevent breaking stdlib logging
+        logger_name = event_dict.get("logger", "")
+        is_foreign_log = not logger_name.startswith("ccproxy") and not logger_name.startswith("plugins")
+        
+        if not (is_foreign_log and category == "general"):
+            raise structlog.DropEvent
+            
+    if excluded and category in excluded:
+        # Always allow critical messages through even if their category is explicitly excluded
+        if is_critical_message:
+            return event_dict
+        raise structlog.DropEvent
+
+    return event_dict
+
+
+def format_category_for_console(
+    logger: Any, method_name: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """Format category field for better visibility in console output."""
+    if "category" in event_dict:
+        category = event_dict.pop("category")  # Remove from key-value pairs
+        # Prepend category to the event message
+        event = event_dict.get("event", "")
+        event_dict["event"] = f"[{category.upper()}] {event}"
+    else:
+        # Add default category if missing
+        event = event_dict.get("event", "")
+        event_dict["event"] = f"[GENERAL] {event}"
+    return event_dict
+
+
+class CategoryConsoleRenderer:
+    """Custom console renderer that formats categories as a separate padded column."""
+    
+    def __init__(self, base_renderer: Any):
+        self.base_renderer = base_renderer
+        
+    def __call__(self, logger: Any, method_name: str, event_dict: MutableMapping[str, Any]) -> str:
+        # Extract category and remove it from the event dict to prevent duplicate display
+        category = event_dict.pop("category", "general")
+        
+        # Get the rendered output from base renderer (without category in key-value pairs)
+        rendered = self.base_renderer(logger, method_name, event_dict)
+        # Debug: print the raw rendered output to see the structure
+        # print(f"DEBUG RENDERED: {repr(rendered)}")
+        
+        # Color mapping for different categories
+        category_colors = {
+            "lifecycle": "\033[92m",    # bright green
+            "plugin": "\033[94m",       # bright blue
+            "http": "\033[95m",         # bright magenta
+            "streaming": "\033[96m",    # bright cyan
+            "auth": "\033[93m",         # bright yellow
+            "transform": "\033[91m",    # bright red
+            "cache": "\033[97m",        # bright white
+            "middleware": "\033[35m",   # magenta
+            "config": "\033[34m",       # blue
+            "metrics": "\033[32m",      # green
+            "access": "\033[33m",       # yellow
+            "request": "\033[36m",      # cyan
+            "general": "\033[37m",      # white
+        }
+        
+        # Get color for category (default to white)
+        color = category_colors.get(category.lower(), "\033[37m")
+        
+        # Create padded category field with brackets and font highlighting only
+        category_field = f"{color}\033[1m[{category.lower():<10}]\033[0m"
+        
+        # Insert category field after the level field in the rendered output
+        # Look for the pattern: [timestamp] [[level]] and insert category after it
+        import re
+        
+        # Find the position right after the level field closes with "] "
+        # The actual pattern is: \x1b[2m18:50:17.686\x1b[0m [\x1b[32m\x1b[1minfo     \x1b[0m] \x1b[1m
+        level_end_pattern = r'(\[[^\]]*\[[^\]]*m[^\]]*\[[^\]]*m\])\s+'
+        match = re.search(level_end_pattern, rendered)
+        
+        if match:
+            # Insert category right after the level field and its trailing space
+            insert_pos = match.end()
+            rendered = (
+                rendered[:insert_pos] + 
+                category_field + " " +
+                rendered[insert_pos:]
+            )
+        else:
+            # Fallback: prepend category to the beginning
+            rendered = category_field + " " + rendered
+            
+        return rendered
 
 
 def configure_structlog(log_level: int = logging.INFO) -> None:
@@ -27,6 +193,7 @@ def configure_structlog(log_level: int = logging.INFO) -> None:
         structlog.stdlib.filter_by_level,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
+        category_filter,  # Add category filtering
     ]
 
     # Add debug-specific processors
@@ -149,6 +316,7 @@ def setup_logging(
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
+        category_filter,  # Apply category filtering to all logs
         structlog.dev.set_exc_info,
     ]
 
@@ -189,16 +357,21 @@ def setup_logging(
     # 4. Setup console handler with ConsoleRenderer
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(log_level)
+    base_console_renderer = structlog.dev.ConsoleRenderer(
+        exception_formatter=rich_traceback,  # Use rich for better formatting
+        colors=True,
+        pad_event=30,
+    )
+    
     console_renderer = (
         structlog.processors.JSONRenderer()
         if json_logs
-        else structlog.dev.ConsoleRenderer(
-            exception_formatter=rich_traceback  # structlog.dev.rich_traceback,  # Use rich for better formatting
-        )
+        else CategoryConsoleRenderer(base_console_renderer)
     )
 
-    # Console gets human-readable timestamps for both structlog and stdlib logs
-    console_processors = shared_processors + [console_timestamper, format_timestamp_ms]
+    # Console gets human-readable timestamps for both structlog and stdlib logs  
+    # Note: format_category_for_console must come after category_filter
+    console_processors = shared_processors + [console_timestamper, format_timestamp_ms, format_category_for_console]
     console_handler.setFormatter(
         structlog.stdlib.ProcessorFormatter(
             foreign_pre_chain=console_processors,  # type: ignore[arg-type]
@@ -296,6 +469,15 @@ def get_logger(name: str | None = None) -> BoundLogger:
         BoundLogger with request_id bound if available
     """
     logger = structlog.get_logger(name)
+
+    # Add trace method to BoundLogger if not present
+    if not hasattr(logger, "trace"):
+
+        def trace_method(msg: str, *args: Any, **kwargs: Any) -> Any:
+            """Log at TRACE level."""
+            return logger.log(TRACE_LEVEL, msg, *args, **kwargs)
+
+        logger.trace = trace_method
 
     # Try to get request context and bind request_id if available
     try:

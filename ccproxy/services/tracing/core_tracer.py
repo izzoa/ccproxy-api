@@ -1,6 +1,7 @@
 """Core request tracer implementation for proxy service."""
 
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -11,24 +12,41 @@ from ccproxy.services.tracing.interfaces import RequestTracer, StreamingTracer
 
 logger = structlog.get_logger(__name__)
 
+# Import TRACE_LEVEL
+try:
+    from ccproxy.core.logging import TRACE_LEVEL
+except ImportError:
+    TRACE_LEVEL = 5  # Fallback
+
 
 class CoreRequestTracer(RequestTracer, StreamingTracer):
-    """Core proxy request tracer for non-plugin requests."""
+    """Core proxy request tracer using TRACE level logging."""
 
     def __init__(
         self, verbose_api: bool = False, request_log_dir: str | None = None
     ) -> None:
         """Initialize with verbosity settings from environment.
 
-        - Reads CCPROXY_VERBOSE_API environment variable
+        - Reads CCPROXY_VERBOSE_API environment variable (for backward compatibility)
+        - Maps verbose_api to TRACE level logging
         - Sets up file logging directory if needed
         """
+        # Keep verbose_api for backward compatibility
         self.verbose_api = (
             verbose_api or os.getenv("CCPROXY_VERBOSE_API", "").lower() == "true"
         )
+
+        # Check if TRACE level is enabled
+        current_level = (
+            logger._context.get("_level", logging.INFO)
+            if hasattr(logger, "_context")
+            else logging.INFO
+        )
+        self.trace_enabled = self.verbose_api or current_level <= TRACE_LEVEL
+
         self.request_log_dir = request_log_dir or os.getenv("CCPROXY_REQUEST_LOG_DIR")
 
-        if self.verbose_api and self.request_log_dir:
+        if self.trace_enabled and self.request_log_dir:
             Path(self.request_log_dir).mkdir(parents=True, exist_ok=True)
 
     @staticmethod
@@ -67,22 +85,34 @@ class CoreRequestTracer(RequestTracer, StreamingTracer):
     ) -> None:
         """Implementation of request tracing.
 
-        - Only operates if verbose_api is enabled
-        - Logs to structlog with redacted headers
-        - Writes to request log file with complete data
+        - Logs at TRACE level with redacted headers
+        - Writes to request log file with complete data (if configured)
         """
-        if not self.verbose_api:
+        if not self.trace_enabled:
             return
 
-        # Log to console with redacted headers
-        logger.info(
-            "Proxying API request",
-            request_id=request_id,
-            method=method,
-            url=url,
-            headers=self.redact_headers(headers),
-            body_size=len(body) if body else 0,
-        )
+        # Log at TRACE level with redacted headers
+        if hasattr(logger, "trace"):
+            logger.trace(
+                "api_request",
+                category="http",
+                request_id=request_id,
+                method=method,
+                url=url,
+                headers=self.redact_headers(headers),
+                body_size=len(body) if body else 0,
+            )
+        elif self.verbose_api:
+            # Fallback for backward compatibility
+            logger.info(
+                "api_request",
+                category="http",
+                request_id=request_id,
+                method=method,
+                url=url,
+                headers=self.redact_headers(headers),
+                body_size=len(body) if body else 0,
+            )
 
         # Write to file if configured
         if self.request_log_dir:
@@ -101,24 +131,37 @@ class CoreRequestTracer(RequestTracer, StreamingTracer):
     ) -> None:
         """Implementation of response tracing.
 
+        - Logs at TRACE level
         - Truncates body preview at 1024 chars for console
-        - Attempts JSON parsing for better formatting
         - Handles binary data gracefully
         """
-        if not self.verbose_api:
+        if not self.trace_enabled:
             return
 
         body_preview = self._get_body_preview(body)
 
-        # Log to console
-        logger.info(
-            "Received API response",
-            request_id=request_id,
-            status=status,
-            headers=dict(headers),
-            body_preview=body_preview,
-            body_size=len(body),
-        )
+        # Log at TRACE level
+        if hasattr(logger, "trace"):
+            logger.trace(
+                "api_response",
+                category="http",
+                request_id=request_id,
+                status=status,
+                headers=dict(headers),
+                body_preview=body_preview,
+                body_size=len(body),
+            )
+        elif self.verbose_api:
+            # Fallback for backward compatibility
+            logger.info(
+                "api_response",
+                category="http",
+                request_id=request_id,
+                status=status,
+                headers=dict(headers),
+                body_preview=body_preview,
+                body_size=len(body),
+            )
 
         # Write to file if configured
         if self.request_log_dir:

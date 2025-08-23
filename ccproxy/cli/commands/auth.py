@@ -40,7 +40,10 @@ async def initialize_plugins_for_oauth() -> None:
             try:
                 provider = manifest.oauth_provider_factory()
                 registry.register_provider(provider)
-                logger.debug(f"Registered OAuth provider from plugin: {plugin_name}")
+                logger.debug(
+                    f"Registered OAuth provider from plugin: {plugin_name}",
+                    category="auth",
+                )
             except Exception as e:
                 logger.warning(
                     f"Failed to register OAuth provider from {plugin_name}: {e}"

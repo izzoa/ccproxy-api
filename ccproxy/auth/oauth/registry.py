@@ -135,7 +135,7 @@ class OAuthRegistry:
         """Initialize the OAuth registry."""
         self._providers: dict[str, OAuthProviderProtocol] = {}
         self._provider_info_cache: dict[str, OAuthProviderInfo] = {}
-        logger.info("oauth_registry_initialized")
+        logger.info("oauth_registry_initialized", category="auth")
 
     def register_provider(self, provider: OAuthProviderProtocol) -> None:
         """Register an OAuth provider from a plugin.
@@ -163,6 +163,7 @@ class OAuthRegistry:
                 display_name=info.display_name,
                 supports_pkce=info.supports_pkce,
                 plugin=info.plugin_name,
+                category="auth",
             )
         except Exception as e:
             logger.error(
@@ -170,6 +171,7 @@ class OAuthRegistry:
                 provider=provider_name,
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
 
     def unregister_provider(self, provider_name: str) -> None:
@@ -182,7 +184,9 @@ class OAuthRegistry:
             del self._providers[provider_name]
             if provider_name in self._provider_info_cache:
                 del self._provider_info_cache[provider_name]
-            logger.info("oauth_provider_unregistered", provider=provider_name)
+            logger.info(
+                "oauth_provider_unregistered", provider=provider_name, category="auth"
+            )
 
     def get_provider(self, provider_name: str) -> OAuthProviderProtocol | None:
         """Get a registered OAuth provider by name.
@@ -213,6 +217,7 @@ class OAuthRegistry:
                     "oauth_provider_info_refresh_error",
                     provider=name,
                     error=str(e),
+                    category="auth",
                 )
                 # Use cached info if available
                 if name in self._provider_info_cache:
@@ -254,6 +259,7 @@ class OAuthRegistry:
                 provider=provider_name,
                 error=str(e),
                 exc_info=e,
+                category="auth",
             )
             # Return cached info if available
             return self._provider_info_cache.get(provider_name)
@@ -265,7 +271,7 @@ class OAuthRegistry:
         """
         self._providers.clear()
         self._provider_info_cache.clear()
-        logger.info("oauth_registry_cleared")
+        logger.info("oauth_registry_cleared", category="auth")
 
 
 # Global registry instance

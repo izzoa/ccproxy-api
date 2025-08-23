@@ -40,7 +40,12 @@ def register_oauth_flow(
         "success": False,
         "error": None,
     }
-    logger.debug("Registered OAuth flow", state=state, operation="register_oauth_flow")
+    logger.debug(
+        "Registered OAuth flow",
+        state=state,
+        operation="register_oauth_flow",
+        category="auth",
+    )
 
 
 def get_oauth_flow_result(state: str) -> dict[str, Any] | None:
@@ -72,6 +77,7 @@ async def oauth_callback(
                 oauth_error_description=error_description,
                 state=state,
                 operation="oauth_callback",
+                category="auth",
             )
 
             # Update pending flow if state is provided
@@ -106,6 +112,7 @@ async def oauth_callback(
                 error_message=error_msg,
                 state=state,
                 operation="oauth_callback",
+                category="auth",
             )
 
             if state and state in _pending_flows:
@@ -138,6 +145,7 @@ async def oauth_callback(
                 error_type="missing_state",
                 error_message=error_msg,
                 operation="oauth_callback",
+                category="auth",
             )
             return HTMLResponse(
                 content=f"""
@@ -162,6 +170,7 @@ async def oauth_callback(
                 error_message="Invalid or expired state parameter",
                 state=state,
                 operation="oauth_callback",
+                category="auth",
             )
             return HTMLResponse(
                 content=f"""
@@ -196,7 +205,10 @@ async def oauth_callback(
 
         if success:
             logger.info(
-                "OAuth login successful", state=state, operation="oauth_callback"
+                "OAuth login successful",
+                state=state,
+                operation="oauth_callback",
+                category="auth",
             )
             return HTMLResponse(
                 content="""
@@ -224,6 +236,7 @@ async def oauth_callback(
                 error_message=error_msg,
                 state=state,
                 operation="oauth_callback",
+                category="auth",
             )
             return HTMLResponse(
                 content=f"""

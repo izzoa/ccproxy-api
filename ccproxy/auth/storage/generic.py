@@ -47,6 +47,7 @@ class GenericJsonStorage(BaseJsonStorage[T]):
                 "Failed to read credentials file",
                 error=str(e),
                 path=str(self.file_path),
+                category="auth",
             )
             return None
 

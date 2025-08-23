@@ -291,6 +291,7 @@ class Settings(BaseSettings):
                 "config_file_loaded",
                 path=str(config_path),
                 http_config=config_data.get("http", {}),
+                category="config",
             )
 
         # Merge config with kwargs (kwargs take precedence)
@@ -306,6 +307,7 @@ class Settings(BaseSettings):
                 "final_http_settings",
                 compression_enabled=settings.http.compression_enabled,
                 accept_encoding=settings.http.accept_encoding,
+                category="config",
             )
 
         return settings
@@ -356,7 +358,9 @@ class ConfigurationManager:
                 current_level[keys[-1]] = typed_value
 
             except ValueError:
-                logger.warning(f"Invalid plugin setting format: {override}")
+                logger.warning(
+                    f"Invalid plugin setting format: {override}", category="config"
+                )
 
     def load_settings(
         self,

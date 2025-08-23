@@ -57,6 +57,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     error_detail=error_detail,
                     operation=operation,
                     exc_info=e,
+                    category="auth",
                 )
 
                 if status_code == 401:
@@ -80,6 +81,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     operation=operation,
                     error=str(e),
                     exc_info=e,
+                    category="auth",
                 )
                 raise OAuthError(f"{operation} timed out") from e
 
@@ -89,6 +91,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     operation=operation,
                     error=str(e),
                     exc_info=e,
+                    category="auth",
                 )
                 raise OAuthError(f"{operation} failed: Connection error") from e
 
@@ -98,6 +101,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     operation=operation,
                     error=str(e),
                     exc_info=e,
+                    category="auth",
                 )
                 raise OAuthError(f"{operation} failed: Network error - {e}") from e
 
@@ -108,6 +112,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     error=str(e),
                     line=e.lineno,
                     exc_info=e,
+                    category="auth",
                 )
                 raise OAuthError(f"{operation} failed: Invalid JSON response") from e
 
@@ -117,6 +122,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     operation=operation,
                     error=str(e),
                     exc_info=e,
+                    category="auth",
                 )
                 raise OAuthError(
                     f"{operation} failed: Invalid data format - {e}"
@@ -128,6 +134,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     operation=operation,
                     error=str(e),
                     exc_info=e,
+                    category="auth",
                 )
                 raise  # Re-raise storage errors as-is
 
@@ -137,6 +144,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     operation=operation,
                     error=str(e),
                     exc_info=e,
+                    category="auth",
                 )
                 raise  # Re-raise credential errors as-is
 
@@ -150,6 +158,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     error=str(e),
                     error_type=type(e).__name__,
                     exc_info=e,
+                    category="auth",
                 )
                 raise OAuthError(f"{operation} failed: Unexpected error - {e}") from e
 
@@ -168,6 +177,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     error_detail=error_detail,
                     operation=operation,
                     exc_info=e,
+                    category="auth",
                 )
 
                 if status_code == 401:
@@ -191,6 +201,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     operation=operation,
                     error=str(e),
                     exc_info=e,
+                    category="auth",
                 )
                 raise OAuthError(f"{operation} timed out") from e
 
@@ -200,6 +211,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     operation=operation,
                     error=str(e),
                     exc_info=e,
+                    category="auth",
                 )
                 raise OAuthError(f"{operation} failed: Network error - {e}") from e
 
@@ -209,6 +221,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     operation=operation,
                     error=str(e),
                     exc_info=e,
+                    category="auth",
                 )
                 raise OAuthError(f"{operation} failed: Invalid JSON response") from e
 
@@ -218,6 +231,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     operation=operation,
                     error=str(e),
                     exc_info=e,
+                    category="auth",
                 )
                 raise OAuthError(
                     f"{operation} failed: Invalid data format - {e}"
@@ -233,6 +247,7 @@ def oauth_error_handler(operation: str) -> Callable[[F], F]:
                     error=str(e),
                     error_type=type(e).__name__,
                     exc_info=e,
+                    category="auth",
                 )
                 raise OAuthError(f"{operation} failed: Unexpected error - {e}") from e
 

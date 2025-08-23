@@ -82,12 +82,14 @@ class CodexRequestTransformer:
                 token_preview=f"{access_token[:20]}..."
                 if len(access_token) > 20
                 else access_token,
+                category="http",
             )
         else:
             # Warn about missing/expired token but still attempt the request
             logger.warning(
                 "OpenAI token is expired or missing. Attempting request anyway. "
-                "To refresh authentication, run 'ccproxy auth login-openai'"
+                "To refresh authentication, run 'ccproxy auth login-openai'",
+                category="http",
             )
             # Still set Authorization header even with no token
             # The API will return 401 if auth is truly required
@@ -102,6 +104,7 @@ class CodexRequestTransformer:
                     "injecting_detected_codex_headers",
                     version=cached_data.codex_version,
                     header_count=len(detected_headers),
+                    category="http",
                 )
                 # Override with detected headers (except session_id)
                 for key, value in detected_headers.items():
@@ -124,7 +127,10 @@ class CodexRequestTransformer:
             transformed["Accept"] = "application/json"
 
         logger.info(
-            "codex_headers_final", headers=dict(transformed), session_id=session_id
+            "codex_headers_final",
+            headers=dict(transformed),
+            session_id=session_id,
+            category="transform",
         )
         return transformed
 
@@ -137,7 +143,11 @@ class CodexRequestTransformer:
         Returns:
             Body with instructions injected if needed
         """
-        logger.info("transform_body_called", body_length=len(body) if body else 0)
+        logger.info(
+            "transform_body_called",
+            body_length=len(body) if body else 0,
+            category="transform",
+        )
         if not body:
             return body
 
@@ -147,9 +157,10 @@ class CodexRequestTransformer:
                 "parsed_request_body",
                 keys=list(data.keys()),
                 has_instructions="instructions" in data,
+                category="transform",
             )
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.warning("body_decode_failed", error=str(e))
+            logger.warning("body_decode_failed", error=str(e), category="transform")
             return body
 
         # Only inject instructions if missing or None
@@ -159,6 +170,7 @@ class CodexRequestTransformer:
                 "getting_instructions",
                 has_detection_service=bool(self.detection_service),
                 instructions_length=len(instructions) if instructions else 0,
+                category="transform",
             )
             if instructions:
                 data["instructions"] = instructions
@@ -168,16 +180,21 @@ class CodexRequestTransformer:
                     instructions_preview=f"{instructions[:100]}..."
                     if len(instructions) > 100
                     else instructions,
+                    category="transform",
                 )
             else:
-                logger.warning("no_codex_instructions_available")
+                logger.warning("no_codex_instructions_available", category="transform")
         else:
             logger.info(
-                "instructions_already_present", length=len(data.get("instructions", ""))
+                "instructions_already_present",
+                length=len(data.get("instructions", "")),
+                category="transform",
             )
 
         result = json.dumps(data).encode("utf-8")
-        logger.info("transform_body_result", result_length=len(result))
+        logger.info(
+            "transform_body_result", result_length=len(result), category="transform"
+        )
         return result
 
     def _get_instructions(self) -> str | None:

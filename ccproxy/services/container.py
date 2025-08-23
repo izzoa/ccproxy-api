@@ -59,7 +59,10 @@ class ServiceContainer:
         self._http_client: httpx.AsyncClient | None = None
         self._pool_manager: HTTPPoolManager | None = None
 
-        logger.debug("ServiceContainer initialized with dependency injection")
+        logger.debug(
+            "ServiceContainer initialized with dependency injection",
+            category="lifecycle",
+        )
 
     def create_proxy_service(
         self,
@@ -96,7 +99,8 @@ class ServiceContainer:
         )
 
         logger.debug(
-            "ProxyService created with all dependencies (no circular dependencies)"
+            "ProxyService created with all dependencies (no circular dependencies)",
+            category="lifecycle",
         )
         return proxy_service
 
@@ -196,7 +200,7 @@ class ServiceContainer:
         """
         if not self._pool_manager:
             self._pool_manager = HTTPPoolManager(self.settings)
-            logger.debug("Created HTTPPoolManager")
+            logger.debug("Created HTTPPoolManager", category="lifecycle")
         return self._pool_manager
 
     def get_response_cache(self) -> ResponseCache:
@@ -218,7 +222,7 @@ class ServiceContainer:
             else:
                 # Default configuration
                 self._services[service_key] = ResponseCache()
-            logger.debug("Created ResponseCache")
+            logger.debug("Created ResponseCache", category="lifecycle")
         return self._services[service_key]  # type: ignore
 
     def get_connection_pool_manager(self) -> ConnectionPoolManager:
@@ -240,7 +244,7 @@ class ServiceContainer:
             else:
                 # Default configuration
                 self._services[service_key] = ConnectionPoolManager()
-            logger.debug("Created ConnectionPoolManager")
+            logger.debug("Created ConnectionPoolManager", category="lifecycle")
         return self._services[service_key]  # type: ignore
 
     async def close(self) -> None:
@@ -255,14 +259,16 @@ class ServiceContainer:
             self._pool_manager = None
             # Clear the HTTP client reference since it's closed by pool manager
             self._http_client = None
-            logger.debug("Closed HTTP pool manager and all clients")
+            logger.debug(
+                "Closed HTTP pool manager and all clients", category="lifecycle"
+            )
 
         # Close HTTP client if it was created separately (should not happen normally)
         elif self._http_client:
             await self._http_client.aclose()
             self._http_client = None
-            logger.debug("Closed shared HTTP client directly")
+            logger.debug("Closed shared HTTP client directly", category="lifecycle")
 
         # Clear service cache
         self._services.clear()
-        logger.debug("ServiceContainer resources closed")
+        logger.debug("ServiceContainer resources closed", category="lifecycle")

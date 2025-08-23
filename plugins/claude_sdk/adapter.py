@@ -213,11 +213,15 @@ class ClaudeSDKAdapter(BaseAdapter):
             )
 
         self.logger.info(
-            "claude_sdk_direct_handling",
+            "plugin_request",
+            plugin="claude_sdk",
             endpoint=endpoint,
+            target_url=f"claude-sdk://{session_id}" if session_id else "claude-sdk://direct",
             model=model,
-            stream=stream,
+            is_streaming=stream,
             needs_conversion=needs_conversion,
+            session_id=session_id,
+            category="http",
         )
 
         try:
@@ -293,6 +297,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                             "claude_sdk_streaming_cancelled",
                             error=str(e),
                             exc_info=e,
+                            category="streaming",
                         )
                         raise
                     except httpx.TimeoutException as e:
@@ -300,6 +305,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                             "claude_sdk_streaming_timeout",
                             error=str(e),
                             exc_info=e,
+                            category="streaming",
                         )
                         error_chunk = {"error": "Request timed out"}
                         yield f"data: {json.dumps(error_chunk)}\n\n".encode()
@@ -311,6 +317,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                             if hasattr(e, "response")
                             else None,
                             exc_info=e,
+                            category="streaming",
                         )
                         error_chunk = {"error": f"HTTP error: {e}"}
                         yield f"data: {json.dumps(error_chunk)}\n\n".encode()
@@ -319,6 +326,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                             "claude_sdk_streaming_unexpected_error",
                             error=str(e),
                             exc_info=e,
+                            category="streaming",
                         )
                         error_chunk = {"error": str(e)}
                         yield f"data: {json.dumps(error_chunk)}\n\n".encode()
@@ -362,6 +370,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                 "claude_sdk_request_timeout",
                 error=str(e),
                 exc_info=e,
+                category="http",
             )
             raise HTTPException(status_code=408, detail="Request timed out") from e
         except httpx.HTTPError as e:
@@ -372,6 +381,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                 if hasattr(e, "response")
                 else None,
                 exc_info=e,
+                category="http",
             )
             raise HTTPException(status_code=502, detail=f"HTTP error: {e}") from e
         except asyncio.CancelledError as e:

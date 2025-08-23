@@ -95,6 +95,7 @@ class ClaudeOAuthProvider:
             "claude_auth_url_generated",
             state=state,
             has_pkce=bool(code_verifier and self.config.use_pkce),
+            category="auth",
         )
 
         return auth_url
@@ -126,6 +127,7 @@ class ClaudeOAuthProvider:
             "claude_oauth_callback_handled",
             state=state,
             has_credentials=bool(credentials),
+            category="auth",
         )
 
         return credentials
@@ -145,7 +147,7 @@ class ClaudeOAuthProvider:
         if self.storage:
             await self.storage.save_credentials(credentials)
 
-        logger.info("claude_token_refreshed")
+        logger.info("claude_token_refreshed", category="auth")
 
         return credentials
 
@@ -159,7 +161,7 @@ class ClaudeOAuthProvider:
         if self.storage:
             await self.storage.delete_credentials()
 
-        logger.info("claude_token_revoked_locally")
+        logger.info("claude_token_revoked_locally", category="auth")
 
     def get_provider_info(self) -> OAuthProviderInfo:
         """Get provider information for discovery.
