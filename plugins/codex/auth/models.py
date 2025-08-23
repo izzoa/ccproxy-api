@@ -8,10 +8,10 @@ from pydantic import computed_field
 
 from ccproxy.auth.models import OpenAICredentials
 from ccproxy.auth.models.base import BaseProfileInfo, BaseTokenInfo
-from ccproxy.core.logging import get_logger
+from ccproxy.core.logging import get_plugin_logger
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class OpenAITokenWrapper(BaseTokenInfo):

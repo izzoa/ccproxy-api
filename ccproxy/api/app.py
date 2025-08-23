@@ -135,6 +135,7 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
             self.http_client = container.get_http_client()
             self.logger = structlog.get_logger()
             self.proxy_service = getattr(app.state, "proxy_service", None)
+            self.cli_detection_service = container.get_cli_detection_service()
             self.scheduler = getattr(app.state, "scheduler", None)
             self._container = container
 
@@ -456,6 +457,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Register all plugin factories
         for factory in plugin_factories.values():
             plugin_registry.register_factory(factory)
+
+        # Log registration summary
+        provider_count = sum(1 for f in plugin_factories.values() if f.get_manifest().is_provider)
+        logger.info(
+            "plugins_registered",
+            total=len(plugin_factories),
+            providers=provider_count,
+            system_plugins=len(plugin_factories) - provider_count,
+            names=list(plugin_factories.keys()),
+            category="plugin",
+        )
 
         # Create a minimal core services adapter for manifest population
         # This allows plugins to check their configuration and add middleware/routes

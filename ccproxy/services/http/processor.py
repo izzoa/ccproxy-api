@@ -266,7 +266,9 @@ class RequestProcessor:
         )
 
         if not handler_config.request_transformer:
-            self.logger.debug("apply_request_transformer_no_transformer", category="request")
+            self.logger.debug(
+                "apply_request_transformer_no_transformer", category="request"
+            )
             return headers
 
         if not hasattr(handler_config.request_transformer, "transform_headers"):

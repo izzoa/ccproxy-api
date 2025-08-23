@@ -140,7 +140,7 @@ class HTTPPoolManager:
             The shared httpx.AsyncClient instance
         """
         if self._shared_client is None:
-            logger.info("creating_shared_client_sync")
+            logger.debug("creating_shared_client_sync")
             self._shared_client = HTTPClientFactory.create_client(
                 settings=self.settings,
                 http2=False,  # Disable HTTP/2 to ensure logging transport works

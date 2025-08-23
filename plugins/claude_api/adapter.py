@@ -3,7 +3,6 @@
 import json
 from typing import Any
 
-import structlog
 from fastapi import HTTPException, Request
 from httpx import AsyncClient
 from starlette.responses import Response, StreamingResponse
@@ -13,6 +12,7 @@ from ccproxy.config.constants import (
     CLAUDE_MESSAGES_ENDPOINT,
     OPENAI_CHAT_COMPLETIONS_PATH,
 )
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.http.plugin_handler import PluginHTTPHandler
@@ -21,7 +21,7 @@ from ccproxy.streaming.deferred_streaming import DeferredStreaming
 from .transformers import ClaudeAPIRequestTransformer, ClaudeAPIResponseTransformer
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeAPIAdapter(BaseAdapter):
@@ -48,10 +48,8 @@ class ClaudeAPIAdapter(BaseAdapter):
             http_client: Optional HTTP client for making requests
             logger: Optional structured logger instance
         """
-        # Use stdlib logger for compatibility with RequestContext
-        import structlog.stdlib
-
-        self.logger = logger or structlog.stdlib.get_logger(__name__)
+        # Use plugin logger for proper plugin context
+        self.logger = logger or get_plugin_logger()
         self.proxy_service = proxy_service
         self._auth_manager = auth_manager
         self._detection_service = detection_service
@@ -517,7 +515,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             self._response_transformer = None
             self.openai_adapter = None
 
-            self.logger.debug("claude_api_adapter_cleanup_completed")
+            self.logger.debug("adapter_cleanup_completed")
 
         except Exception as e:
             self.logger.error(

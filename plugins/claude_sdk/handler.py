@@ -8,11 +8,11 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
 
-import structlog
 from claude_code_sdk import ClaudeCodeOptions
 
 from ccproxy.auth.manager import AuthManager
 from ccproxy.core.errors import ClaudeProxyError, ServiceUnavailableError
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.models.messages import TextContentBlock
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
@@ -30,7 +30,7 @@ from .models import MessageResponse, SDKMessage, create_sdk_message
 from .streaming import ClaudeStreamProcessor
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 def _convert_sdk_message_mode(core_mode: Any) -> SDKMessageMode:
@@ -236,7 +236,7 @@ class ClaudeSDKHandler:
     ) -> MessageResponse:
         """Complete a non-streaming request with business logic."""
         request_id = ctx.request_id
-        logger.debug("claude_sdk_completion_start", request_id=request_id)
+        logger.debug("completion_start", request_id=request_id)
 
         # Convert messages to single SDKMessage
         sdk_message = self._convert_messages_to_sdk_message(messages, session_id)
@@ -276,7 +276,7 @@ class ClaudeSDKHandler:
                 status_code=500,
             )
 
-        logger.debug("claude_sdk_completion_received")
+        logger.debug("completion_received")
         mode = (
             _convert_sdk_message_mode(self.config.sdk_message_mode)
             if self.config

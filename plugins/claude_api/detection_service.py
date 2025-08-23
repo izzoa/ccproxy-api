@@ -9,11 +9,11 @@ import socket
 from pathlib import Path
 from typing import Any
 
-import structlog
 from fastapi import FastAPI, Request, Response
 
 from ccproxy.config.discovery import get_ccproxy_cache_dir
 from ccproxy.config.settings import Settings
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.models.detection import (
     ClaudeCacheData,
     ClaudeCodeHeaders,
@@ -23,19 +23,27 @@ from ccproxy.services.cli_detection import CLIDetectionService
 from ccproxy.utils.caching import async_ttl_cache
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeAPIDetectionService:
     """Claude API plugin detection service for automatically detecting Claude CLI headers."""
 
-    def __init__(self, settings: Settings) -> None:
-        """Initialize Claude detection service."""
+    def __init__(
+        self, settings: Settings, cli_service: CLIDetectionService | None = None
+    ) -> None:
+        """Initialize Claude detection service.
+
+        Args:
+            settings: Application settings
+            cli_service: Optional CLIDetectionService instance for dependency injection.
+                        If None, creates a new instance for backward compatibility.
+        """
         self.settings = settings
         self.cache_dir = get_ccproxy_cache_dir()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._cached_data: ClaudeCacheData | None = None
-        self._cli_service = CLIDetectionService(settings)
+        self._cli_service = cli_service or CLIDetectionService(settings)
 
     async def initialize_detection(self) -> ClaudeCacheData:
         """Initialize Claude detection at startup."""
@@ -46,13 +54,7 @@ class ClaudeAPIDetectionService:
             # Try to load from cache first
             detected_data = self._load_from_cache(current_version)
             cached = detected_data is not None
-            if cached:
-                logger.debug(
-                    "detection_claude_headers_debug",
-                    version=current_version,
-                    category="plugin",
-                )
-            else:
+            if not cached:
                 # No cache or version changed - detect fresh
                 detected_data = await self._detect_claude_headers(current_version)
                 # Cache the results
@@ -61,7 +63,7 @@ class ClaudeAPIDetectionService:
             self._cached_data = detected_data
 
             logger.debug(
-                "detection_claude_headers_completed",
+                "detection_headers_completed",
                 version=current_version,
                 cached=cached,
                 category="plugin",
@@ -292,4 +294,4 @@ class ClaudeAPIDetectionService:
         # Clear the async cache for _get_claude_version
         if hasattr(self._get_claude_version, "cache_clear"):
             self._get_claude_version.cache_clear()
-        logger.debug("claude_api_detection_cache_cleared", category="plugin")
+        logger.debug("detection_cache_cleared", category="plugin")

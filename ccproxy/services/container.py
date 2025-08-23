@@ -13,6 +13,7 @@ from ccproxy.config.settings import Settings
 from ccproxy.core.http import BaseProxyClient
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.services.cache import ResponseCache
+from ccproxy.services.cli_detection import CLIDetectionService
 from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.factories import ConcreteServiceFactory
 from ccproxy.services.http.connection_pool import ConnectionPoolManager
@@ -20,6 +21,8 @@ from ccproxy.services.http_pool import HTTPPoolManager
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
+from ccproxy.services.cli_detection import CLIDetectionService
+from ccproxy.utils.binary_resolver import BinaryResolver
 
 
 if TYPE_CHECKING:
@@ -85,21 +88,46 @@ class ServiceContainer:
         from ccproxy.services.proxy_service import ProxyService
 
         # Create ProxyService without old plugin system
+        # Track components being initialized
+        components = []
+        
+        request_tracer = self.get_request_tracer()
+        components.append("request_tracer")
+        
+        mock_handler = self.get_mock_handler()
+        components.append("mock_handler")
+        
+        streaming_handler = self.get_streaming_handler(metrics)
+        components.append("streaming_handler")
+        
+        config = self.get_proxy_config()
+        components.append("proxy_config")
+        
+        http_client = self.get_http_client()
+        components.append("http_client")
+        
+        response_cache = self.get_response_cache()
+        components.append("response_cache")
+        
+        connection_pool_manager = self.get_connection_pool_manager()
+        components.append("connection_pool")
+
         proxy_service = ProxyService(
             proxy_client=proxy_client,
             settings=self.settings,
-            request_tracer=self.get_request_tracer(),
-            mock_handler=self.get_mock_handler(),
-            streaming_handler=self.get_streaming_handler(metrics),
-            config=self.get_proxy_config(),
-            http_client=self.get_http_client(),
+            request_tracer=request_tracer,
+            mock_handler=mock_handler,
+            streaming_handler=streaming_handler,
+            config=config,
+            http_client=http_client,
             metrics=metrics,
-            response_cache=self.get_response_cache(),
-            connection_pool_manager=self.get_connection_pool_manager(),
+            response_cache=response_cache,
+            connection_pool_manager=connection_pool_manager,
         )
 
-        logger.debug(
-            "ProxyService created with all dependencies (no circular dependencies)",
+        logger.info(
+            "services_initialized", 
+            components=components,
             category="lifecycle",
         )
         return proxy_service
@@ -157,6 +185,35 @@ class ServiceContainer:
                 self.settings, metrics, request_tracer
             )
         return cast(StreamingHandler, self._services[service_key])
+
+    def get_binary_resolver(self) -> BinaryResolver:
+        """Get binary resolver service instance.
+
+        Uses caching to ensure single instance per container lifetime,
+        but allows multiple containers for testing.
+
+        Returns:
+            Binary resolver service instance
+        """
+        service_key = "binary_resolver"
+        if service_key not in self._services:
+            self._services[service_key] = BinaryResolver.from_settings(self.settings)
+        return self._services[service_key]  # type: ignore
+
+    def get_cli_detection_service(self) -> CLIDetectionService:
+        """Get CLI detection service instance.
+
+        Uses caching to ensure single instance per container lifetime,
+        but allows multiple containers for testing.
+
+        Returns:
+            CLI detection service instance
+        """
+        service_key = "cli_detection_service"
+        if service_key not in self._services:
+            binary_resolver = self.get_binary_resolver()
+            self._services[service_key] = CLIDetectionService(self.settings, binary_resolver)
+        return self._services[service_key]  # type: ignore
 
     def get_proxy_config(self) -> ProxyConfiguration:
         """Get proxy configuration service instance.

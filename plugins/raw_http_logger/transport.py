@@ -5,12 +5,13 @@ from types import TracebackType
 from typing import Any
 
 import httpx
-import structlog
+
+from ccproxy.core.logging import get_plugin_logger
 
 from .logger import RawHTTPLogger
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class LoggingResponseStream(httpx.AsyncByteStream):
@@ -68,8 +69,12 @@ class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
         # Delegate pool to wrapped transport for context manager support
         if hasattr(self.wrapped, "_pool"):
             self._pool = self.wrapped._pool
-        logger_module = structlog.get_logger(__name__)
-        logger_module.info(
+
+        # Use module-level logger for initialization message
+        from ccproxy.core.logging import get_plugin_logger
+
+        module_logger = get_plugin_logger(__name__)
+        module_logger.info(
             "LoggingHTTPTransport initialized",
             enabled=self.logger.enabled,
             category="middleware",

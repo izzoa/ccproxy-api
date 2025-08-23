@@ -8,9 +8,8 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-import structlog
-
 from ccproxy.core.async_task_manager import create_managed_task
+from ccproxy.core.logging import get_plugin_logger
 
 from .config import SessionPoolSettings
 from .message_queue import QueueListener
@@ -18,7 +17,7 @@ from .session_client import SessionClient
 from .stream_worker import StreamWorker, WorkerStatus
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class StreamHandle:

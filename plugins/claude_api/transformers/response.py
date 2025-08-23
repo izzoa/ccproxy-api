@@ -3,11 +3,11 @@
 from typing import Any
 
 from ccproxy.config.cors import CORSSettings
-from ccproxy.core.logging import get_logger
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.utils.cors import get_cors_headers, get_request_origin
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeAPIResponseTransformer:
@@ -42,7 +42,7 @@ class ClaudeAPIResponseTransformer:
             Transformed headers preserving server identification and secure CORS
         """
         # Get logger with request context at the start of the function
-        logger = get_logger(__name__)
+        logger = get_plugin_logger()
 
         transformed = {}
 

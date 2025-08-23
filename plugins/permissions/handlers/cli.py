@@ -11,17 +11,17 @@ import httpx
 import structlog
 import typer
 from pydantic import ValidationError
-from structlog import get_logger
 
 from ccproxy.config.settings import get_settings
 from ccproxy.core.async_task_manager import create_managed_task
+from ccproxy.core.logging import get_plugin_logger
 
 from ..models import PermissionRequest
 from .protocol import ConfirmationHandlerProtocol
 from .terminal import TerminalPermissionHandler as TextualPermissionHandler
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 app = typer.Typer(
     name="confirmation-handler",

@@ -2,13 +2,12 @@
 
 from typing import Any
 
-import structlog
-
 from ccproxy.config.cors import CORSSettings
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.utils.cors import get_cors_headers, get_request_origin
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class CodexResponseTransformer:

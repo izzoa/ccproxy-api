@@ -158,7 +158,9 @@ async def log_request_access(
     logger = context.logger.bind(**log_data)
 
     if context.metadata.get("error"):
-        logger.warn("access_log", exc_info=context.metadata.get("error"), category="access")
+        logger.warn(
+            "access_log", exc_info=context.metadata.get("error"), category="access"
+        )
     elif not is_streaming:
         # Log as access_log event (structured logging)
         logger.info("access_log", category="access")

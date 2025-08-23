@@ -123,7 +123,7 @@ class PluginDiscovery:
                 )
                 return None
 
-            logger.info(
+            logger.debug(
                 "plugin_factory_loaded",
                 name=name,
                 version=factory.get_manifest().version,
@@ -218,7 +218,6 @@ class PluginFilter:
         for name, factory in factories.items():
             if self.is_enabled(name):
                 filtered[name] = factory
-                logger.debug("plugin_enabled", name=name, category="plugin")
             else:
                 logger.info("plugin_disabled", name=name, category="plugin")
 

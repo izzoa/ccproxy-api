@@ -7,12 +7,12 @@ from typing import Any
 from ccproxy.auth.managers.base import BaseTokenManager
 from ccproxy.auth.models import ClaudeCredentials
 from ccproxy.auth.storage.generic import GenericJsonStorage
-from ccproxy.core.logging import get_logger
+from ccproxy.core.logging import get_plugin_logger
 
 from .models import ClaudeProfileInfo, ClaudeTokenWrapper
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeApiTokenManager(BaseTokenManager[ClaudeCredentials]):

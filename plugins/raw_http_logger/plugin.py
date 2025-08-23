@@ -2,8 +2,7 @@
 
 from typing import Any
 
-import structlog
-
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.plugins import (
     MiddlewareLayer,
     MiddlewareSpec,
@@ -18,7 +17,7 @@ from plugins.raw_http_logger.middleware import RawHTTPLoggingMiddleware
 from plugins.raw_http_logger.transport import LoggingHTTPTransport
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class RawHTTPLoggerRuntime(SystemPluginRuntime):
@@ -39,8 +38,10 @@ class RawHTTPLoggerRuntime(SystemPluginRuntime):
         # Get configuration
         config = self.context.get("config")
         if not isinstance(config, RawHTTPLoggerConfig):
-            logger.warning("raw_http_logger_no_config", plugin=self.name)
-            return
+            logger.warning("plugin_no_config")
+            # Use default config if none provided
+            config = RawHTTPLoggerConfig()
+            logger.info("plugin_using_default_config")
         self.config = config
 
         # Create logger instance

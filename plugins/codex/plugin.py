@@ -2,8 +2,7 @@
 
 from typing import Any
 
-import structlog
-
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.plugins import (
     PluginContext,
     PluginManifest,
@@ -17,7 +16,7 @@ from plugins.codex.detection_service import CodexDetectionService
 from plugins.codex.routes import router as codex_router
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class CodexRuntime(ProviderPluginRuntime):
@@ -37,8 +36,10 @@ class CodexRuntime(ProviderPluginRuntime):
         # Get configuration
         config = self.context.get("config")
         if not isinstance(config, CodexSettings):
-            logger.warning("codex_plugin_no_config", plugin=self.name)
-            return
+            logger.warning("plugin_no_config")
+            # Use default config if none provided
+            config = CodexSettings()
+            logger.info("plugin_using_default_config")
         self.config = config
 
         # Get auth manager from context
@@ -47,11 +48,34 @@ class CodexRuntime(ProviderPluginRuntime):
         # Call parent to initialize adapter and detection service
         await super()._on_initialize()
 
+        # Check CLI status
+        if self.detection_service:
+            version = self.detection_service.get_version()
+            cli_path = self.detection_service.get_cli_path()
+
+            if cli_path:
+                logger.info(
+                    "cli_detection_completed",
+                    cli_available=True,
+                    version=version,
+                    cli_path=cli_path,
+                    source="package_manager",
+                )
+            else:
+                logger.warning(
+                    "cli_detection_completed",
+                    cli_available=False,
+                    version=None,
+                    cli_path=None,
+                    source="unknown",
+                )
+
         logger.info(
             "plugin_initialized",
-            plugin="codex",
             status="initialized",
-            cli_available=bool(self.detection_service and self.detection_service.get_cli_path()),
+            cli_available=bool(
+                self.detection_service and self.detection_service.get_cli_path()
+            ),
             has_credentials=self.auth_manager is not None,
             has_adapter=self.adapter is not None,
             has_detection=self.detection_service is not None,
@@ -252,7 +276,8 @@ class CodexFactory(ProviderPluginFactory):
         if not settings:
             raise RuntimeError("Settings are required for Codex detection service")
 
-        return CodexDetectionService(settings)
+        cli_service = context.get("cli_detection_service")
+        return CodexDetectionService(settings, cli_service)
 
     def create_credentials_manager(self, context: PluginContext) -> Any:
         """Create the Codex credentials manager with OAuth client for token refresh."""

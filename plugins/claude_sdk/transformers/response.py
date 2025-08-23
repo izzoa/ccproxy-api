@@ -6,14 +6,14 @@ including headers and body modifications.
 
 from typing import TYPE_CHECKING, Any
 
-import structlog
+from ccproxy.core.logging import get_plugin_logger
 
 
 if TYPE_CHECKING:
     from ccproxy.config.cors import CORSSettings
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeSDKResponseTransformer:

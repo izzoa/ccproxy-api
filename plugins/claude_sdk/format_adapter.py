@@ -6,12 +6,11 @@ for the Claude SDK plugin.
 
 from typing import Any
 
-import structlog
-
 from ccproxy.adapters.openai.adapter import OpenAIAdapter
+from ccproxy.core.logging import get_plugin_logger
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeSDKFormatAdapter:

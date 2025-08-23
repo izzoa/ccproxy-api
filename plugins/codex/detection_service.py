@@ -10,11 +10,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import structlog
 from fastapi import FastAPI, Request, Response
 
 from ccproxy.config.discovery import get_ccproxy_cache_dir
 from ccproxy.config.settings import Settings
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.models.detection import (
     CodexCacheData,
     CodexHeaders,
@@ -24,19 +24,27 @@ from ccproxy.services.cli_detection import CLIDetectionService
 from ccproxy.utils.caching import async_ttl_cache
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class CodexDetectionService:
     """Service for automatically detecting Codex CLI headers at startup."""
 
-    def __init__(self, settings: Settings) -> None:
-        """Initialize Codex detection service."""
+    def __init__(
+        self, settings: Settings, cli_service: CLIDetectionService | None = None
+    ) -> None:
+        """Initialize Codex detection service.
+
+        Args:
+            settings: Application settings
+            cli_service: Optional CLI detection service for dependency injection.
+                        If None, creates its own instance.
+        """
         self.settings = settings
         self.cache_dir = get_ccproxy_cache_dir()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._cached_data: CodexCacheData | None = None
-        self._cli_service = CLIDetectionService(settings)
+        self._cli_service = cli_service or CLIDetectionService(settings)
 
     async def initialize_detection(self) -> CodexCacheData:
         """Initialize Codex detection at startup."""
@@ -47,13 +55,7 @@ class CodexDetectionService:
             # Try to load from cache first
             detected_data = self._load_from_cache(current_version)
             cached = detected_data is not None
-            if cached:
-                logger.debug(
-                    "detection_codex_headers_debug",
-                    version=current_version,
-                    category="plugin",
-                )
-            else:
+            if not cached:
                 # No cache or version changed - detect fresh
                 detected_data = await self._detect_codex_headers(current_version)
                 # Cache the results
@@ -62,7 +64,7 @@ class CodexDetectionService:
             self._cached_data = detected_data
 
             logger.debug(
-                "detection_codex_headers_completed",
+                "detection_headers_completed",
                 version=current_version,
                 cached=cached,
                 category="plugin",
@@ -320,4 +322,4 @@ class CodexDetectionService:
         # Clear the async cache for _get_codex_version
         if hasattr(self._get_codex_version, "cache_clear"):
             self._get_codex_version.cache_clear()
-        logger.debug("codex_detection_cache_cleared", category="plugin")
+        logger.debug("detection_cache_cleared", category="plugin")

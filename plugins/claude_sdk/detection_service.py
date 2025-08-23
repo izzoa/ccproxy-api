@@ -2,14 +2,13 @@
 
 from typing import NamedTuple
 
-import structlog
-
 from ccproxy.config.settings import Settings
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.services.cli_detection import CLIDetectionService
 from ccproxy.utils.caching import async_ttl_cache
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeDetectionData(NamedTuple):
@@ -29,14 +28,17 @@ class ClaudeSDKDetectionService:
     the actual CLI to be present.
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self, settings: Settings, cli_service: CLIDetectionService | None = None
+    ) -> None:
         """Initialize the Claude SDK detection service.
 
         Args:
             settings: Application settings
+            cli_service: Optional CLI detection service instance. If None, creates a new one.
         """
         self.settings = settings
-        self._cli_service = CLIDetectionService(settings)
+        self._cli_service = cli_service or CLIDetectionService(settings)
         self._version: str | None = None
         self._cli_command: list[str] | None = None
         self._is_available = False
@@ -51,7 +53,7 @@ class ClaudeSDKDetectionService:
         Note:
             No fallback support - SDK requires actual CLI presence
         """
-        logger.debug("claude_sdk_detection_starting", category="plugin")
+        logger.debug("detection_starting", category="plugin")
 
         # Use centralized CLI detection service
         # For SDK, we don't want fallback - require actual CLI
@@ -73,7 +75,7 @@ class ClaudeSDKDetectionService:
                 self._cli_command = result.command
                 self._is_available = True
                 logger.debug(
-                    "claude_sdk_detection_success",
+                    "cli_detection_completed",
                     cli_command=self._cli_command,
                     version=self._version,
                     source=result.source,
@@ -126,4 +128,4 @@ class ClaudeSDKDetectionService:
         # Clear the async cache for initialize_detection
         if hasattr(self.initialize_detection, "cache_clear"):
             self.initialize_detection.cache_clear()
-        logger.debug("claude_sdk_detection_cache_cleared", category="plugin")
+        logger.debug("detection_cache_cleared", category="plugin")

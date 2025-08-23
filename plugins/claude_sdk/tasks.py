@@ -2,8 +2,7 @@
 
 from typing import TYPE_CHECKING, Any
 
-import structlog
-
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.scheduler.tasks import BaseScheduledTask
 
 
@@ -11,7 +10,7 @@ if TYPE_CHECKING:
     from .detection_service import ClaudeSDKDetectionService
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeSDKDetectionRefreshTask(BaseScheduledTask):

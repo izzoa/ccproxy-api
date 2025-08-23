@@ -11,10 +11,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, TypeVar
 
-import structlog
+from ccproxy.core.logging import get_plugin_logger
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 T = TypeVar("T")
 

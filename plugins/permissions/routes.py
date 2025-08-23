@@ -7,7 +7,6 @@ from collections.abc import AsyncGenerator
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
-from structlog import get_logger
 
 from ccproxy.api.dependencies import SettingsDep
 from ccproxy.auth.conditional import ConditionalAuthDep
@@ -15,12 +14,13 @@ from ccproxy.core.errors import (
     PermissionAlreadyResolvedError,
     PermissionNotFoundError,
 )
+from ccproxy.core.logging import get_plugin_logger
 
 from .models import EventType, PermissionEvent, PermissionStatus
 from .service import get_permission_service
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 router = APIRouter(tags=["permissions"])

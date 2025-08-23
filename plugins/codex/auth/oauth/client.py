@@ -9,11 +9,11 @@ from ccproxy.auth.exceptions import OAuthError
 from ccproxy.auth.models import OpenAICredentials
 from ccproxy.auth.oauth.base import BaseOAuthClient
 from ccproxy.auth.storage.base import TokenStorage
-from ccproxy.core.logging import get_logger
+from ccproxy.core.logging import get_plugin_logger
 from plugins.codex.auth.oauth.config import CodexOAuthConfig
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
@@ -208,6 +208,9 @@ class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
 
         except Exception as e:
             logger.error(
-                "openai_token_refresh_failed", error=str(e), exc_info=e, category="auth"
+                "openai_token_refresh_failed",
+                error=str(e),
+                exc_info=False,
+                category="auth",
             )
             raise OAuthError(f"Failed to refresh OpenAI token: {e}") from e

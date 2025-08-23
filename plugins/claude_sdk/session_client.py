@@ -7,19 +7,19 @@ import time
 from enum import Enum
 from typing import Any
 
-import structlog
 from claude_code_sdk import ClaudeCodeOptions
 from pydantic import BaseModel
 
 from ccproxy.core.async_task_manager import create_managed_task
 from ccproxy.core.async_utils import patched_typing
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.utils.id_generator import generate_client_id
 
 
 with patched_typing():
     from claude_code_sdk import ClaudeSDKClient as ImportedClaudeSDKClient
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class SessionStatus(str, Enum):
@@ -245,7 +245,7 @@ class SessionClient:
                         "session_disconnect_error",
                         session_id=self.session_id,
                         error=str(e),
-                        exc_info=e,
+                        exc_info=False,
                     )
                 finally:
                     self.claude_client = None

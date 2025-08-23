@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from ccproxy.scheduler.core import Scheduler
     from ccproxy.scheduler.tasks import BaseScheduledTask
     from ccproxy.services.adapters.base import BaseAdapter
+    from ccproxy.services.cli_detection import CLIDetectionService
     from ccproxy.services.proxy_service import ProxyService
 else:
     # Runtime import - mypy doesn't have stubs for fastapi.middleware
@@ -161,6 +162,7 @@ class PluginContext(TypedDict, total=False):
     proxy_service: "ProxyService"  # ProxyService instance
     scheduler: "Scheduler"  # Scheduler instance
     config: BaseModel | None  # Plugin-specific configuration
+    cli_detection_service: "CLIDetectionService"  # Shared CLI detection service
 
     # Provider-specific
     adapter: "BaseAdapter"  # BaseAdapter instance

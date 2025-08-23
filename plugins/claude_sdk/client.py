@@ -5,11 +5,11 @@ import contextlib
 from collections.abc import AsyncIterator
 from typing import Any, TypeVar, cast
 
-import structlog
 from pydantic import BaseModel
 
 from ccproxy.core.async_utils import patched_typing
 from ccproxy.core.errors import ClaudeProxyError, ServiceUnavailableError
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.observability import timed_operation
 
 from . import models as sdk_models
@@ -45,7 +45,7 @@ with patched_typing():
     )
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 T = TypeVar("T", bound=BaseModel)
 

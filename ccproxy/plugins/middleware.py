@@ -60,12 +60,6 @@ class MiddlewareManager:
             source="core",
         )
         self.middleware_specs.append(spec)
-        logger.debug(
-            "core_middleware_added",
-            middleware=middleware_class.__name__,
-            priority=priority,
-            category="middleware",
-        )
 
     def add_plugin_middleware(
         self, plugin_name: str, specs: list[MiddlewareSpec]
@@ -115,19 +109,24 @@ class MiddlewareManager:
             app: FastAPI application
         """
         ordered = self.get_ordered_middleware()
+        applied_middleware = []
+        failed_middleware = []
 
         # Apply in reverse order (highest priority last so it runs first)
         for spec in reversed(ordered):
             try:
                 app.add_middleware(spec.middleware_class, **spec.kwargs)  # type: ignore[arg-type]
-                logger.info(
-                    "middleware_applied",
-                    middleware=spec.middleware_class.__name__,
-                    priority=spec.priority,
-                    source=spec.source,
-                    category="middleware",
-                )
+                applied_middleware.append({
+                    "name": spec.middleware_class.__name__,
+                    "priority": spec.priority,
+                    "source": spec.source
+                })
             except Exception as e:
+                failed_middleware.append({
+                    "name": spec.middleware_class.__name__,
+                    "source": spec.source,
+                    "error": str(e)
+                })
                 logger.error(
                     "middleware_application_failed",
                     middleware=spec.middleware_class.__name__,
@@ -136,6 +135,16 @@ class MiddlewareManager:
                     exc_info=e,
                     category="middleware",
                 )
+
+        # Log aggregated success
+        if applied_middleware:
+            logger.info(
+                "middleware_stack_configured",
+                applied=len(applied_middleware),
+                failed=len(failed_middleware),
+                middleware=[m["name"] for m in applied_middleware],
+                category="middleware",
+            )
 
     def get_middleware_summary(self) -> dict[str, Any]:
         """Get a summary of registered middleware.

@@ -8,9 +8,9 @@ from typing import Annotated
 from fastapi import APIRouter, FastAPI
 from fastapi_mcp import FastApiMCP  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
-from structlog import get_logger
 
 from ccproxy.api.dependencies import SettingsDep
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.models.responses import (
     PermissionToolAllowResponse,
     PermissionToolDenyResponse,
@@ -21,7 +21,7 @@ from .models import PermissionStatus
 from .service import get_permission_service
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class PermissionCheckRequest(BaseModel):

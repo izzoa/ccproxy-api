@@ -6,10 +6,10 @@ from typing import Any
 
 import aiofiles
 
-from ccproxy.core.logging import get_logger
+from ccproxy.core.logging import get_plugin_logger
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class RawHTTPLogger:

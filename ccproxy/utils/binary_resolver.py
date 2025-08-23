@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 import structlog
 
+from ccproxy.utils.caching import ttl_cache
+
 
 if TYPE_CHECKING:
     from ccproxy.config.settings import Settings
@@ -83,6 +85,7 @@ class BinaryResolver:
         ]
         self._available_managers: dict[str, bool] | None = None
 
+    @ttl_cache(maxsize=32, ttl=300.0)
     def find_binary(
         self,
         binary_name: str,
@@ -118,11 +121,21 @@ class BinaryResolver:
 
         # If package_manager_only mode, skip direct binary lookup
         if package_manager_only:
-            logger.debug("package_manager_only_mode", binary=binary_name)
             package_name = package_name or self.KNOWN_PACKAGES.get(
                 binary_name, binary_name
             )
-            return self._find_via_package_manager(binary_name, package_name)
+            result = self._find_via_package_manager(binary_name, package_name)
+            if result:
+                logger.debug(
+                    "binary_resolved",
+                    binary=binary_name,
+                    manager=result.package_manager,
+                    command=result.command,
+                    source="package_manager",
+                )
+            else:
+                logger.debug("binary_resolution_failed", binary=binary_name, source="package_manager")
+            return result
 
         # First, try direct binary lookup in PATH
         direct_path = shutil.which(binary_name)
@@ -193,12 +206,6 @@ class BinaryResolver:
 
             cmd = self._build_package_manager_command(manager_name, package_name)
             if cmd:
-                logger.debug(
-                    "binary_using_package_manager",
-                    binary=binary_name,
-                    manager=manager_name,
-                    command=cmd,
-                )
                 return BinaryCommand(
                     command=cmd,
                     is_direct=False,
@@ -275,6 +282,7 @@ class BinaryResolver:
             return self._available_managers
 
         self._available_managers = {}
+        manager_info = {}
 
         for manager_name, config in self.PACKAGE_MANAGERS.items():
             check_cmd = config["check_cmd"]
@@ -290,14 +298,18 @@ class BinaryResolver:
                 available = result.returncode == 0
                 self._available_managers[manager_name] = available
                 if available:
-                    logger.debug(
-                        "package_manager_available",
-                        manager=manager_name,
-                        version=result.stdout.strip() if result.stdout else "unknown",
-                    )
+                    version = result.stdout.strip() if result.stdout else "unknown"
+                    manager_info[manager_name] = version
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 self._available_managers[manager_name] = False
-                logger.debug("package_manager_not_available", manager=manager_name)
+
+        # Log all available managers in one consolidated message
+        if manager_info:
+            logger.debug(
+                "package_managers_detected",
+                managers=manager_info,
+                count=len(manager_info),
+            )
 
         return self._available_managers
 

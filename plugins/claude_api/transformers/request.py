@@ -3,10 +3,10 @@
 import json
 from typing import Any
 
-from ccproxy.core.logging import get_logger
+from ccproxy.core.logging import get_plugin_logger
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeAPIRequestTransformer:
@@ -47,7 +47,7 @@ class ClaudeAPIRequestTransformer:
             Transformed headers with Claude CLI headers injected
         """
         # Get logger with request context at the start of the function
-        logger = get_logger(__name__)
+        logger = get_plugin_logger()
 
         # Debug logging
         logger.debug(
@@ -140,7 +140,7 @@ class ClaudeAPIRequestTransformer:
             Transformed body with system prompt injected
         """
         # Get logger with request context at the start of the function
-        logger = get_logger(__name__)
+        logger = get_plugin_logger()
 
         logger.debug(
             "transform_body_called",

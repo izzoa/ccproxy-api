@@ -4,8 +4,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
 
-import structlog
-
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
 
@@ -14,7 +13,7 @@ from .config import SDKMessageMode
 from .converter import MessageConverter
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeStreamProcessor:

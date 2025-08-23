@@ -43,18 +43,19 @@ class CLIDetectionService:
     - Consistent logging and error handling
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, binary_resolver: BinaryResolver | None = None) -> None:
         """Initialize the CLI detection service.
 
         Args:
             settings: Application settings
+            binary_resolver: Optional binary resolver instance. If None, creates a new one.
         """
         self.settings = settings
         self.cache_dir = get_ccproxy_cache_dir()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create resolver from settings
-        self.resolver = BinaryResolver.from_settings(settings)
+        # Use injected resolver or create from settings for backward compatibility
+        self.resolver = binary_resolver or BinaryResolver.from_settings(settings)
 
         # Enhanced TTL cache for detection results (10 minute TTL)
         self._detection_cache = TTLCache(maxsize=64, ttl=600.0)
@@ -126,6 +127,8 @@ class CLIDetectionService:
                 version=version,
                 source=source,
                 package_manager=result.package_manager,
+                command=result.command,
+                cached=cached_result is not None,
             )
 
         elif fallback_data:
@@ -236,13 +239,6 @@ class CLIDetectionService:
 
             # Cache the version result (even if None)
             self._version_cache.set(cache_key, version)
-
-            logger.debug(
-                "cli_version_detected",
-                command=cli_command[0],
-                version=version,
-                cached=True,
-            )
 
             return version
 

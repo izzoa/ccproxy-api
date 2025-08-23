@@ -90,23 +90,13 @@ class HTTPClientFactory:
         default_headers = {}
         if settings and hasattr(settings, "http"):
             http_settings = settings.http
-            # Log the HTTP settings to verify they're being loaded
-            logger.info(
-                "http_settings_loaded",
-                compression_enabled=http_settings.compression_enabled,
-                accept_encoding=http_settings.accept_encoding,
-            )
             if not http_settings.compression_enabled:
                 # Disable compression by setting identity encoding
                 # "identity" means no compression
                 default_headers["accept-encoding"] = "identity"
-                logger.info("compression_disabled", accept_encoding="identity")
             elif http_settings.accept_encoding:
                 # Use custom Accept-Encoding value
                 default_headers["accept-encoding"] = http_settings.accept_encoding
-                logger.info(
-                    "compression_custom", accept_encoding=http_settings.accept_encoding
-                )
             # else: let httpx use its default compression handling
         else:
             logger.warning(
@@ -127,8 +117,8 @@ class HTTPClientFactory:
             **kwargs,
         }
 
-        logger.debug(
-            "creating_http_client",
+        logger.info(
+            "http_client_created",
             timeout_connect=timeout_connect,
             timeout_read=timeout_read,
             max_keepalive_connections=max_keepalive_connections,
@@ -274,11 +264,6 @@ def _get_ssl_context() -> str | bool:
         )
         return False
     else:
-        logger.debug(
-            "ssl_default_verification",
-            ssl_verify_value=ssl_verify,
-            operation="get_ssl_context",
-        )
         return True
 
 

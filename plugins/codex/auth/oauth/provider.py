@@ -7,13 +7,13 @@ from urllib.parse import urlencode
 
 from ccproxy.auth.models import OpenAICredentials
 from ccproxy.auth.oauth.registry import OAuthProviderInfo
-from ccproxy.core.logging import get_logger
+from ccproxy.core.logging import get_plugin_logger
 from plugins.codex.auth.oauth.client import CodexOAuthClient
 from plugins.codex.auth.oauth.config import CodexOAuthConfig
 from plugins.codex.auth.storage import CodexTokenStorage
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class CodexOAuthProvider:

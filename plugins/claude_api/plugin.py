@@ -2,8 +2,7 @@
 
 from typing import Any
 
-import structlog
-
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.plugins import (
     PluginContext,
     PluginManifest,
@@ -20,7 +19,7 @@ from plugins.claude_api.routes import router as claude_api_router
 from plugins.claude_api.tasks import ClaudeAPIDetectionRefreshTask
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeAPIRuntime(ProviderPluginRuntime):
@@ -36,7 +35,6 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
         # Debug: Log what we receive in context
         logger.debug(
             "claude_api_initializing",
-            plugin=self.name,
             context_keys=list(self.context.keys()) if self.context else [],
             has_config="config" in (self.context or {}),
             config_type=type(self.context.get("config")).__name__
@@ -53,14 +51,13 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
         config = self.context.get("config")
         if not isinstance(config, ClaudeAPISettings):
             logger.warning(
-                "claude_api_no_config",
-                plugin=self.name,
+                "plugin_no_config",
                 config_type=type(config).__name__ if config else None,
                 config_value=config,
             )
             # Use default config if none provided
             config = ClaudeAPISettings()
-            logger.info("claude_api_using_default_config", plugin=self.name)
+            logger.info("plugin_using_default_config")
         self.config = config
 
         # Initialize detection service to populate cached data
@@ -72,17 +69,20 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
                 cli_path = self.detection_service.get_cli_path()
 
                 if cli_path:
-                    logger.debug(
-                        "claude_cli_available",
-                        status="available",
+                    logger.info(
+                        "cli_detection_completed",
+                        cli_available=True,
                         version=version,
                         cli_path=cli_path,
+                        source="package_manager",
                     )
                 else:
                     logger.warning(
-                        "claude_cli_not_found",
-                        status="not_found",
-                        msg="Claude CLI not found in PATH or common locations",
+                        "cli_detection_completed",
+                        cli_available=False,
+                        version=None,
+                        cli_path=None,
+                        source="unknown",
                     )
             except Exception as e:
                 logger.error(
@@ -93,7 +93,6 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
 
         logger.info(
             "plugin_initialized",
-            plugin="claude_api",
             status="initialized",
             base_url=self.config.base_url,
             models_count=len(self.config.models) if self.config.models else 0,
@@ -257,7 +256,9 @@ class ClaudeAPIFactory(ProviderPluginFactory):
             from ccproxy.config.settings import Settings
 
             settings = Settings()
-        return ClaudeAPIDetectionService(settings)
+        
+        cli_service = context.get("cli_detection_service")
+        return ClaudeAPIDetectionService(settings, cli_service)
 
     def create_credentials_manager(self, context: PluginContext) -> Any:
         """Create the credentials manager for Claude API.

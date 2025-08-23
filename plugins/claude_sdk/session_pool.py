@@ -6,11 +6,11 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any
 
-import structlog
 from claude_code_sdk import ClaudeCodeOptions
 
 from ccproxy.core.async_task_manager import create_managed_task
 from ccproxy.core.errors import ClaudeProxyError, ServiceUnavailableError
+from ccproxy.core.logging import get_plugin_logger
 
 from .config import SessionPoolSettings
 from .session_client import SessionClient, SessionStatus
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     pass
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class SessionPool:

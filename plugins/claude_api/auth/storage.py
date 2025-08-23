@@ -5,10 +5,10 @@ from pathlib import Path
 
 from ccproxy.auth.models import ClaudeCredentials
 from ccproxy.auth.storage.base import TokenStorage
-from ccproxy.core.logging import get_logger
+from ccproxy.core.logging import get_plugin_logger
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeApiTokenStorage(TokenStorage[ClaudeCredentials]):

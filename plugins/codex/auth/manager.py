@@ -11,12 +11,12 @@ from ccproxy.auth.models import (
     UserProfile,
 )
 from ccproxy.auth.storage.generic import GenericJsonStorage
-from ccproxy.core.logging import get_logger
+from ccproxy.core.logging import get_plugin_logger
 
 from .models import OpenAIProfileInfo, OpenAITokenWrapper
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
@@ -100,7 +100,7 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
             logger.error(
                 "Token refresh failed",
                 error=str(e),
-                exc_info=e,
+                exc_info=False,
                 category="auth",
             )
             return None

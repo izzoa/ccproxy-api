@@ -2,8 +2,7 @@
 
 from typing import Any, Literal
 
-import structlog
-
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.plugins.protocol import HealthCheckResult
 
 from .auth.manager import ClaudeApiTokenManager
@@ -11,7 +10,7 @@ from .config import ClaudeAPISettings
 from .detection_service import ClaudeAPIDetectionService
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 async def claude_api_health_check(
@@ -156,7 +155,7 @@ async def claude_api_health_check(
         )
 
     except Exception as e:
-        logger.error("claude_api_health_check_failed", error=str(e))
+        logger.error("health_check_failed", error=str(e))
         return HealthCheckResult(
             status="fail",
             componentId="plugin-claude-api",

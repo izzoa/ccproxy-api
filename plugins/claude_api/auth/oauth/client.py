@@ -9,11 +9,11 @@ from ccproxy.auth.exceptions import OAuthError
 from ccproxy.auth.models import ClaudeCredentials, OAuthToken
 from ccproxy.auth.oauth.base import BaseOAuthClient
 from ccproxy.auth.storage.base import TokenStorage
-from ccproxy.core.logging import get_logger
+from ccproxy.core.logging import get_plugin_logger
 from plugins.claude_api.auth.oauth.config import ClaudeOAuthConfig
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeOAuthClient(BaseOAuthClient[ClaudeCredentials]):

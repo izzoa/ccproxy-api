@@ -2,8 +2,7 @@
 
 from typing import Any
 
-import structlog
-
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.plugins import (
     PluginContext,
     PluginManifest,
@@ -19,7 +18,7 @@ from plugins.claude_sdk.routes import router
 from plugins.claude_sdk.tasks import ClaudeSDKDetectionRefreshTask
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeSDKRuntime(ProviderPluginRuntime):
@@ -40,16 +39,18 @@ class ClaudeSDKRuntime(ProviderPluginRuntime):
 
         # Get configuration
         config = self.context.get("config")
-        if not config:
-            logger.warning("claude_sdk_no_config", plugin=self.name)
-            return
+        if not isinstance(config, ClaudeSDKSettings):
+            logger.warning("plugin_no_config")
+            # Use default config if none provided
+            config = ClaudeSDKSettings()
+            logger.info("plugin_using_default_config")
 
         # Initialize adapter with session manager if enabled
         if self.adapter and hasattr(self.adapter, "session_manager"):
             self.session_manager = self.adapter.session_manager
             if self.session_manager:
                 await self.session_manager.start()
-                logger.info("claude_sdk_session_manager_started")
+                logger.info("session_manager_started")
 
         # Initialize detection service if present
         if self.detection_service and hasattr(
@@ -63,10 +64,11 @@ class ClaudeSDKRuntime(ProviderPluginRuntime):
 
             if cli_path:
                 logger.info(
-                    "claude_cli_available",
-                    status="available",
+                    "cli_detection_completed",
+                    cli_available=True,
                     version=version,
                     cli_path=cli_path,
+                    source="package_manager",
                 )
             else:
                 error_msg = "Claude CLI not found in PATH or common locations - SDK plugin requires installed CLI"
@@ -79,7 +81,6 @@ class ClaudeSDKRuntime(ProviderPluginRuntime):
 
         logger.info(
             "plugin_initialized",
-            plugin="claude_sdk",
             status="initialized",
             cli_available=self.detection_service.is_claude_available()
             if self.detection_service
@@ -95,7 +96,7 @@ class ClaudeSDKRuntime(ProviderPluginRuntime):
         # Shutdown session manager first
         if self.session_manager:
             await self.session_manager.shutdown()
-            logger.debug("claude_sdk_session_manager_shutdown")
+            logger.debug("session_manager_shutdown")
 
         # Call parent shutdown which handles adapter cleanup
         await super()._on_shutdown()
@@ -197,7 +198,8 @@ class ClaudeSDKFactory(ProviderPluginFactory):
         if not settings:
             raise RuntimeError("No settings provided for Claude SDK detection service")
 
-        return ClaudeSDKDetectionService(settings)
+        cli_service = context.get("cli_detection_service")
+        return ClaudeSDKDetectionService(settings, cli_service)
 
     def create_credentials_manager(self, context: PluginContext) -> None:
         """Create the credentials manager for Claude SDK.

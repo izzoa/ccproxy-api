@@ -5,12 +5,11 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from structlog import get_logger
-
 from ccproxy.core.async_task_manager import create_managed_task
 from ccproxy.core.errors import (
     PermissionNotFoundError,
 )
+from ccproxy.core.logging import get_plugin_logger
 
 from .models import (
     EventType,
@@ -20,7 +19,7 @@ from .models import (
 )
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class PermissionService:

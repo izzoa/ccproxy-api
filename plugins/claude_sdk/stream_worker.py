@@ -8,9 +8,8 @@ from collections.abc import AsyncIterator
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-import structlog
-
 from ccproxy.core.async_task_manager import create_managed_task
+from ccproxy.core.logging import get_plugin_logger
 
 from . import models as sdk_models
 from .exceptions import StreamTimeoutError
@@ -21,7 +20,7 @@ if TYPE_CHECKING:
     from .session_client import SessionClient
     from .stream_handle import StreamHandle
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class WorkerStatus(str, Enum):

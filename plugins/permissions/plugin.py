@@ -2,8 +2,7 @@
 
 from typing import Any
 
-import structlog
-
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.plugins import (
     PluginContext,
     PluginManifest,
@@ -17,7 +16,7 @@ from plugins.permissions.routes import router
 from plugins.permissions.service import get_permission_service
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class PermissionsRuntime(SystemPluginRuntime):
@@ -37,7 +36,7 @@ class PermissionsRuntime(SystemPluginRuntime):
         # Get configuration
         config = self.context.get("config")
         if not isinstance(config, PermissionsConfig):
-            logger.warning("permissions_plugin_no_config", plugin=self.name)
+            logger.warning("plugin_no_config")
             # Use default config if none provided
             self.config = PermissionsConfig()
         else:

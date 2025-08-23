@@ -5,7 +5,6 @@ import contextlib
 import time
 from dataclasses import dataclass
 
-from structlog import get_logger
 from textual.app import App, ComposeResult
 from textual.containers import Container, Vertical
 from textual.events import Key
@@ -18,11 +17,12 @@ from ccproxy.core.async_task_manager import (
     create_fire_and_forget_task,
     create_managed_task,
 )
+from ccproxy.core.logging import get_plugin_logger
 
 from ..models import PermissionRequest
 
 
-logger = get_logger(__name__)
+logger = get_plugin_logger()
 
 
 @dataclass

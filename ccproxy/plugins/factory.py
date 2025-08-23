@@ -97,6 +97,10 @@ class BasePluginFactory(PluginFactory):
             "proxy_service": core_services.proxy_service,
         }
 
+        # Add CLI detection service if available
+        if hasattr(core_services, "cli_detection_service"):
+            context["cli_detection_service"] = core_services.cli_detection_service
+
         # Add scheduler if available
         if hasattr(core_services, "scheduler"):
             context["scheduler"] = core_services.scheduler
@@ -229,7 +233,7 @@ class PluginRegistry:
             raise ValueError(f"Plugin {manifest.name} already registered")
 
         self.factories[manifest.name] = factory
-        logger.info(
+        logger.debug(
             "plugin_factory_registered",
             plugin=manifest.name,
             version=manifest.version,

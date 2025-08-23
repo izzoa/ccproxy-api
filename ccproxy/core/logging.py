@@ -65,7 +65,7 @@ def category_filter(
     )
 
     category = event_dict.get("category")
-    
+
     # For foreign (stdlib) logs without category, check if logger name suggests a category
     if category is None:
         logger_name = event_dict.get("logger", "")
@@ -76,7 +76,7 @@ def category_filter(
             category = "http"
         else:
             category = "general"  # Default fallback
-        
+
         # Add the category to the event dict for consistent handling
         event_dict["category"] = category
 
@@ -84,20 +84,22 @@ def category_filter(
     # and ALWAYS allow errors and warnings through regardless of category filtering
     log_level = event_dict.get("level", "").lower()
     is_critical_message = log_level in ("error", "warning", "critical")
-    
+
     if included and category not in included:
         # Always allow critical messages through regardless of category filtering
         if is_critical_message:
             return event_dict
-            
+
         # If it's a foreign log with "general" fallback, and "general" is not in included channels,
         # still allow it through to prevent breaking stdlib logging
         logger_name = event_dict.get("logger", "")
-        is_foreign_log = not logger_name.startswith("ccproxy") and not logger_name.startswith("plugins")
-        
+        is_foreign_log = not logger_name.startswith(
+            "ccproxy"
+        ) and not logger_name.startswith("plugins")
+
         if not (is_foreign_log and category == "general"):
             raise structlog.DropEvent
-            
+
     if excluded and category in excluded:
         # Always allow critical messages through even if their category is explicitly excluded
         if is_critical_message:
@@ -125,63 +127,90 @@ def format_category_for_console(
 
 class CategoryConsoleRenderer:
     """Custom console renderer that formats categories as a separate padded column."""
-    
+
     def __init__(self, base_renderer: Any):
         self.base_renderer = base_renderer
-        
-    def __call__(self, logger: Any, method_name: str, event_dict: MutableMapping[str, Any]) -> str:
-        # Extract category and remove it from the event dict to prevent duplicate display
+
+    def __call__(
+        self, logger: Any, method_name: str, event_dict: MutableMapping[str, Any]
+    ) -> str:
+        # Extract category and plugin_name, remove from event dict to prevent duplicate display
         category = event_dict.pop("category", "general")
-        
-        # Get the rendered output from base renderer (without category in key-value pairs)
+        plugin_name = event_dict.pop("plugin_name", None)
+
+        # Get the rendered output from base renderer (without category/plugin_name in key-value pairs)
         rendered = self.base_renderer(logger, method_name, event_dict)
-        # Debug: print the raw rendered output to see the structure
-        # print(f"DEBUG RENDERED: {repr(rendered)}")
-        
+
         # Color mapping for different categories
         category_colors = {
-            "lifecycle": "\033[92m",    # bright green
-            "plugin": "\033[94m",       # bright blue
-            "http": "\033[95m",         # bright magenta
-            "streaming": "\033[96m",    # bright cyan
-            "auth": "\033[93m",         # bright yellow
-            "transform": "\033[91m",    # bright red
-            "cache": "\033[97m",        # bright white
-            "middleware": "\033[35m",   # magenta
-            "config": "\033[34m",       # blue
-            "metrics": "\033[32m",      # green
-            "access": "\033[33m",       # yellow
-            "request": "\033[36m",      # cyan
-            "general": "\033[37m",      # white
+            "lifecycle": "\033[92m",  # bright green
+            "plugin": "\033[94m",  # bright blue
+            "http": "\033[95m",  # bright magenta
+            "streaming": "\033[96m",  # bright cyan
+            "auth": "\033[93m",  # bright yellow
+            "transform": "\033[91m",  # bright red
+            "cache": "\033[97m",  # bright white
+            "middleware": "\033[35m",  # magenta
+            "config": "\033[34m",  # blue
+            "metrics": "\033[32m",  # green
+            "access": "\033[33m",  # yellow
+            "request": "\033[36m",  # cyan
+            "general": "\033[37m",  # white
         }
-        
-        # Get color for category (default to white)
-        color = category_colors.get(category.lower(), "\033[37m")
-        
-        # Create padded category field with brackets and font highlighting only
-        category_field = f"{color}\033[1m[{category.lower():<10}]\033[0m"
-        
-        # Insert category field after the level field in the rendered output
-        # Look for the pattern: [timestamp] [[level]] and insert category after it
+
+        # Plugin name colors (distinct from categories)
+        plugin_colors = {
+            "claude_api": "\033[38;5;33m",  # blue
+            "claude_sdk": "\033[38;5;39m",  # bright blue
+            "codex": "\033[38;5;214m",  # orange
+            "permissions": "\033[38;5;165m",  # purple
+            "raw_http_logger": "\033[38;5;150m",  # light green
+        }
+
+        # Get colors
+        category_color = category_colors.get(category.lower(), "\033[37m")
+        plugin_color = (
+            plugin_colors.get(plugin_name, "\033[38;5;242m") if plugin_name else None
+        )
+
+        # Build the display fields
+        # Truncate long category names to fit the field width
+        truncated_category = (
+            category.lower()[:10] if len(category) > 10 else category.lower()
+        )
+        category_field = f"{category_color}\033[1m[{truncated_category:<10}]\033[0m"
+
+        # Always show a plugin field - either plugin name or "core"
+        if plugin_name:
+            # Truncate long plugin names to fit the field width
+            truncated_name = plugin_name[:12] if len(plugin_name) > 12 else plugin_name
+            plugin_field = f"{plugin_color}\033[1m[{truncated_name:<12}]\033[0m "
+        else:
+            # Show "core" for non-plugin logs with a distinct color
+            core_color = "\033[38;5;8m"  # dark gray
+            plugin_field = f"{core_color}\033[1m[{'core':<12}]\033[0m "
+
+        # Insert fields after the level field in the rendered output
         import re
-        
+
         # Find the position right after the level field closes with "] "
-        # The actual pattern is: \x1b[2m18:50:17.686\x1b[0m [\x1b[32m\x1b[1minfo     \x1b[0m] \x1b[1m
-        level_end_pattern = r'(\[[^\]]*\[[^\]]*m[^\]]*\[[^\]]*m\])\s+'
+        level_end_pattern = r"(\[[^\]]*\[[^\]]*m[^\]]*\[[^\]]*m\])\s+"
         match = re.search(level_end_pattern, rendered)
-        
+
         if match:
-            # Insert category right after the level field and its trailing space
+            # Insert plugin_field and category_field after the level field
             insert_pos = match.end()
             rendered = (
-                rendered[:insert_pos] + 
-                category_field + " " +
-                rendered[insert_pos:]
+                rendered[:insert_pos]
+                + plugin_field
+                + category_field
+                + " "
+                + rendered[insert_pos:]
             )
         else:
-            # Fallback: prepend category to the beginning
-            rendered = category_field + " " + rendered
-            
+            # Fallback: prepend fields to the beginning
+            rendered = plugin_field + category_field + " " + rendered
+
         return rendered
 
 
@@ -362,16 +391,20 @@ def setup_logging(
         colors=True,
         pad_event=30,
     )
-    
+
     console_renderer = (
         structlog.processors.JSONRenderer()
         if json_logs
         else CategoryConsoleRenderer(base_console_renderer)
     )
 
-    # Console gets human-readable timestamps for both structlog and stdlib logs  
+    # Console gets human-readable timestamps for both structlog and stdlib logs
     # Note: format_category_for_console must come after category_filter
-    console_processors = shared_processors + [console_timestamper, format_timestamp_ms, format_category_for_console]
+    console_processors = shared_processors + [
+        console_timestamper,
+        format_timestamp_ms,
+        format_category_for_console,
+    ]
     console_handler.setFormatter(
         structlog.stdlib.ProcessorFormatter(
             foreign_pre_chain=console_processors,  # type: ignore[arg-type]
@@ -490,5 +523,41 @@ def get_logger(name: str | None = None) -> BoundLogger:
         # If anything fails, just return the regular logger
         # This ensures backward compatibility
         pass
+
+    return logger  # type: ignore[no-any-return]
+
+
+def get_plugin_logger(name: str | None = None) -> BoundLogger:
+    """Get a plugin-aware logger with plugin_name automatically bound.
+
+    This function auto-detects the plugin name from the caller's module path
+    and binds it to the logger. Preserves all existing functionality including
+    request_id binding and trace method.
+
+    Args:
+        name: Logger name (auto-detected from caller if None)
+
+    Returns:
+        BoundLogger with plugin_name and request_id bound if available
+    """
+    if name is None:
+        # Auto-detect caller's module name
+        import inspect
+
+        frame = inspect.currentframe().f_back
+        if frame:
+            name = frame.f_globals.get("__name__", "unknown")
+        else:
+            name = "unknown"
+
+    # Use existing get_logger (preserves request_id binding & trace method)
+    logger = get_logger(name)
+
+    # Extract and bind plugin name for plugin modules
+    if name and name.startswith("plugins."):
+        parts = name.split(".", 2)
+        if len(parts) > 1:
+            plugin_name = parts[1]  # e.g., "claude_api", "codex"
+            logger = logger.bind(plugin_name=plugin_name)
 
     return logger  # type: ignore[no-any-return]

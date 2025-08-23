@@ -5,7 +5,6 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
-import structlog
 from fastapi import HTTPException, Request
 from starlette.responses import Response, StreamingResponse
 
@@ -16,6 +15,7 @@ from ccproxy.config.constants import (
     OPENAI_CHAT_COMPLETIONS_PATH,
     OPENAI_COMPLETIONS_PATH,
 )
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.http.plugin_handler import PluginHTTPHandler
@@ -29,7 +29,7 @@ from .format_adapter import CodexFormatAdapter
 from .transformers import CodexRequestTransformer, CodexResponseTransformer
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class CodexAdapter(BaseAdapter):
@@ -45,7 +45,7 @@ class CodexAdapter(BaseAdapter):
         auth_manager: AuthManager,
         detection_service: Any,
         http_client: Any | None = None,
-        logger: structlog.BoundLogger | None = None,
+        logger=None,
     ):
         """Initialize the Codex adapter.
 
@@ -56,7 +56,7 @@ class CodexAdapter(BaseAdapter):
             http_client: Not used directly (for interface compatibility)
             logger: Structured logger instance
         """
-        self.logger = logger or structlog.get_logger(__name__)
+        self.logger = logger or get_plugin_logger()
         self.proxy_service = proxy_service
         self._auth_manager = auth_manager
         self._detection_service = detection_service
@@ -280,7 +280,7 @@ class CodexAdapter(BaseAdapter):
             self.request_transformer = None
             self.response_transformer = None
 
-            self.logger.debug("codex_adapter_cleanup_completed")
+            self.logger.debug("adapter_cleanup_completed")
 
         except Exception as e:
             self.logger.error(

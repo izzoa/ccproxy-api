@@ -315,9 +315,4 @@ def get_ssl_context() -> str | bool:
         )
         return False
     else:
-        logger.debug(
-            "ssl_default_verification",
-            ssl_verify_value=ssl_verify,
-            operation="get_ssl_context",
-        )
         return True

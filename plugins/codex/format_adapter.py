@@ -3,13 +3,12 @@
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any
 
-import structlog
-
 from ccproxy.adapters.base import APIAdapter
 from ccproxy.adapters.openai.response_adapter import ResponseAdapter
+from ccproxy.core.logging import get_plugin_logger
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class CodexFormatAdapter(APIAdapter):
@@ -54,7 +53,7 @@ class CodexFormatAdapter(APIAdapter):
             return codex_request
 
         # Native Response API format - passthrough
-        logger.info("codex_request_passthrough", request_keys=list(request_data.keys()))
+        logger.info("request_passthrough", request_keys=list(request_data.keys()))
         return request_data
 
     async def adapt_response(self, response_data: dict[str, Any]) -> dict[str, Any]:

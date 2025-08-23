@@ -6,10 +6,10 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 
 import httpx
-import structlog
 from fastapi import HTTPException, Request
 from starlette.responses import Response, StreamingResponse
 
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.services.adapters.base import BaseAdapter
 
 from .auth import NoOpAuthManager
@@ -21,7 +21,7 @@ from .transformers.request import ClaudeSDKRequestTransformer
 from .transformers.response import ClaudeSDKResponseTransformer
 
 
-logger = structlog.get_logger(__name__)
+logger = get_plugin_logger()
 
 
 class ClaudeSDKAdapter(BaseAdapter):
@@ -37,7 +37,7 @@ class ClaudeSDKAdapter(BaseAdapter):
         """Initialize the Claude SDK adapter."""
         import uuid
 
-        self.logger = structlog.get_logger(__name__)
+        self.logger = get_plugin_logger()
         self.config = config
         self.proxy_service = proxy_service
 
@@ -94,7 +94,7 @@ class ClaudeSDKAdapter(BaseAdapter):
         if not self._initialized:
             if self.session_manager:
                 await self.session_manager.start()
-                self.logger.info("claude_sdk_adapter_session_manager_started")
+                self.logger.info("session_manager_started")
             self._initialized = True
 
     def set_detection_service(self, detection_service: Any) -> None:
@@ -190,12 +190,10 @@ class ClaudeSDKAdapter(BaseAdapter):
             import time
             import uuid
 
-            import structlog
-
             from ccproxy.observability.context import RequestContext
 
             request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-            request_logger = structlog.get_logger().bind(
+            request_logger = get_plugin_logger().bind(
                 request_id=request_id,
                 provider="claude_sdk",
                 endpoint=endpoint,
@@ -216,7 +214,9 @@ class ClaudeSDKAdapter(BaseAdapter):
             "plugin_request",
             plugin="claude_sdk",
             endpoint=endpoint,
-            target_url=f"claude-sdk://{session_id}" if session_id else "claude-sdk://direct",
+            target_url=f"claude-sdk://{session_id}"
+            if session_id
+            else "claude-sdk://direct",
             model=model,
             is_streaming=stream,
             needs_conversion=needs_conversion,
@@ -487,7 +487,7 @@ class ClaudeSDKAdapter(BaseAdapter):
             # Mark as not initialized
             self._initialized = False
 
-            self.logger.debug("claude_sdk_adapter_cleanup_completed")
+            self.logger.debug("adapter_cleanup_completed")
 
         except Exception as e:
             self.logger.error(
