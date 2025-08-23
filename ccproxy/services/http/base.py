@@ -6,6 +6,7 @@ from typing import Any, Protocol, runtime_checkable
 from starlette.responses import Response, StreamingResponse
 
 from ccproxy.services.handler_config import HandlerConfig
+from ccproxy.streaming.deferred_streaming import DeferredStreaming
 
 
 @runtime_checkable
@@ -22,7 +23,7 @@ class HTTPRequestHandler(Protocol):
         is_streaming: bool = False,
         streaming_handler: Any | None = None,
         request_context: dict[str, Any] | None = None,
-    ) -> Response | StreamingResponse:
+    ) -> Response | StreamingResponse | DeferredStreaming:
         """Handle an HTTP request."""
         ...
 
@@ -50,7 +51,7 @@ class BaseHTTPHandler(ABC):
         body: bytes,
         handler_config: HandlerConfig,
         **kwargs: Any,
-    ) -> Response | StreamingResponse:
+    ) -> Response | StreamingResponse | DeferredStreaming:
         """Handle an HTTP request.
 
         Args:

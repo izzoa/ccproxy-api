@@ -1,4 +1,4 @@
-"""FastAPI application factory for CCProxy API Server with v2 plugin system."""
+"""FastAPI application factory for CCProxy API Server with plugin system."""
 
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -28,7 +28,7 @@ from ccproxy.core.logging import setup_logging
 from ccproxy.hooks import HookManager, HookRegistry
 from ccproxy.hooks.events import HookEvent
 
-# V2 Plugin System imports
+# Plugin System imports
 from ccproxy.plugins import (
     MiddlewareManager,
     PluginRegistry,
@@ -106,8 +106,8 @@ async def setup_proxy_service_shutdown(app: FastAPI) -> None:
                 )
 
 
-async def initialize_plugins_v2_startup(app: FastAPI, settings: Settings) -> None:
-    """Initialize v2 plugins during startup (runtime phase)."""
+async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
+    """Initialize plugins during startup (runtime phase)."""
     if not settings.enable_plugins:
         logger.info("plugin_system_disabled")
         return
@@ -158,22 +158,22 @@ async def initialize_plugins_v2_startup(app: FastAPI, settings: Settings) -> Non
     await plugin_registry.initialize_all(core_services)
 
     logger.info(
-        "plugins_v2_initialization_completed",
+        "plugins_initialization_completed",
         total_plugins=len(plugin_registry.list_plugins()),
         provider_plugins=len(plugin_registry.list_provider_plugins()),
     )
 
 
-async def shutdown_plugins_v2(app: FastAPI) -> None:
-    """Shutdown v2 plugins."""
+async def shutdown_plugins(app: FastAPI) -> None:
+    """Shutdown plugins."""
     if hasattr(app.state, "plugin_registry"):
         plugin_registry: PluginRegistry = app.state.plugin_registry
         await plugin_registry.shutdown_all()
-        logger.debug("plugins_v2_shutdown_completed")
+        logger.debug("plugins_shutdown_completed")
 
 
-async def initialize_hooks_v2_startup(app: FastAPI, settings: Settings) -> None:
-    """Initialize hook system with v2 plugins."""
+async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
+    """Initialize hook system with plugins."""
     if not settings.hooks.enabled:
         logger.info("hook_system_disabled")
         return
@@ -265,13 +265,13 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "shutdown": setup_proxy_service_shutdown,
     },
     {
-        "name": "Plugin System V2",
-        "startup": initialize_plugins_v2_startup,
-        "shutdown": shutdown_plugins_v2,
+        "name": "Plugin System",
+        "startup": initialize_plugins_startup,
+        "shutdown": shutdown_plugins,
     },
     {
-        "name": "Hook System V2",
-        "startup": initialize_hooks_v2_startup,
+        "name": "Hook System",
+        "startup": initialize_hooks_startup,
         "shutdown": None,  # Hook system cleaned up automatically
     },
 ]
@@ -386,7 +386,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    """Create and configure the FastAPI application with v2 plugin system.
+    """Create and configure the FastAPI application with plugin system.
 
     Args:
         settings: Optional settings override. If None, uses get_settings().
@@ -416,7 +416,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    logger.warn("v2")
     # PHASE 1: Plugin Discovery and Registration (before app starts)
     plugin_registry = PluginRegistry()
     middleware_manager = MiddlewareManager()

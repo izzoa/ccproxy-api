@@ -6,6 +6,8 @@ from typing import Any
 from fastapi import Request
 from starlette.responses import Response, StreamingResponse
 
+from ccproxy.streaming.deferred_streaming import DeferredStreaming
+
 
 class BaseAdapter(ABC):
     """Base adapter for provider-specific request handling."""
@@ -13,7 +15,7 @@ class BaseAdapter(ABC):
     @abstractmethod
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
-    ) -> Response | StreamingResponse:
+    ) -> Response | StreamingResponse | DeferredStreaming:
         """Handle a provider-specific request.
 
         Args:
@@ -23,14 +25,14 @@ class BaseAdapter(ABC):
             **kwargs: Additional provider-specific arguments
 
         Returns:
-            Response or StreamingResponse object
+            Response, StreamingResponse, or DeferredStreaming object
         """
         ...
 
     @abstractmethod
     async def handle_streaming(
         self, request: Request, endpoint: str, **kwargs: Any
-    ) -> StreamingResponse:
+    ) -> StreamingResponse | DeferredStreaming:
         """Handle a streaming request.
 
         Args:
@@ -39,7 +41,7 @@ class BaseAdapter(ABC):
             **kwargs: Additional provider-specific arguments
 
         Returns:
-            StreamingResponse object
+            StreamingResponse or DeferredStreaming object
         """
         ...
 

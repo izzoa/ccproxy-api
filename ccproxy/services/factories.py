@@ -87,14 +87,14 @@ class ConcreteServiceFactory:
             request_tracer: Optional request tracer
 
         Returns:
-            Configured streaming handler instance
+            Configured streaming handler instance with header preservation
         """
         handler = StreamingHandler(
             metrics=metrics,
             verbose_streaming=settings.server.verbose_api,
             request_tracer=request_tracer,
         )
-        logger.debug("Created StreamingHandler")
+        logger.info("Created StreamingHandler with header preservation")
         return handler
 
     def create_proxy_config(self) -> ProxyConfiguration:

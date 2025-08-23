@@ -1,25 +1,23 @@
 """Streaming request handler for SSE and chunked responses."""
 
 import json
-from collections.abc import AsyncGenerator, AsyncIterator, MutableMapping
 from typing import Any
 
 import httpx
 import structlog
-from fastapi.responses import StreamingResponse
 
-from ccproxy.adapters.base import APIAdapter
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.tracing import CoreRequestTracer
+from ccproxy.streaming.deferred_streaming import DeferredStreaming
 
 
 logger = structlog.get_logger(__name__)
 
 
 class StreamingHandler:
-    """Manages streaming request processing and SSE adaptation."""
+    """Manages streaming request processing with header preservation and SSE adaptation."""
 
     def __init__(
         self,
@@ -75,391 +73,38 @@ class StreamingHandler:
         request_context: RequestContext,
         client_config: dict[str, Any] | None = None,
         client: httpx.AsyncClient | None = None,
-    ) -> StreamingResponse:
-        """Execute streaming HTTP request with SSE processing.
+    ) -> DeferredStreaming:
+        """Create a deferred streaming response that preserves headers.
 
-        - Creates async client with proper timeout
-        - Processes SSE events with adapter if provided
-        - Returns StreamingResponseWithLogging wrapper
+        This always returns a DeferredStreaming response which:
+        - Defers the actual HTTP request until FastAPI sends the response
+        - Captures all upstream headers correctly
+        - Supports SSE processing through handler_config
+        - Provides request tracing and metrics
         """
+        # Use provided client or create one
+        if client is None:
+            client = httpx.AsyncClient(**(client_config or {}))
 
-        # Store response headers to pass to client
-        response_headers: dict[str, str] = {}
-
-        async def stream_generator() -> AsyncGenerator[bytes, None]:
-            """Generate streaming response chunks."""
-            nonlocal response_headers
-            total_chunks = 0
-            total_bytes = 0
-            request_id = request_context.request_id if request_context else None
-
-            # Trace stream start
-            if self.request_tracer and request_id:
-                await self.request_tracer.trace_stream_start(
-                    request_id=request_id, headers=headers
-                )
-
-            try:
-                # Create or use provided HTTP client with appropriate config
-                config = client_config or {}
-                if client is None:
-                    # Prepare extensions for request ID tracking
-                    extensions = {}
-                    if request_context and hasattr(request_context, "request_id"):
-                        extensions["request_id"] = request_context.request_id
-                    else:
-                        logger.warning(
-                            "streaming_request_missing_request_id",
-                            url=url,
-                            method=method,
-                            message="Skipping raw HTTP logging for this streaming request",
-                        )
-
-                    async with (
-                        httpx.AsyncClient(**config) as local_client,
-                        local_client.stream(
-                            method=method,
-                            url=url,
-                            headers=headers,
-                            content=body,
-                            timeout=httpx.Timeout(300.0),
-                            extensions=extensions,
-                        ) as response,
-                    ):
-                        # Capture response headers to pass to client and context
-                        response_headers = dict(response.headers)
-
-                        # Pass all response headers to the request context
-                        if request_context and hasattr(request_context, "metadata"):
-                            request_context.metadata["response_headers"] = (
-                                response_headers
-                            )
-
-                        # Check for error status
-                        if response.status_code >= 400:
-                            error_body = await response.aread()
-                            yield error_body
-                            return
-
-                        # Stream the response
-                        if handler_config.response_adapter:
-                            async for chunk in self._process_sse_events(
-                                response, handler_config.response_adapter
-                            ):
-                                total_chunks += 1
-                                total_bytes += len(chunk)
-                                # Trace each chunk if tracer is available
-                                if self.request_tracer and request_id:
-                                    await self.request_tracer.trace_stream_chunk(
-                                        request_id=request_id,
-                                        chunk=chunk,
-                                        chunk_number=total_chunks,
-                                    )
-                                yield chunk
-                        else:
-                            async for chunk in response.aiter_bytes():
-                                total_chunks += 1
-                                total_bytes += len(chunk)
-                                # Trace each chunk if tracer is available
-                                if self.request_tracer and request_id:
-                                    await self.request_tracer.trace_stream_chunk(
-                                        request_id=request_id,
-                                        chunk=chunk,
-                                        chunk_number=total_chunks,
-                                    )
-                                yield chunk
-                else:
-                    # Prepare extensions for request ID tracking
-                    extensions = {}
-                    if request_context and hasattr(request_context, "request_id"):
-                        extensions["request_id"] = request_context.request_id
-                    else:
-                        logger.warning(
-                            "streaming_request_missing_request_id",
-                            url=url,
-                            method=method,
-                            message="Skipping raw HTTP logging for this streaming request",
-                        )
-
-                    async with client.stream(
-                        method=method,
-                        url=url,
-                        headers=headers,
-                        content=body,
-                        timeout=httpx.Timeout(300.0),
-                        extensions=extensions,
-                    ) as response:
-                        # Capture response headers to pass to client and context
-                        response_headers = dict(response.headers)
-
-                        # Pass all response headers to the request context
-                        if request_context and hasattr(request_context, "metadata"):
-                            request_context.metadata["response_headers"] = (
-                                response_headers
-                            )
-
-                        # Check for error status
-                        if response.status_code >= 400:
-                            error_body = await response.aread()
-                            yield error_body
-                            return
-
-                        # Stream the response
-                        if handler_config.response_adapter:
-                            async for chunk in self._process_sse_events(
-                                response, handler_config.response_adapter
-                            ):
-                                total_chunks += 1
-                                total_bytes += len(chunk)
-                                # Trace each chunk if tracer is available
-                                if self.request_tracer and request_id:
-                                    await self.request_tracer.trace_stream_chunk(
-                                        request_id=request_id,
-                                        chunk=chunk,
-                                        chunk_number=total_chunks,
-                                    )
-                                yield chunk
-                        else:
-                            async for chunk in response.aiter_bytes():
-                                total_chunks += 1
-                                total_bytes += len(chunk)
-                                # Trace each chunk if tracer is available
-                                if self.request_tracer and request_id:
-                                    await self.request_tracer.trace_stream_chunk(
-                                        request_id=request_id,
-                                        chunk=chunk,
-                                        chunk_number=total_chunks,
-                                    )
-                                yield chunk
-
-                # Update metrics if available
-                if request_context and hasattr(request_context, "metrics"):
-                    request_context.metrics["stream_chunks"] = total_chunks
-                    request_context.metrics["stream_bytes"] = total_bytes
-
-                # Trace stream completion
-                if self.request_tracer and request_id:
-                    await self.request_tracer.trace_stream_complete(
-                        request_id=request_id,
-                        total_chunks=total_chunks,
-                        total_bytes=total_bytes,
-                    )
-
-            except httpx.TimeoutException as e:
-                logger.error(
-                    "streaming_request_timeout", url=url, error=str(e), exc_info=e
-                )
-                error_msg = json.dumps({"error": "Request timeout"}).encode()
-                yield error_msg
-            except httpx.ConnectError as e:
-                logger.error(
-                    "streaming_connect_error", url=url, error=str(e), exc_info=e
-                )
-                error_msg = json.dumps({"error": "Connection failed"}).encode()
-                yield error_msg
-            except httpx.HTTPError as e:
-                logger.error("streaming_http_error", url=url, error=str(e), exc_info=e)
-                error_msg = json.dumps({"error": f"HTTP error: {str(e)}"}).encode()
-                yield error_msg
-            except Exception as e:
-                logger.error(
-                    "streaming_request_unexpected_error",
-                    url=url,
-                    error=str(e),
-                    exc_info=e,
-                )
-                error_msg = json.dumps({"error": str(e)}).encode()
-                yield error_msg
-
-        # Merge response headers with necessary streaming headers
-        final_headers = {
-            **response_headers,  # Include all headers from upstream response
-            "Cache-Control": "no-cache",
-            "X-Request-ID": request_context.request_id if request_context else "",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-            "Content-Type": "text/event-stream",  # Ensure correct content type
-        }
-
-        # Return streaming response with all headers
-        return StreamingResponseWithLogging(
-            stream_generator(),
-            media_type="text/event-stream",
-            headers=final_headers,
-            request_context=request_context,
-            metrics=self.metrics,
+        # Log that we're creating a deferred response
+        logger.debug(
+            "streaming_handler_creating_deferred_response",
+            url=url,
+            method=method,
+            has_sse_adapter=bool(handler_config.response_adapter),
         )
 
-    async def _parse_sse_to_json_stream(
-        self, raw_stream: AsyncIterator[bytes]
-    ) -> AsyncIterator[dict[str, Any]]:
-        """Parse raw SSE bytes stream into JSON chunks.
-
-        Yields JSON objects extracted from SSE events without buffering
-        the entire response.
-        """
-        buffer = b""
-
-        async for chunk_bytes in raw_stream:
-            buffer += chunk_bytes
-
-            # Process complete SSE events in buffer
-            while b"\n\n" in buffer:
-                # Split at the first complete event
-                event_bytes, buffer = buffer.split(b"\n\n", 1)
-
-                try:
-                    # Decode the complete event
-                    event_str = event_bytes.decode("utf-8")
-
-                    # Skip empty events
-                    if not event_str.strip():
-                        continue
-
-                    # Check if this is a data event
-                    if "data: " in event_str:
-                        # Extract data from the event
-                        for line in event_str.split("\n"):
-                            if line.startswith("data: "):
-                                data_str = line[6:].strip()
-                                if data_str == "[DONE]":
-                                    # Don't yield DONE marker as JSON
-                                    continue
-                                else:
-                                    try:
-                                        chunk_json = json.loads(data_str)
-                                        yield chunk_json
-                                    except json.JSONDecodeError:
-                                        # Skip invalid JSON
-                                        logger.warning(
-                                            "Failed to parse SSE data as JSON",
-                                            data=data_str[:100],
-                                        )
-                                        continue
-                except json.JSONDecodeError as e:
-                    logger.warning("sse_json_decode_error", error=str(e), exc_info=e)
-                    continue
-                except UnicodeDecodeError as e:
-                    logger.warning("sse_unicode_decode_error", error=str(e), exc_info=e)
-                    continue
-                except Exception as e:
-                    logger.warning(
-                        "sse_processing_unexpected_error", error=str(e), exc_info=e
-                    )
-                    continue
-
-    async def _serialize_json_to_sse_stream(
-        self, json_stream: AsyncIterator[dict[str, Any]]
-    ) -> AsyncIterator[bytes]:
-        """Serialize JSON chunks back to SSE format.
-
-        Converts adapted JSON objects back into SSE events.
-        """
-        async for chunk in json_stream:
-            try:
-                # Serialize JSON chunk to SSE format
-                json_str = json.dumps(chunk, separators=(",", ":"))
-                sse_event = f"data: {json_str}\n\n"
-                yield sse_event.encode()
-            except json.JSONDecodeError as e:
-                logger.warning(
-                    "sse_serialization_json_error",
-                    error=str(e),
-                    chunk_type=type(chunk).__name__,
-                    exc_info=e,
-                )
-                continue
-            except TypeError as e:
-                logger.warning(
-                    "sse_serialization_type_error",
-                    error=str(e),
-                    chunk_type=type(chunk).__name__,
-                    exc_info=e,
-                )
-                continue
-            except Exception as e:
-                logger.warning(
-                    "sse_serialization_unexpected_error",
-                    error=str(e),
-                    chunk_type=type(chunk).__name__,
-                    exc_info=e,
-                )
-                continue
-
-        # Send final DONE marker
-        yield b"data: [DONE]\n\n"
-
-    async def _process_sse_events(
-        self, response: httpx.Response, adapter: APIAdapter
-    ) -> AsyncGenerator[bytes, None]:
-        """Parse and adapt SSE events from response stream using new pipeline.
-
-        - Parse raw SSE bytes to JSON chunks
-        - Pass entire JSON stream through adapter (maintains state)
-        - Serialize adapted chunks back to SSE format
-        """
-        # Create streaming pipeline:
-        # 1. Parse raw SSE bytes to JSON chunks
-        json_stream = self._parse_sse_to_json_stream(response.aiter_bytes())
-
-        # 2. Pass entire JSON stream through adapter (maintains state)
-        adapted_stream = adapter.adapt_stream(json_stream)
-
-        # 3. Serialize adapted chunks back to SSE format
-        async for sse_bytes in self._serialize_json_to_sse_stream(adapted_stream):  # type: ignore[arg-type]
-            yield sse_bytes
-
-
-class StreamingResponseWithLogging(StreamingResponse):
-    """Streaming response wrapper that logs completion."""
-
-    def __init__(
-        self,
-        content: AsyncIterator[bytes],
-        status_code: int = 200,
-        headers: dict[str, str] | None = None,
-        media_type: str | None = None,
-        request_context: RequestContext | None = None,
-        metrics: PrometheusMetrics | None = None,
-    ):
-        super().__init__(content, status_code, headers, media_type)
-        self.request_context = request_context
-        self.metrics = metrics
-
-    async def __call__(
-        self, scope: MutableMapping[str, Any], receive: Any, send: Any
-    ) -> None:
-        """Override to log streaming completion."""
-        try:
-            await super().__call__(scope, receive, send)
-        finally:
-            if self.request_context:
-                # Log completion with available metrics
-                log_metrics = {}
-                if hasattr(self.request_context, "metrics"):
-                    log_metrics = self.request_context.metrics
-
-                logger.info(
-                    "Streaming response complete",
-                    request_id=self.request_context.request_id,
-                    metrics=log_metrics,
-                )
-
-                # Update Prometheus metrics if available and context has needed attributes
-                if (
-                    self.metrics
-                    and hasattr(self.request_context, "provider")
-                    and hasattr(self.request_context, "metrics")
-                ):
-                    # Record streaming completion metrics using available methods
-                    provider = getattr(self.request_context, "provider", "unknown")
-                    stream_chunks = self.request_context.metrics.get("stream_chunks", 0)
-                    stream_bytes = self.request_context.metrics.get("stream_bytes", 0)
-
-                    # Use existing methods to record streaming metrics
-                    self.metrics.record_request(
-                        method="STREAM",
-                        endpoint="streaming",
-                        model=getattr(self.request_context, "model", None),
-                        status="200",
-                        service_type=provider,
-                    )
+        # Return the deferred response with all features
+        return DeferredStreaming(
+            method=method,
+            url=url,
+            headers=headers,
+            body=body,
+            client=client,
+            media_type="text/event-stream",
+            handler_config=handler_config,
+            request_context=request_context,
+            request_tracer=self.request_tracer,
+            metrics=self.metrics,
+            verbose_streaming=self.verbose_streaming,
+        )

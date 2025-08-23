@@ -250,10 +250,14 @@ class CodexFactory(ProviderPluginFactory):
         return CodexDetectionService(settings)
 
     def create_credentials_manager(self, context: PluginContext) -> Any:
-        """Create the Codex credentials manager."""
+        """Create the Codex credentials manager with OAuth client for token refresh."""
         from plugins.codex.auth.manager import CodexTokenManager
+        from plugins.codex.auth.oauth import CodexOAuthProvider
 
-        return CodexTokenManager()
+        # Create OAuth provider for automatic token refresh
+        oauth_provider = CodexOAuthProvider()
+
+        return CodexTokenManager(oauth_client=oauth_provider)
 
 
 # Export the factory instance

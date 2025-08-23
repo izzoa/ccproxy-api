@@ -20,6 +20,7 @@ from ccproxy.services.http.connection_pool import ConnectionPoolManager
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
+from ccproxy.streaming.deferred_streaming import DeferredStreaming
 
 
 if TYPE_CHECKING:
@@ -96,9 +97,11 @@ class ProxyService:
         method: str,
         provider: str,
         plugin_name: str,
-        adapter_handler: Callable[..., Awaitable[Response | StreamingResponse]],
+        adapter_handler: Callable[
+            ..., Awaitable[Response | StreamingResponse | DeferredStreaming]
+        ],
         **kwargs: Any,
-    ) -> Response | StreamingResponse:
+    ) -> Response | StreamingResponse | DeferredStreaming:
         """Handle proxy request with hooks.
 
         This method provides a central point for all provider requests with hook emission.
@@ -167,7 +170,10 @@ class ProxyService:
             )
 
             # Check if response is streaming and wrap if needed
-            if isinstance(response, StreamingResponse):
+            # DeferredStreaming already handles its own wrapping
+            if isinstance(response, StreamingResponse) and not isinstance(
+                response, DeferredStreaming
+            ):
                 response = await self._wrap_streaming_with_hooks(
                     response, request_context
                 )

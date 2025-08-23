@@ -16,6 +16,7 @@ from ccproxy.config.constants import (
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.http.plugin_handler import PluginHTTPHandler
+from ccproxy.streaming.deferred_streaming import DeferredStreaming
 
 from .transformers import ClaudeAPIRequestTransformer, ClaudeAPIResponseTransformer
 
@@ -93,7 +94,7 @@ class ClaudeAPIAdapter(BaseAdapter):
 
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
-    ) -> Response | StreamingResponse:
+    ) -> Response | StreamingResponse | DeferredStreaming:
         """Handle a request to the Claude API.
 
         Args:
@@ -194,7 +195,7 @@ class ClaudeAPIAdapter(BaseAdapter):
         handler_config: HandlerConfig,
         endpoint: str,
         needs_conversion: bool,
-    ) -> Response | StreamingResponse:
+    ) -> Response | StreamingResponse | DeferredStreaming:
         """Execute the HTTP request.
 
         Args:
@@ -298,7 +299,16 @@ class ClaudeAPIAdapter(BaseAdapter):
             request_context=request_context,  # Pass the actual RequestContext object
         )
 
-        # For streaming responses, wrap to accumulate chunks and extract headers
+        # For deferred streaming responses, return as-is (they handle headers internally)
+        if isinstance(response, DeferredStreaming):
+            # DeferredStreaming already handles header preservation
+            self.logger.debug(
+                "claude_api_using_deferred_response",
+                response_type=type(response).__name__,
+            )
+            return response
+
+        # For regular streaming responses, wrap to accumulate chunks and extract headers
         if is_streaming and isinstance(response, StreamingResponse):
             return await self._wrap_streaming_response(response, request_context)
 
@@ -429,7 +439,7 @@ class ClaudeAPIAdapter(BaseAdapter):
 
     async def handle_streaming(
         self, request: Request, endpoint: str, **kwargs: Any
-    ) -> StreamingResponse:
+    ) -> StreamingResponse | DeferredStreaming:
         """Handle a streaming request to the Claude API.
 
         Forces stream=true in the request body and delegates to handle_request.
@@ -448,8 +458,8 @@ class ClaudeAPIAdapter(BaseAdapter):
         # Delegate to handle_request
         result = await self.handle_request(modified_request, endpoint, "POST", **kwargs)
 
-        # Ensure streaming response
-        if isinstance(result, StreamingResponse):
+        # Return deferred or streaming response directly
+        if isinstance(result, StreamingResponse | DeferredStreaming):
             return result
 
         # Fallback: wrap non-streaming response

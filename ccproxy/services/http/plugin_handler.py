@@ -13,6 +13,7 @@ from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.http.base import BaseHTTPHandler
 from ccproxy.services.http.processor import RequestProcessor
 from ccproxy.services.tracing import CoreRequestTracer
+from ccproxy.streaming.deferred_streaming import DeferredStreaming
 
 
 logger = get_logger(__name__)
@@ -54,7 +55,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
         body: bytes,
         handler_config: HandlerConfig,
         **kwargs: Any,
-    ) -> Response | StreamingResponse:
+    ) -> Response | StreamingResponse | DeferredStreaming:
         """Handle an HTTP request.
 
         Args:
@@ -74,7 +75,7 @@ class PluginHTTPHandler(BaseHTTPHandler):
 
         if is_streaming and streaming_handler:
             # Delegate to streaming handler
-            response: StreamingResponse = await streaming_handler.handle_streaming_request(
+            response: DeferredStreaming = await streaming_handler.handle_streaming_request(
                 method=method,
                 url=url,
                 headers=headers,

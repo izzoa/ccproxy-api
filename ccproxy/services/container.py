@@ -4,7 +4,7 @@ This module provides a clean, testable dependency injection container that
 manages service lifecycles and dependencies without singleton anti-patterns.
 """
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import structlog
@@ -152,7 +152,7 @@ class ServiceContainer:
             self._services[service_key] = self._factory.create_streaming_handler(
                 self.settings, metrics, request_tracer
             )
-        return self._services[service_key]  # type: ignore
+        return cast(StreamingHandler, self._services[service_key])
 
     def get_proxy_config(self) -> ProxyConfiguration:
         """Get proxy configuration service instance.

@@ -272,6 +272,7 @@ def _run_local_server(
         log_config=None,
         access_log=False,  # Disable uvicorn's default access logs
         server_header=False,  # Disable uvicorn's server header to preserve upstream headers
+        date_header=False,  # Disable uvicorn's date header to preserve upstream headers
         reload_includes=reload_includes,
         # log_config=get_uvicorn_log_config(),
     )
