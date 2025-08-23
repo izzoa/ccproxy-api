@@ -7,7 +7,6 @@ from typing import Any
 import structlog
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from structlog import get_logger
 from typing_extensions import TypedDict
 
 from ccproxy import __version__
@@ -24,7 +23,7 @@ from ccproxy.auth.oauth.routes import router as oauth_router
 from ccproxy.config.settings import Settings, get_settings
 from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
 from ccproxy.core.http_client import close_shared_http_client
-from ccproxy.core.logging import setup_logging
+from ccproxy.core.logging import TraceBoundLogger, get_logger, setup_logging
 from ccproxy.hooks import HookManager, HookRegistry
 from ccproxy.hooks.events import HookEvent
 
@@ -48,11 +47,10 @@ from ccproxy.utils.startup_helpers import (
     setup_permission_service_shutdown,
     setup_scheduler_shutdown,
     setup_scheduler_startup,
-    validate_claude_authentication_startup,
 )
 
 
-logger = get_logger(__name__)
+logger: TraceBoundLogger = get_logger()
 
 
 # Type definitions for lifecycle components
@@ -239,11 +237,6 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "name": "Task Manager",
         "startup": setup_task_manager_startup,
         "shutdown": setup_task_manager_shutdown,
-    },
-    {
-        "name": "Authentication Validation",
-        "startup": validate_claude_authentication_startup,
-        "shutdown": None,  # One-time validation, no cleanup needed
     },
     {
         "name": "Version Check",
@@ -459,7 +452,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             plugin_registry.register_factory(factory)
 
         # Log registration summary
-        provider_count = sum(1 for f in plugin_factories.values() if f.get_manifest().is_provider)
+        provider_count = sum(
+            1 for f in plugin_factories.values() if f.get_manifest().is_provider
+        )
         logger.info(
             "plugins_registered",
             total=len(plugin_factories),
@@ -496,16 +491,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             factory.create_context(manifest_services)
 
         # Collect middleware from all plugins
+        plugin_middleware_count = 0
         for name, factory in plugin_registry.factories.items():
             manifest = factory.get_manifest()
             if manifest.middleware:
                 middleware_manager.add_plugin_middleware(name, manifest.middleware)
-                logger.debug(
+                plugin_middleware_count += len(manifest.middleware)
+                logger.trace(
                     "plugin_middleware_collected",
                     plugin=name,
                     count=len(manifest.middleware),
                     category="lifecycle",
                 )
+
+        # Log middleware collection summary
+        if plugin_middleware_count > 0:
+            plugins_with_middleware = [
+                n
+                for n, f in plugin_registry.factories.items()
+                if f.get_manifest().middleware
+            ]
+            logger.debug(
+                "plugin_middleware_collection_completed",
+                total_middleware=plugin_middleware_count,
+                plugins_with_middleware=len(plugins_with_middleware),
+                plugin_names=plugins_with_middleware,
+                category="lifecycle",
+            )
 
         # Register plugin routes (static registration during app creation)
         for name, factory in plugin_registry.factories.items():

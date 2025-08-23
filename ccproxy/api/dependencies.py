@@ -62,7 +62,7 @@ async def get_http_client(
     Returns:
         Shared HTTP client instance
     """
-    logger.debug("Getting shared HTTP client instance", category="lifecycle")
+    logger.debug("getting_shared_http_client_instance", category="lifecycle")
     return await get_shared_http_client(settings)
 
 

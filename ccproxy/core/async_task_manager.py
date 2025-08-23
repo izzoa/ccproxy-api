@@ -12,12 +12,12 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
-import structlog
+from ccproxy.core.logging import TraceBoundLogger, get_logger
 
 
 T = TypeVar("T")
 
-logger = structlog.get_logger(__name__)
+logger: TraceBoundLogger = get_logger(__name__)
 
 
 class TaskInfo:
@@ -200,7 +200,7 @@ class AsyncTaskManager:
         # Add done callback for automatic cleanup
         task.add_done_callback(lambda t: self._schedule_cleanup_callback(task_info))
 
-        logger.debug(
+        logger.trace(
             "task_created",
             task_id=task_info.task_id,
             task_name=name,

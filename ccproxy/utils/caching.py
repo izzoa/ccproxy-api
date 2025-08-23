@@ -10,10 +10,10 @@ import time
 from collections.abc import Callable, Hashable
 from typing import Any, TypeVar
 
-import structlog
+from ccproxy.core.logging import TraceBoundLogger, get_logger
 
 
-logger = structlog.get_logger(__name__)
+logger: TraceBoundLogger = get_logger(__name__)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -138,11 +138,10 @@ def ttl_cache(maxsize: int = 128, ttl: float = 300.0) -> Callable[[F], F]:
             # Try to get from cache first
             cached_result = cache.get(key)
             if cached_result is not None:
-                logger.debug(
+                logger.trace(
                     "cache_hit",
                     function=func.__name__,
                     key_hash=hash(key) if isinstance(key, tuple) else key,
-                    category="cache",
                 )
                 return cached_result
 
@@ -150,12 +149,11 @@ def ttl_cache(maxsize: int = 128, ttl: float = 300.0) -> Callable[[F], F]:
             result = func(*args, **kwargs)
             cache.set(key, result)
 
-            logger.debug(
+            logger.trace(
                 "cache_miss_and_set",
                 function=func.__name__,
                 key_hash=hash(key) if isinstance(key, tuple) else key,
                 cache_size=len(cache._cache),
-                category="cache",
             )
 
             return result
@@ -190,11 +188,10 @@ def async_ttl_cache(
             # Try to get from cache first
             cached_result = cache.get(key)
             if cached_result is not None:
-                logger.debug(
+                logger.trace(
                     "async_cache_hit",
                     function=func.__name__,
                     key_hash=hash(key) if isinstance(key, tuple) else key,
-                    category="cache",
                 )
                 return cached_result
 
@@ -202,12 +199,11 @@ def async_ttl_cache(
             result = await func(*args, **kwargs)
             cache.set(key, result)
 
-            logger.debug(
+            logger.trace(
                 "async_cache_miss_and_set",
                 function=func.__name__,
                 key_hash=hash(key) if isinstance(key, tuple) else key,
                 cache_size=len(cache._cache),
-                category="cache",
             )
 
             return result

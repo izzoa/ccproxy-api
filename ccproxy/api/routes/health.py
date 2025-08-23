@@ -489,7 +489,7 @@ async def liveness_probe(response: Response) -> dict[str, Any]:
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Content-Type"] = "application/health+json"
 
-    logger.debug("Liveness probe request")
+    logger.debug("liveness_probe_request")
 
     return {
         "status": "pass",
@@ -512,7 +512,7 @@ async def readiness_probe(response: Response) -> dict[str, Any]:
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Content-Type"] = "application/health+json"
 
-    logger.debug("Readiness probe request")
+    logger.debug("readiness_probe_request")
 
     # Check OAuth credentials, CLI, and SDK separately
     oauth_status, oauth_details = await _check_oauth2_credentials()
@@ -619,7 +619,7 @@ async def detailed_health_check(response: Response) -> dict[str, Any]:
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Content-Type"] = "application/health+json"
 
-    logger.debug("Detailed health check request")
+    logger.debug("detailed_health_check_request")
 
     # Perform all health checks
     oauth_status, oauth_details = await _check_oauth2_credentials()

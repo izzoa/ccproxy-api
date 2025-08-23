@@ -295,26 +295,14 @@ class OpenAIStreamProcessor:
             processed_count = 0
             async for chunk in claude_stream:
                 chunk_count += 1
-                logger.debug(
-                    "openai_stream_chunk_received",
-                    chunk_count=chunk_count,
-                    chunk_type=chunk.get("type"),
-                    chunk=chunk,
-                )
                 async for sse_chunk in self._process_chunk(chunk):
                     processed_count += 1
-                    logger.debug(
-                        "openai_stream_chunk_processed",
-                        processed_count=processed_count,
-                        sse_chunk=sse_chunk,
-                    )
                     yield sse_chunk
 
             logger.debug(
                 "openai_stream_complete",
                 total_chunks=chunk_count,
                 processed_chunks=processed_count,
-                usage_info=self.usage_info,
             )
 
             # Send final chunk

@@ -26,21 +26,21 @@ class EnhancedTokenManager(BaseTokenManager[CredentialsT]):
         """
         credentials = await self.load_credentials()
         if not credentials:
-            logger.debug("No credentials found")
+            logger.debug("no_credentials_found")
             return None
 
         # Check if token is expired
         if self.is_expired(credentials):
-            logger.info("Token is expired, attempting refresh")
+            logger.info("token_expired_attempting_refresh")
 
             # Try to refresh if we have a refresh token and oauth client
             if oauth_client and hasattr(credentials, "refresh_token"):
                 refreshed = await self.refresh_token(oauth_client)
                 if refreshed:
-                    logger.info("Token refreshed successfully")
+                    logger.info("token_refreshed_successfully")
                     credentials = refreshed
                 else:
-                    logger.error("Token refresh failed")
+                    logger.error("token_refresh_failed")
                     return None
             else:
                 logger.warning(

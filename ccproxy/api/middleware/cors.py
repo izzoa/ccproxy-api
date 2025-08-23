@@ -19,7 +19,6 @@ def setup_cors_middleware(app: FastAPI, settings: Settings) -> None:
         app: FastAPI application instance
         settings: Application settings containing CORS configuration
     """
-    logger.debug("cors_middleware_setup_start", category="middleware")
 
     app.add_middleware(
         CORSMiddleware,

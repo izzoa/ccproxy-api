@@ -107,7 +107,7 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
             # Delete from storage
             return await self.storage.delete()
         except Exception as e:
-            logger.error("Failed to clear credentials", error=str(e), exc_info=e)
+            logger.error("failed_to_clear_credentials", error=str(e), exc_info=e)
             return False
 
     def get_storage_location(self) -> str:
@@ -131,7 +131,7 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
             return False
 
         if self.is_expired(credentials):
-            logger.info("Token is expired")
+            logger.info("token_expired")
             return False
 
         return True
@@ -332,7 +332,7 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
             return None
 
         if self.is_expired(credentials):
-            logger.info("Token is expired")
+            logger.info("token_expired")
             return None
 
         # Get access_token attribute from credentials

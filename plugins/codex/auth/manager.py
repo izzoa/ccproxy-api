@@ -57,11 +57,11 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
         """
         credentials = await self.load_credentials()
         if not credentials:
-            logger.error("No credentials to refresh", category="auth")
+            logger.error("no_credentials_to_refresh", category="auth")
             return None
 
         if not credentials.refresh_token:
-            logger.error("No refresh token available", category="auth")
+            logger.error("no_refresh_token_available", category="auth")
             return None
 
         try:
@@ -93,7 +93,7 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
                 self._profile_cache = None
                 return new_credentials
 
-            logger.error("Failed to save refreshed credentials", category="auth")
+            logger.error("failed_to_save_refreshed_credentials", category="auth")
             return None
 
         except Exception as e:
@@ -153,12 +153,12 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
         """
         credentials = await self.load_credentials()
         if not credentials:
-            logger.debug("No credentials found", category="auth")
+            logger.debug("no_credentials_found", category="auth")
             return None
 
         # Check if token is expired
         if self.is_expired(credentials):
-            logger.info("OpenAI token is expired, attempting refresh", category="auth")
+            logger.info("openai_token_expired_attempting_refresh", category="auth")
 
             # Use provided oauth_client or fallback to stored one
             client = oauth_client or self._oauth_client
@@ -173,7 +173,7 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
                         )
                         return refreshed.access_token
                     else:
-                        logger.error("OpenAI token refresh failed", category="auth")
+                        logger.error("openai_token_refresh_failed", category="auth")
                         return None
                 except Exception as e:
                     logger.error(
@@ -203,7 +203,7 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
         """
         credentials = await self.load_credentials()
         if not credentials:
-            logger.debug("No credentials found", category="auth")
+            logger.debug("no_credentials_found", category="auth")
             return None
 
         # Check if token is expired

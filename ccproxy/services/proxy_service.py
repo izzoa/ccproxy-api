@@ -89,7 +89,7 @@ class ProxyService:
         since the hook system is initialized after the proxy service.
         """
         self.hook_manager = hook_manager
-        logger.debug("Hook manager set on ProxyService", category="lifecycle")
+        logger.debug("hook_manager_set_on_proxy_service", category="lifecycle")
 
     async def handle_request(
         self,
@@ -373,7 +373,7 @@ class ProxyService:
             if self.response_cache:
                 self.response_cache.clear()
 
-            logger.info("ProxyService cleanup complete", category="lifecycle")
+            logger.info("proxy_service_cleanup_complete", category="lifecycle")
 
         except (AttributeError, TypeError) as e:
             logger.error(

@@ -5,7 +5,7 @@ from typing import Any
 
 import structlog
 
-from ccproxy.core.logging import get_logger
+from ccproxy.core.logging import TraceBoundLogger, get_logger
 from ccproxy.services.handler_config import HandlerConfig
 
 
@@ -19,6 +19,7 @@ class RequestProcessor:
         self,
         logger: structlog._generic.BoundLogger
         | structlog.stdlib.BoundLogger
+        | TraceBoundLogger
         | None = None,
     ) -> None:
         """Initialize the request processor.

@@ -6,11 +6,12 @@ providers at runtime, enabling dynamic discovery and management of OAuth flows.
 
 from typing import Any, Protocol
 
-import structlog
 from pydantic import BaseModel
 
+from ccproxy.core.logging import get_logger
 
-logger = structlog.get_logger(__name__)
+
+logger = get_logger()
 
 
 class OAuthProviderInfo(BaseModel):

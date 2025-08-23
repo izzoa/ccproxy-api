@@ -28,19 +28,6 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 
-async def validate_claude_authentication_startup(
-    app: FastAPI, settings: Settings
-) -> None:
-    """Validate Claude authentication credentials at startup.
-
-    Args:
-        app: FastAPI application instance
-        settings: Application settings
-    """
-    # Authentication is now handled by individual plugins
-    logger.debug("Authentication validation moved to plugins", category="auth")
-
-
 async def check_version_updates_startup(app: FastAPI, settings: Settings) -> None:
     """Trigger version update check at startup.
 
@@ -263,8 +250,16 @@ async def initialize_proxy_service_startup(app: FastAPI, settings: Settings) -> 
         # Get global metrics instance
         metrics = get_metrics()
 
-        # Create ServiceContainer and use it to create ProxyService
-        container = ServiceContainer(settings)
+        # Reuse ServiceContainer from app state or create new one
+        if hasattr(app.state, "service_container"):
+            container = app.state.service_container
+        else:
+            from ccproxy.services.factories import ConcreteServiceFactory
+
+            factory = ConcreteServiceFactory()
+            container = ServiceContainer(settings, factory)
+            app.state.service_container = container
+
         proxy_service = container.create_proxy_service(
             proxy_client=proxy_client,
             metrics=metrics,

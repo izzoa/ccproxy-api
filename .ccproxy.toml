@@ -6,6 +6,7 @@ log_client_request = true
 log_client_response = true
 log_provider_request = true
 log_provider_response = true
+exclude_headers = []
 
 [plugins.claude_api]
 enabled = true

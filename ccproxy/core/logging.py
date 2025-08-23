@@ -4,13 +4,46 @@ import shutil
 import sys
 from collections.abc import MutableMapping
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Protocol, TextIO
 
 import structlog
 from rich.console import Console
 from rich.traceback import Traceback
 from structlog.stdlib import BoundLogger
 from structlog.typing import ExcInfo, Processor
+
+
+# Custom protocol for BoundLogger with trace method
+class TraceBoundLogger(Protocol):
+    """Protocol defining BoundLogger with trace method."""
+
+    def trace(self, msg: str, *args: Any, **kwargs: Any) -> Any:
+        """Log at TRACE level."""
+        ...
+
+    def debug(self, msg: str, *args: Any, **kwargs: Any) -> Any:
+        """Log at DEBUG level."""
+        ...
+
+    def info(self, msg: str, *args: Any, **kwargs: Any) -> Any:
+        """Log at INFO level."""
+        ...
+
+    def warning(self, msg: str, *args: Any, **kwargs: Any) -> Any:
+        """Log at WARNING level."""
+        ...
+
+    def error(self, msg: str, *args: Any, **kwargs: Any) -> Any:
+        """Log at ERROR level."""
+        ...
+
+    def bind(self, **kwargs: Any) -> "TraceBoundLogger":
+        """Bind additional context to logger."""
+        ...
+
+    def log(self, level: int, msg: str, *args: Any, **kwargs: Any) -> Any:
+        """Log at specific level."""
+        ...
 
 
 # Import LogCategory locally to avoid circular import
@@ -211,7 +244,7 @@ class CategoryConsoleRenderer:
             # Fallback: prepend fields to the beginning
             rendered = plugin_field + category_field + " " + rendered
 
-        return rendered
+        return str(rendered)
 
 
 def configure_structlog(log_level: int = logging.INFO) -> None:
@@ -308,7 +341,7 @@ def setup_logging(
     json_logs: bool = False,
     log_level_name: str = "DEBUG",
     log_file: str | None = None,
-) -> BoundLogger:
+) -> TraceBoundLogger:
     """
     Setup logging for the entire application using canonical structlog pattern.
     Returns a structlog logger instance.
@@ -488,7 +521,7 @@ def setup_logging(
 
 
 # Create a convenience function for getting loggers
-def get_logger(name: str | None = None) -> BoundLogger:
+def get_logger(name: str | None = None) -> TraceBoundLogger:
     """Get a structlog logger instance with request context automatically bound.
 
     This function checks for an active RequestContext and automatically binds
@@ -499,11 +532,11 @@ def get_logger(name: str | None = None) -> BoundLogger:
         name: Logger name (typically __name__)
 
     Returns:
-        BoundLogger with request_id bound if available
+        TraceBoundLogger with request_id bound if available
     """
     logger = structlog.get_logger(name)
 
-    # Add trace method to BoundLogger if not present
+    # Add trace method to logger if not present
     if not hasattr(logger, "trace"):
 
         def trace_method(msg: str, *args: Any, **kwargs: Any) -> Any:
@@ -527,7 +560,7 @@ def get_logger(name: str | None = None) -> BoundLogger:
     return logger  # type: ignore[no-any-return]
 
 
-def get_plugin_logger(name: str | None = None) -> BoundLogger:
+def get_plugin_logger(name: str | None = None) -> TraceBoundLogger:
     """Get a plugin-aware logger with plugin_name automatically bound.
 
     This function auto-detects the plugin name from the caller's module path
@@ -538,15 +571,15 @@ def get_plugin_logger(name: str | None = None) -> BoundLogger:
         name: Logger name (auto-detected from caller if None)
 
     Returns:
-        BoundLogger with plugin_name and request_id bound if available
+        TraceBoundLogger with plugin_name and request_id bound if available
     """
     if name is None:
         # Auto-detect caller's module name
         import inspect
 
-        frame = inspect.currentframe().f_back
-        if frame:
-            name = frame.f_globals.get("__name__", "unknown")
+        frame = inspect.currentframe()
+        if frame and frame.f_back:
+            name = frame.f_back.f_globals.get("__name__", "unknown")
         else:
             name = "unknown"
 
@@ -560,4 +593,4 @@ def get_plugin_logger(name: str | None = None) -> BoundLogger:
             plugin_name = parts[1]  # e.g., "claude_api", "codex"
             logger = logger.bind(plugin_name=plugin_name)
 
-    return logger  # type: ignore[no-any-return]
+    return logger

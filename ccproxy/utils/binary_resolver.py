@@ -5,15 +5,14 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
-import structlog
-
+from ccproxy.core.logging import TraceBoundLogger, get_logger
 from ccproxy.utils.caching import ttl_cache
 
 
 if TYPE_CHECKING:
     from ccproxy.config.settings import Settings
 
-logger = structlog.get_logger(__name__)
+logger: TraceBoundLogger = get_logger()
 
 
 class BinaryCommand(NamedTuple):
@@ -126,7 +125,7 @@ class BinaryResolver:
             )
             result = self._find_via_package_manager(binary_name, package_name)
             if result:
-                logger.debug(
+                logger.trace(
                     "binary_resolved",
                     binary=binary_name,
                     manager=result.package_manager,
@@ -134,7 +133,11 @@ class BinaryResolver:
                     source="package_manager",
                 )
             else:
-                logger.debug("binary_resolution_failed", binary=binary_name, source="package_manager")
+                logger.trace(
+                    "binary_resolution_failed",
+                    binary=binary_name,
+                    source="package_manager",
+                )
             return result
 
         # First, try direct binary lookup in PATH

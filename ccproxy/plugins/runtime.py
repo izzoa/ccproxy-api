@@ -6,12 +6,12 @@ plugin instances and their lifecycle after the application has started.
 
 from typing import Any
 
-import structlog
+from ccproxy.core.logging import TraceBoundLogger, get_logger
 
 from .declaration import PluginContext, PluginManifest, PluginRuntimeProtocol
 
 
-logger = structlog.get_logger(__name__)
+logger: TraceBoundLogger = get_logger()
 
 
 class BasePluginRuntime(PluginRuntimeProtocol):
@@ -266,7 +266,7 @@ class ProviderPluginRuntime(BasePluginRuntime):
             registry = get_oauth_registry()
             registry.register_provider(oauth_provider)
 
-            logger.info(
+            logger.trace(
                 "oauth_provider_registered",
                 plugin=self.name,
                 provider=oauth_provider.provider_name,
@@ -299,7 +299,7 @@ class ProviderPluginRuntime(BasePluginRuntime):
             registry = get_oauth_registry()
             registry.unregister_provider(provider_name)
 
-            logger.info(
+            logger.trace(
                 "oauth_provider_unregistered",
                 plugin=self.name,
                 provider=provider_name,

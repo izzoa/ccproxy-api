@@ -53,15 +53,7 @@ class CodexRuntime(ProviderPluginRuntime):
             version = self.detection_service.get_version()
             cli_path = self.detection_service.get_cli_path()
 
-            if cli_path:
-                logger.info(
-                    "cli_detection_completed",
-                    cli_available=True,
-                    version=version,
-                    cli_path=cli_path,
-                    source="package_manager",
-                )
-            else:
+            if not cli_path:
                 logger.warning(
                     "cli_detection_completed",
                     cli_available=False,
@@ -70,16 +62,26 @@ class CodexRuntime(ProviderPluginRuntime):
                     source="unknown",
                 )
 
+        # Get CLI info for consolidated logging (only for successful detection)
+        cli_info = {}
+        if self.detection_service and self.detection_service.get_cli_path():
+            cli_info.update(
+                {
+                    "cli_available": True,
+                    "cli_version": self.detection_service.get_version(),
+                    "cli_path": self.detection_service.get_cli_path(),
+                    "cli_source": "package_manager",
+                }
+            )
+
         logger.info(
             "plugin_initialized",
             status="initialized",
-            cli_available=bool(
-                self.detection_service and self.detection_service.get_cli_path()
-            ),
             has_credentials=self.auth_manager is not None,
             has_adapter=self.adapter is not None,
             has_detection=self.detection_service is not None,
             category="plugin",
+            **cli_info,
         )
 
     async def get_profile_info(self) -> dict[str, Any] | None:

@@ -45,7 +45,7 @@ class CodexAdapter(BaseAdapter):
         auth_manager: AuthManager,
         detection_service: Any,
         http_client: Any | None = None,
-        logger=None,
+        logger: Any = None,
     ):
         """Initialize the Codex adapter.
 

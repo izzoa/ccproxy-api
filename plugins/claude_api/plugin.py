@@ -68,15 +68,7 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
                 version = self.detection_service.get_version()
                 cli_path = self.detection_service.get_cli_path()
 
-                if cli_path:
-                    logger.info(
-                        "cli_detection_completed",
-                        cli_available=True,
-                        version=version,
-                        cli_path=cli_path,
-                        source="package_manager",
-                    )
-                else:
+                if not cli_path:
                     logger.warning(
                         "cli_detection_completed",
                         cli_available=False,
@@ -91,6 +83,18 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
                     exc_info=e,
                 )
 
+        # Get CLI info for consolidated logging (only for successful detection)
+        cli_info = {}
+        if self.detection_service and self.detection_service.get_cli_path():
+            cli_info.update(
+                {
+                    "cli_available": True,
+                    "cli_version": self.detection_service.get_version(),
+                    "cli_path": self.detection_service.get_cli_path(),
+                    "cli_source": "package_manager",
+                }
+            )
+
         logger.info(
             "plugin_initialized",
             status="initialized",
@@ -99,6 +103,7 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
             has_credentials=self.credentials_manager is not None,
             has_adapter=self.adapter is not None,
             category="plugin",
+            **cli_info,
         )
 
     async def _get_health_details(self) -> dict[str, Any]:
@@ -256,7 +261,7 @@ class ClaudeAPIFactory(ProviderPluginFactory):
             from ccproxy.config.settings import Settings
 
             settings = Settings()
-        
+
         cli_service = context.get("cli_detection_service")
         return ClaudeAPIDetectionService(settings, cli_service)
 

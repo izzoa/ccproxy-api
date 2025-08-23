@@ -62,7 +62,7 @@ class ClaudeAPIRequestTransformer:
 
         transformed = headers.copy()
 
-        # Remove hop-by-hop headers and x-api-key (client auth header)
+        # Remove hop-by-hop headers and client auth headers
         hop_by_hop = {
             "host",
             "connection",
@@ -75,6 +75,7 @@ class ClaudeAPIRequestTransformer:
             "te",
             "trailer",
             "x-api-key",  # Remove client's x-api-key header
+            "authorization",  # Remove client's Authorization header
         }
         transformed = {
             k: v for k, v in transformed.items() if k.lower() not in hop_by_hop

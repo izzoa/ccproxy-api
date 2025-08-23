@@ -179,9 +179,6 @@ class RawHTTPLoggerFactory(SystemPluginFactory):
             )
 
             self.manifest.middleware.append(middleware_spec)
-            logger.debug(
-                "raw_http_logger_middleware_added_to_manifest", category="middleware"
-            )
 
         return context
 

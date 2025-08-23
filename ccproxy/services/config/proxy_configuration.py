@@ -25,11 +25,11 @@ class ProxyConfiguration:
         self._ssl_verify = self._init_ssl_context()
 
         if self._proxy_url:
-            logger.info("Proxy configuration detected", proxy_url=self._proxy_url)
+            logger.info("proxy_configuration_detected", proxy_url=self._proxy_url)
         if isinstance(self._ssl_verify, str):
-            logger.info("Custom CA bundle configured", ca_bundle=self._ssl_verify)
+            logger.info("custom_ca_bundle_configured", ca_bundle=self._ssl_verify)
         elif not self._ssl_verify:
-            logger.warning("SSL verification disabled - not recommended for production")
+            logger.warning("ssl_verification_disabled_not_recommended_for_production")
 
     def _init_proxy_url(self) -> str | None:
         """Extract proxy URL from environment.
@@ -71,7 +71,7 @@ class ProxyConfiguration:
             if ca_path.exists() and ca_path.is_file():
                 return str(ca_path)
             else:
-                logger.warning("CA bundle file not found", ca_bundle=ca_bundle)
+                logger.warning("ca_bundle_file_not_found", ca_bundle=ca_bundle)
 
         # Check if SSL verification should be disabled
         ssl_verify = os.getenv("SSL_VERIFY", "true").lower()

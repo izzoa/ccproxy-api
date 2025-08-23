@@ -45,7 +45,7 @@ class ClaudeSDKFormatAdapter:
                 # Anthropic format has 'role' and 'content' where content is list of blocks
                 if "role" in first_msg and isinstance(first_msg.get("content"), str):
                     # This looks like OpenAI format, convert it
-                    self.logger.debug("Converting OpenAI format to Anthropic format")
+                    self.logger.debug("converting_openai_format_to_anthropic_format")
                     return await self.openai_adapter.adapt_request(request_data)
 
         # Already in Anthropic format or not a messages request
@@ -68,7 +68,7 @@ class ClaudeSDKFormatAdapter:
             # This is Anthropic format, check if we need OpenAI format
             # The decision should be based on the original request format
             # For now, we'll return as-is and let the caller decide
-            self.logger.debug("Response in Anthropic format")
+            self.logger.debug("response_in_anthropic_format")
 
         return response_data
 

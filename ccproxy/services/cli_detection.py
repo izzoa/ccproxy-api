@@ -43,7 +43,9 @@ class CLIDetectionService:
     - Consistent logging and error handling
     """
 
-    def __init__(self, settings: Settings, binary_resolver: BinaryResolver | None = None) -> None:
+    def __init__(
+        self, settings: Settings, binary_resolver: BinaryResolver | None = None
+    ) -> None:
         """Initialize the CLI detection service.
 
         Args:

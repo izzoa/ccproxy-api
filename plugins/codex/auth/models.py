@@ -80,7 +80,7 @@ class OpenAIProfileInfo(BaseProfileInfo):
                 "Extracted JWT claims", num_claims=len(claims), category="auth"
             )
         except Exception as e:
-            logger.warning("Failed to decode JWT token", error=str(e), category="auth")
+            logger.warning("failed_to_decode_jwt_token", error=str(e), category="auth")
             claims = {}
 
         # Use the account_id already extracted by OpenAICredentials validator

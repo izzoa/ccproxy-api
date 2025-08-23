@@ -63,33 +63,27 @@ class ClaudeSDKRuntime(ProviderPluginRuntime):
             cli_path = self.detection_service.get_cli_path()
 
             if cli_path:
+                # Single consolidated log message with both CLI detection and plugin initialization status
                 logger.info(
-                    "cli_detection_completed",
+                    "plugin_initialized",
+                    status="initialized",
                     cli_available=True,
-                    version=version,
+                    cli_version=version,
                     cli_path=cli_path,
-                    source="package_manager",
+                    cli_source="package_manager",
+                    has_credentials=True,  # SDK handles its own auth
+                    has_adapter=self.adapter is not None,
+                    has_session_manager=self.session_manager is not None,
+                    category="plugin",
                 )
             else:
                 error_msg = "Claude CLI not found in PATH or common locations - SDK plugin requires installed CLI"
                 logger.error(
-                    "claude_sdk_plugin_initialization_failed",
+                    "plugin_initialization_failed",
                     status="failed",
                     error=error_msg,
                 )
                 raise RuntimeError(error_msg)
-
-        logger.info(
-            "plugin_initialized",
-            status="initialized",
-            cli_available=self.detection_service.is_claude_available()
-            if self.detection_service
-            else False,
-            has_credentials=True,  # SDK handles its own auth
-            has_adapter=self.adapter is not None,
-            has_session_manager=self.session_manager is not None,
-            category="plugin",
-        )
 
     async def _on_shutdown(self) -> None:
         """Cleanup on shutdown."""

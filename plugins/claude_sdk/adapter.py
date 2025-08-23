@@ -51,14 +51,14 @@ class ClaudeSDKAdapter(BaseAdapter):
             # Generate a random session ID for this runtime
             self._runtime_default_session_id = f"auto-{uuid.uuid4().hex[:12]}"
             self.logger.info(
-                "claude_sdk_auto_generated_session",
+                "auto_generated_session",
                 session_id=self._runtime_default_session_id,
                 lifetime="runtime",
             )
         elif config.default_session_id:
             self._runtime_default_session_id = config.default_session_id
             self.logger.debug(
-                "claude_sdk_using_configured_default_session",
+                "using_configured_default_session",
                 session_id=self._runtime_default_session_id,
             )
 
@@ -67,7 +67,7 @@ class ClaudeSDKAdapter(BaseAdapter):
         if config.sdk_session_pool and config.sdk_session_pool.enabled:
             session_manager = SessionManager(config=config)
             self.logger.debug(
-                "claude_sdk_adapter_session_pool_enabled",
+                "adapter_session_pool_enabled",
                 session_ttl=config.sdk_session_pool.session_ttl,
                 max_sessions=config.sdk_session_pool.max_sessions,
                 has_default_session=bool(self._runtime_default_session_id),
@@ -294,7 +294,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                                 yield f"data: {data}\n\n".encode()
                     except asyncio.CancelledError as e:
                         self.logger.warning(
-                            "claude_sdk_streaming_cancelled",
+                            "streaming_cancelled",
                             error=str(e),
                             exc_info=e,
                             category="streaming",
@@ -302,7 +302,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                         raise
                     except httpx.TimeoutException as e:
                         self.logger.error(
-                            "claude_sdk_streaming_timeout",
+                            "streaming_timeout",
                             error=str(e),
                             exc_info=e,
                             category="streaming",
@@ -311,7 +311,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                         yield f"data: {json.dumps(error_chunk)}\n\n".encode()
                     except httpx.HTTPError as e:
                         self.logger.error(
-                            "claude_sdk_streaming_http_error",
+                            "streaming_http_error",
                             error=str(e),
                             status_code=getattr(e.response, "status_code", None)
                             if hasattr(e, "response")
@@ -323,7 +323,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                         yield f"data: {json.dumps(error_chunk)}\n\n".encode()
                     except Exception as e:
                         self.logger.error(
-                            "claude_sdk_streaming_unexpected_error",
+                            "streaming_unexpected_error",
                             error=str(e),
                             exc_info=e,
                             category="streaming",
@@ -367,7 +367,7 @@ class ClaudeSDKAdapter(BaseAdapter):
 
         except httpx.TimeoutException as e:
             self.logger.error(
-                "claude_sdk_request_timeout",
+                "request_timeout",
                 error=str(e),
                 exc_info=e,
                 category="http",
@@ -375,7 +375,7 @@ class ClaudeSDKAdapter(BaseAdapter):
             raise HTTPException(status_code=408, detail="Request timed out") from e
         except httpx.HTTPError as e:
             self.logger.error(
-                "claude_sdk_http_error",
+                "http_error",
                 error=str(e),
                 status_code=getattr(e.response, "status_code", None)
                 if hasattr(e, "response")
@@ -386,14 +386,14 @@ class ClaudeSDKAdapter(BaseAdapter):
             raise HTTPException(status_code=502, detail=f"HTTP error: {e}") from e
         except asyncio.CancelledError as e:
             self.logger.warning(
-                "claude_sdk_request_cancelled",
+                "request_cancelled",
                 error=str(e),
                 exc_info=e,
             )
             raise
         except Exception as e:
             self.logger.error(
-                "claude_sdk_request_handling_failed",
+                "request_handling_failed",
                 error=str(e),
                 exc_info=e,
             )
@@ -455,7 +455,7 @@ class ClaudeSDKAdapter(BaseAdapter):
         if not isinstance(result, StreamingResponse):
             # This shouldn't happen since we forced stream=true, but handle it gracefully
             self.logger.warning(
-                "claude_sdk_unexpected_response_type",
+                "unexpected_response_type",
                 expected="StreamingResponse",
                 actual=type(result).__name__,
             )
@@ -491,7 +491,7 @@ class ClaudeSDKAdapter(BaseAdapter):
 
         except Exception as e:
             self.logger.error(
-                "claude_sdk_adapter_cleanup_failed",
+                "adapter_cleanup_failed",
                 error=str(e),
                 exc_info=e,
             )

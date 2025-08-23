@@ -666,7 +666,7 @@ class DockerAdapter:
                     return False
             else:
                 # Image doesn't exist (inspect returns non-zero exit code)
-                logger.debug("Docker image does not exist: %s", image_full_name)
+                logger.debug("docker_image_does_not_exist", image=image_full_name)
                 return False
 
         except FileNotFoundError:

@@ -7,8 +7,9 @@ and ensuring proper ordering across core and plugin middleware.
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import structlog
 from fastapi import FastAPI
+
+from ccproxy.core.logging import TraceBoundLogger, get_logger
 
 from .declaration import MiddlewareLayer, MiddlewareSpec
 
@@ -19,7 +20,7 @@ else:
     from starlette.middleware.base import BaseHTTPMiddleware
 
 
-logger = structlog.get_logger(__name__)
+logger: TraceBoundLogger = get_logger()
 
 
 @dataclass
@@ -78,7 +79,7 @@ class MiddlewareManager:
                 source=plugin_name,
             )
             self.middleware_specs.append(core_spec)
-            logger.debug(
+            logger.trace(
                 "plugin_middleware_added",
                 plugin=plugin_name,
                 middleware=spec.middleware_class.__name__,
@@ -116,17 +117,21 @@ class MiddlewareManager:
         for spec in reversed(ordered):
             try:
                 app.add_middleware(spec.middleware_class, **spec.kwargs)  # type: ignore[arg-type]
-                applied_middleware.append({
-                    "name": spec.middleware_class.__name__,
-                    "priority": spec.priority,
-                    "source": spec.source
-                })
+                applied_middleware.append(
+                    {
+                        "name": spec.middleware_class.__name__,
+                        "priority": spec.priority,
+                        "source": spec.source,
+                    }
+                )
             except Exception as e:
-                failed_middleware.append({
-                    "name": spec.middleware_class.__name__,
-                    "source": spec.source,
-                    "error": str(e)
-                })
+                failed_middleware.append(
+                    {
+                        "name": spec.middleware_class.__name__,
+                        "source": spec.source,
+                        "error": str(e),
+                    }
+                )
                 logger.error(
                     "middleware_application_failed",
                     middleware=spec.middleware_class.__name__,
