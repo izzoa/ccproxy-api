@@ -47,22 +47,22 @@ version-file = "ccproxy/_version.py"
 [tool.hatch.build.targets.wheel]
 packages = ["ccproxy", "plugins"]
 include = [
-    "ccproxy/data/*.json",
-    "plugins/**/*.py",
-    "plugins/**/*.json",
-    "plugins/**/*.toml"
+  "ccproxy/data/*.json",
+  "plugins/**/*.py",
+  "plugins/**/*.json",
+  "plugins/**/*.toml",
 ]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "ccproxy/**/*.py",
-    "ccproxy/**/*.json",
-    "plugins/**/*.py",
-    "plugins/**/*.json",
-    "plugins/**/*.toml",
-    "README.md",
-    "LICENSE",
-    "pyproject.toml"
+  "ccproxy/**/*.py",
+  "ccproxy/**/*.json",
+  "plugins/**/*.py",
+  "plugins/**/*.json",
+  "plugins/**/*.toml",
+  "README.md",
+  "LICENSE",
+  "pyproject.toml",
 ]
 
 [project.scripts]
@@ -168,6 +168,12 @@ output = "coverage.xml"
 target-version = "py311"
 line-length = 88
 
+# Add source paths for better import resolution
+src = ["ccproxy", "plugins", "tests"]
+
+# Extend include patterns for your monorepo
+extend-include = ["plugins/**/*.py"]
+
 [tool.ruff.lint]
 select = [
   "E",   # pycodestyle errors
@@ -214,8 +220,9 @@ lines-after-imports = 2
 
 [tool.ruff.lint.per-file-ignores]
 # relax on scripts and tests
-"scripts/*" = ["T201"]       # check for print statements
-"tests/*" = ["N802", "N803"] # arg/function name should be lowercase
+"scripts/*" = ["T201"]                         # check for print statements
+"tests/*" = ["N802", "N803"]                   # arg/function name should be lowercase
+"plugins/*/tests/*" = ["N802", "N803", "S101"] # Allow assert in plugin tests
 
 [tool.mypy]
 python_version = "3.11"
@@ -293,6 +300,7 @@ norecursedirs = [
   ".devenv",
   "node_modules",
   "__pycache__",
+  ".devenv",
 ]
 filterwarnings = [
   "ignore::UserWarning",
@@ -372,8 +380,70 @@ package = true
 # Workspace configuration for plugins
 [tool.uv.workspace]
 members = [
-    "plugins/claude_sdk",
-    "plugins/claude_api",
-    "plugins/codex",
-    "plugins/permissions",
+  "plugins/claude_sdk",
+  "plugins/claude_api",
+  "plugins/codex",
+  "plugins/permissions",
 ]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "standard" # or "strict" 
+
+include = ["ccproxy", "plugins", "tests"] # Include all your workspace members
+
+# Exclude unnecessary directories
+exclude = [
+  "**/__pycache__",
+  ".venv",
+  "venv",
+  "build",
+  "dist",
+  "*.egg-info",
+  ".git",
+  ".tox",
+  "htmlcov",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".devenv",
+]
+
+# Virtual environment configuration
+# venvPath = "."
+# venv = ".venv" # Adjust if using different name
+
+# Extra paths for import resolution
+extraPaths = [
+  ".",
+  "plugins/claude_api",
+  "plugins/claude_sdk",
+  "plugins/codex",
+  "plugins/permissions",
+  "plugins/raw_http_logger",
+]
+
+# Type checking settings
+reportMissingImports = "warning"
+reportMissingTypeStubs = false
+reportPrivateImportUsage = false
+reportUnusedImport = true
+reportUnusedClass = true
+reportUnusedFunction = true
+reportUnusedVariable = true
+reportDuplicateImport = true
+reportOptionalMemberAccess = true
+reportOptionalCall = true
+reportOptionalIterable = true
+reportOptionalContextManager = true
+reportOptionalOperand = true
+reportTypedDictNotRequiredAccess = true
+reportPrivateUsage = "warning"
+reportUnboundVariable = true
+reportUnusedCoroutine = true
+reportGeneralTypeIssues = true
+reportUnnecessaryTypeIgnoreComment = true
+
+# Stub settings
+stubPath = "typings"
+useLibraryCodeForTypes = true

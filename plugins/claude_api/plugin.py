@@ -187,7 +187,9 @@ class ClaudeAPIFactory(ProviderPluginFactory):
             description="Claude API provider plugin with support for both native Anthropic format and OpenAI-compatible format",
             is_provider=True,
             config_class=ClaudeAPISettings,
-            dependencies=[],  # No dependencies
+            dependencies=[
+                "oauth_claude"
+            ],  # Depends on OAuth Claude plugin for authentication
             routes=[
                 RouteSpec(
                     router=claude_api_router,
@@ -205,10 +207,7 @@ class ClaudeAPIFactory(ProviderPluginFactory):
                     kwargs={"skip_initial_run": True},
                 )
             ],
-            oauth_client_factory=self._create_oauth_client,
-            oauth_provider_factory=self._create_oauth_provider,
-            token_manager_factory=self._create_token_manager,
-            oauth_config_class=None,  # We'll use the provider's internal config
+            # OAuth functionality now provided by oauth_claude plugin
         )
 
         # Initialize with manifest
@@ -302,38 +301,6 @@ class ClaudeAPIFactory(ProviderPluginFactory):
                     task_spec.kwargs["detection_service"] = detection_service
 
         return context
-
-    def _create_oauth_client(self) -> Any:
-        """Create OAuth client for Claude API authentication.
-
-        Returns:
-            Claude OAuth client instance
-        """
-        from plugins.claude_api.auth.oauth.client import ClaudeOAuthClient
-        from plugins.claude_api.auth.oauth.config import ClaudeOAuthConfig
-
-        config = ClaudeOAuthConfig()
-        return ClaudeOAuthClient(config)
-
-    def _create_oauth_provider(self) -> Any:
-        """Create OAuth provider for Claude API.
-
-        Returns:
-            Claude OAuth provider instance for registry
-        """
-        from plugins.claude_api.auth.oauth import ClaudeOAuthProvider
-
-        return ClaudeOAuthProvider()
-
-    def _create_token_manager(self) -> Any:
-        """Create token manager for Claude API.
-
-        Returns:
-            ClaudeApiTokenManager instance
-        """
-        from plugins.claude_api.auth.manager import ClaudeApiTokenManager
-
-        return ClaudeApiTokenManager()
 
 
 # Export the factory instance

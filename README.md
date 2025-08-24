@@ -1,6 +1,32 @@
 # CCProxy API Server
 
-`ccproxy` is a local reverse proxy server that provides unified access to multiple AI providers through a single interface. It supports both Anthropic Claude and OpenAI Codex backends, allowing you to use your existing subscriptions without separate API key billing.
+`ccproxy` is a local reverse proxy server built on a plugin-based architecture that provides unified access to multiple AI providers through a single interface. It supports both Anthropic Claude and OpenAI Codex backends, allowing you to use your existing subscriptions without separate API key billing.
+
+## Architecture
+
+CCProxy is designed around a modular plugin system where each AI provider is implemented as a separate plugin:
+
+- **API Layer** (`ccproxy/api/`) - FastAPI endpoints and middleware
+- **Plugin System** (`plugins/`) - Provider-specific implementations:
+  - `claude_api` - Direct Claude API access with OAuth2
+  - `claude_sdk` - Uses claude-code-sdk with local tools
+  - `codex` - OpenAI Codex Response API integration
+  - `permissions` - Permission management for MCP integration
+  - `raw_http_logger` - HTTP request/response logging
+- **Core Services** (`ccproxy/services/`) - ProxyService for request delegation, provider context management
+- **Configuration** (`ccproxy/config/`) - Settings and validation
+- **Models** (`ccproxy/models/`) - Pydantic data models
+
+### Plugin Architecture
+
+Each provider plugin follows a consistent structure:
+
+- **Adapter** - Main plugin interface that delegates to the ProxyService
+- **Transformers** - Handle request/response header and body transformation
+- **Detection Services** - Provider-specific capability detection
+- **Format Adapters** - Protocol conversion (e.g., OpenAI ↔ Anthropic formats)
+
+This architecture enables easy extension to new AI providers while maintaining consistent behavior and authentication patterns.
 
 ## Supported Providers
 
@@ -250,11 +276,11 @@ In SDK mode, CCProxy automatically configures an MCP (Model Context Protocol) se
 **Starting the Permission Handler:**
 
 ```bash
-# In a separate terminal, start the permission handler
-ccproxy permission-handler
+# In a separate terminal, start the confirmation handler
+ccproxy confirmation-handler
 
 # Or with custom settings
-ccproxy permission-handler --host 127.0.0.1 --port 8000
+ccproxy confirmation-handler --host 127.0.0.1 --port 8000
 ```
 
 The permission handler provides:

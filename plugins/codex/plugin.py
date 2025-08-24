@@ -218,7 +218,9 @@ class CodexFactory(ProviderPluginFactory):
             description="OpenAI Codex provider plugin with OAuth authentication and format conversion",
             is_provider=True,
             config_class=CodexSettings,
-            dependencies=[],  # No dependencies
+            dependencies=[
+                "oauth_codex"
+            ],  # Depends on OAuth Codex plugin for authentication
             routes=[
                 RouteSpec(
                     router=codex_router,
@@ -226,24 +228,11 @@ class CodexFactory(ProviderPluginFactory):
                     tags=["provider", "codex"],
                 ),
             ],
-            oauth_provider_factory=self._create_oauth_provider,
-            token_manager_factory=self._create_token_manager,
+            # OAuth functionality now provided by oauth_codex plugin
         )
 
         # Initialize with manifest
         super().__init__(manifest)
-
-    def _create_oauth_provider(self) -> Any:
-        """Create OAuth provider for registry."""
-        from plugins.codex.auth.oauth import CodexOAuthProvider
-
-        return CodexOAuthProvider()
-
-    def _create_token_manager(self) -> Any:
-        """Create token manager for Codex."""
-        from plugins.codex.auth.manager import CodexTokenManager
-
-        return CodexTokenManager()
 
     def create_runtime(self) -> CodexRuntime:
         """Create runtime instance."""
@@ -282,14 +271,14 @@ class CodexFactory(ProviderPluginFactory):
         return CodexDetectionService(settings, cli_service)
 
     def create_credentials_manager(self, context: PluginContext) -> Any:
-        """Create the Codex credentials manager with OAuth client for token refresh."""
+        """Create the Codex credentials manager.
+
+        Note: OAuth functionality is now provided by the oauth_codex plugin.
+        The token manager will look up OAuth providers from the registry as needed.
+        """
         from plugins.codex.auth.manager import CodexTokenManager
-        from plugins.codex.auth.oauth import CodexOAuthProvider
 
-        # Create OAuth provider for automatic token refresh
-        oauth_provider = CodexOAuthProvider()
-
-        return CodexTokenManager(oauth_client=oauth_provider)
+        return CodexTokenManager()
 
 
 # Export the factory instance

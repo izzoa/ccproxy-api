@@ -6,6 +6,7 @@ from typing import Any
 
 from ccproxy.auth.managers.base import BaseTokenManager
 from ccproxy.auth.models import ClaudeCredentials
+from ccproxy.auth.oauth.registry import get_oauth_registry
 from ccproxy.auth.storage.generic import GenericJsonStorage
 from ccproxy.core.logging import get_plugin_logger
 
@@ -36,15 +37,22 @@ class ClaudeApiTokenManager(BaseTokenManager[ClaudeCredentials]):
 
     # ==================== Abstract Method Implementations ====================
 
-    async def refresh_token(self, oauth_client: Any) -> ClaudeCredentials | None:
+    async def refresh_token(self, oauth_client: Any = None) -> ClaudeCredentials | None:
         """Refresh the access token using the refresh token.
 
         Args:
-            oauth_client: Claude OAuth client for token refresh
+            oauth_client: Deprecated - OAuth provider is now looked up from registry
 
         Returns:
             Updated credentials or None if refresh failed
         """
+        # Get OAuth provider from registry
+        registry = get_oauth_registry()
+        oauth_provider = registry.get_provider("claude-api")
+        if not oauth_provider:
+            logger.error("claude_oauth_provider_not_found", category="auth")
+            return None
+
         credentials = await self.load_credentials()
         if not credentials:
             logger.error("no_credentials_to_refresh", category="auth")
@@ -57,9 +65,9 @@ class ClaudeApiTokenManager(BaseTokenManager[ClaudeCredentials]):
             return None
 
         try:
-            # Use OAuth client to refresh
-            new_credentials: ClaudeCredentials = await oauth_client.refresh_token(
-                refresh_token
+            # Use OAuth provider to refresh
+            new_credentials: ClaudeCredentials = (
+                await oauth_provider.refresh_access_token(refresh_token)
             )
 
             # Save updated credentials

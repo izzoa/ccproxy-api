@@ -10,14 +10,14 @@ from ccproxy.auth.models import ClaudeCredentials, OAuthToken
 from ccproxy.auth.oauth.base import BaseOAuthClient
 from ccproxy.auth.storage.base import TokenStorage
 from ccproxy.core.logging import get_plugin_logger
-from plugins.claude_api.auth.oauth.config import ClaudeOAuthConfig
+from plugins.oauth_claude.config import ClaudeOAuthConfig
 
 
 logger = get_plugin_logger()
 
 
 class ClaudeOAuthClient(BaseOAuthClient[ClaudeCredentials]):
-    """Claude OAuth implementation for the plugin."""
+    """Claude OAuth implementation for the OAuth Claude plugin."""
 
     def __init__(
         self,
@@ -118,7 +118,7 @@ class ClaudeOAuthClient(BaseOAuthClient[ClaudeCredentials]):
             credentials = ClaudeCredentials(claudeAiOauth=oauth_token)
 
             logger.info(
-                "claude_credentials_parsed",
+                "claude_oauth_credentials_parsed",
                 has_refresh_token=bool(data.get("refresh_token")),
                 expires_in=expires_in,
                 subscription_type=oauth_token.subscription_type,
@@ -130,7 +130,7 @@ class ClaudeOAuthClient(BaseOAuthClient[ClaudeCredentials]):
 
         except KeyError as e:
             logger.error(
-                "claude_token_response_missing_field",
+                "claude_oauth_token_response_missing_field",
                 missing_field=str(e),
                 response_keys=list(data.keys()),
                 category="auth",
@@ -138,7 +138,7 @@ class ClaudeOAuthClient(BaseOAuthClient[ClaudeCredentials]):
             raise OAuthError(f"Missing required field in token response: {e}") from e
         except Exception as e:
             logger.error(
-                "claude_token_response_parse_error",
+                "claude_oauth_token_response_parse_error",
                 error=str(e),
                 error_type=type(e).__name__,
                 category="auth",
@@ -183,7 +183,10 @@ class ClaudeOAuthClient(BaseOAuthClient[ClaudeCredentials]):
 
         except Exception as e:
             logger.error(
-                "claude_token_refresh_failed", error=str(e), exc_info=e, category="auth"
+                "claude_oauth_token_refresh_failed",
+                error=str(e),
+                exc_info=e,
+                category="auth",
             )
             raise OAuthError(f"Failed to refresh Claude token: {e}") from e
 

@@ -1,4 +1,4 @@
-"""OAuth configuration for Codex plugin."""
+"""OAuth configuration for Codex OAuth plugin."""
 
 from pydantic import BaseModel, Field
 

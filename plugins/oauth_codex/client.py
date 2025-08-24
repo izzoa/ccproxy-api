@@ -10,14 +10,14 @@ from ccproxy.auth.models import OpenAICredentials
 from ccproxy.auth.oauth.base import BaseOAuthClient
 from ccproxy.auth.storage.base import TokenStorage
 from ccproxy.core.logging import get_plugin_logger
-from plugins.codex.auth.oauth.config import CodexOAuthConfig
+from plugins.oauth_codex.config import CodexOAuthConfig
 
 
 logger = get_plugin_logger()
 
 
 class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
-    """Codex/OpenAI OAuth implementation for the plugin."""
+    """Codex/OpenAI OAuth implementation for the OAuth Codex plugin."""
 
     def __init__(
         self,
@@ -116,14 +116,14 @@ class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
                         "picture": decoded.get("picture"),
                     }
                     logger.debug(
-                        "openai_id_token_decoded",
+                        "codex_oauth_id_token_decoded",
                         sub=user_info.get("sub"),
                         email=user_info.get("email"),
                         category="auth",
                     )
                 except Exception as e:
                     logger.warning(
-                        "openai_id_token_decode_error",
+                        "codex_oauth_id_token_decode_error",
                         error=str(e),
                         exc_info=e,
                         category="auth",
@@ -143,7 +143,7 @@ class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
             )
 
             logger.info(
-                "openai_credentials_parsed",
+                "codex_oauth_credentials_parsed",
                 has_refresh_token=bool(refresh_token),
                 expires_in=expires_in,
                 has_id_token=bool(data.get("id_token")),
@@ -155,7 +155,7 @@ class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
 
         except KeyError as e:
             logger.error(
-                "openai_token_response_missing_field",
+                "codex_oauth_token_response_missing_field",
                 missing_field=str(e),
                 response_keys=list(data.keys()),
                 category="auth",
@@ -163,7 +163,7 @@ class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
             raise OAuthError(f"Missing required field in token response: {e}") from e
         except Exception as e:
             logger.error(
-                "openai_token_response_parse_error",
+                "codex_oauth_token_response_parse_error",
                 error=str(e),
                 error_type=type(e).__name__,
                 category="auth",
@@ -208,7 +208,7 @@ class CodexOAuthClient(BaseOAuthClient[OpenAICredentials]):
 
         except Exception as e:
             logger.error(
-                "openai_token_refresh_failed",
+                "codex_oauth_token_refresh_failed",
                 error=str(e),
                 exc_info=False,
                 category="auth",

@@ -19,6 +19,7 @@ from ccproxy.auth.models import (
     ClaudeCredentials,
     OAuthToken,
 )
+from ccproxy.auth.oauth.registry import get_oauth_registry
 
 
 logger = get_logger(__name__)
@@ -192,7 +193,7 @@ async def oauth_callback(
         custom_paths = flow["custom_paths"]
 
         # Exchange authorization code for tokens
-        success = await _exchange_code_for_tokens(code, code_verifier, custom_paths)
+        success = await _exchange_code_for_tokens(code, code_verifier, state, custom_paths)
 
         # Update flow result
         _pending_flows[state].update(
@@ -381,166 +382,64 @@ async def oauth_callback(
 
 
 async def _exchange_code_for_tokens(
-    authorization_code: str, code_verifier: str, custom_paths: list[Path] | None = None
+    authorization_code: str, code_verifier: str, state: str, custom_paths: list[Path] | None = None
 ) -> bool:
     """Exchange authorization code for access tokens."""
     try:
         from datetime import UTC, datetime
 
-        import httpx
+        # Get OAuth provider from registry
+        registry = get_oauth_registry()
+        oauth_provider = registry.get_provider("claude-api")
+        if not oauth_provider:
+            logger.error("claude_oauth_provider_not_found", category="auth")
+            return False
 
-        # Create OAuth config with default values
-        from plugins.claude_api.auth.oauth.config import ClaudeOAuthConfig
-
-        oauth_config = ClaudeOAuthConfig()
-
-        # Exchange authorization code for tokens
-        token_data = {
-            "grant_type": "authorization_code",
-            "code": authorization_code,
-            "redirect_uri": oauth_config.redirect_uri,
-            "client_id": oauth_config.client_id,
-            "code_verifier": code_verifier,
-        }
-
-        headers = {
-            "Content-Type": "application/json",
-            "anthropic-beta": oauth_config.beta_version,
-            "User-Agent": oauth_config.user_agent,
-        }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                oauth_config.token_url,
-                headers=headers,
-                json=token_data,
-                timeout=30.0,
+        # Use OAuth provider to handle the callback
+        try:
+            credentials = await oauth_provider.handle_callback(
+                authorization_code, state, code_verifier
             )
 
-            if response.status_code == 200:
-                result = response.json()
-
-                # Calculate expires_at from expires_in
-                expires_in = result.get("expires_in")
-                expires_at = None
-                if expires_in:
-                    expires_at = int(
-                        (datetime.now(UTC).timestamp() + expires_in) * 1000
-                    )
-
-                # Create credentials object
-                oauth_data = {
-                    "accessToken": result.get("access_token"),
-                    "refreshToken": result.get("refresh_token"),
-                    "expiresAt": expires_at,
-                    "scopes": result.get("scope", "").split()
-                    if result.get("scope")
-                    else oauth_config.scopes,
-                    "subscriptionType": result.get("subscription_type", "unknown"),
-                }
-
-                credentials = ClaudeCredentials(claudeAiOauth=OAuthToken(**oauth_data))
-
-                # Save credentials using plugin's token manager
-                # This is Claude API OAuth based on the anthropic-beta header
+            # Save credentials using plugin's token manager if custom paths specified
+            if custom_paths:
                 from ccproxy.auth.storage.generic import GenericJsonStorage
                 from plugins.claude_api.auth.manager import ClaudeApiTokenManager
 
-                if custom_paths:
-                    # Use the first custom path for storage
-                    storage = GenericJsonStorage(custom_paths[0], ClaudeCredentials)
-                    manager = ClaudeApiTokenManager(storage=storage)
-                else:
-                    manager = ClaudeApiTokenManager()
-
+                # Use the first custom path for storage
+                storage = GenericJsonStorage(custom_paths[0], ClaudeCredentials)
+                manager = ClaudeApiTokenManager(storage=storage)
                 if await manager.save_credentials(credentials):
                     logger.info(
-                        "Successfully saved OAuth credentials",
-                        subscription_type=oauth_data["subscriptionType"],
-                        scopes=oauth_data["scopes"],
+                        "Successfully saved OAuth credentials to custom path",
                         operation="exchange_code_for_tokens",
                     )
-                    return True
                 else:
                     logger.error(
-                        "Failed to save OAuth credentials",
+                        "Failed to save OAuth credentials to custom path",
                         error_type="save_credentials_failed",
                         operation="exchange_code_for_tokens",
                     )
-                    return False
 
-            else:
-                # Use compact logging for the error message
-                import os
+            logger.info(
+                "OAuth flow completed successfully",
+                operation="exchange_code_for_tokens",
+            )
+            return True
 
-                verbose_api = (
-                    os.environ.get("CCPROXY_VERBOSE_API", "false").lower() == "true"
-                )
+        except Exception as e:
+            logger.error(
+                "oauth_provider_callback_error",
+                error=str(e),
+                error_type=type(e).__name__,
+                operation="exchange_code_for_tokens",
+                exc_info=e,
+            )
+            return False
 
-                if verbose_api:
-                    error_detail = response.text
-                else:
-                    response_text = response.text
-                    if len(response_text) > 200:
-                        error_detail = f"{response_text[:100]}...{response_text[-50:]}"
-                    elif len(response_text) > 100:
-                        error_detail = f"{response_text[:100]}..."
-                    else:
-                        error_detail = response_text
-
-                logger.error(
-                    "Token exchange failed",
-                    error_type="token_exchange_failed",
-                    status_code=response.status_code,
-                    error_detail=error_detail,
-                    verbose_api_enabled=verbose_api,
-                    operation="exchange_code_for_tokens",
-                )
-                return False
-
-    except httpx.TimeoutException as e:
-        logger.error(
-            "token_exchange_timeout",
-            error=str(e),
-            operation="exchange_code_for_tokens",
-            exc_info=e,
-        )
-        return False
-    except httpx.HTTPError as e:
-        logger.error(
-            "token_exchange_http_error",
-            error=str(e),
-            operation="exchange_code_for_tokens",
-            exc_info=e,
-        )
-        return False
-    except CredentialsStorageError as e:
-        logger.error(
-            "credentials_save_failed",
-            error=str(e),
-            operation="exchange_code_for_tokens",
-            exc_info=e,
-        )
-        return False
-    except json.JSONDecodeError as e:
-        logger.error(
-            "token_exchange_json_decode_error",
-            error=str(e),
-            operation="exchange_code_for_tokens",
-            exc_info=e,
-        )
-        return False
-    except ValidationError as e:
-        logger.error(
-            "token_exchange_validation_error",
-            error=str(e),
-            operation="exchange_code_for_tokens",
-            exc_info=e,
-        )
-        return False
     except Exception as e:
         logger.error(
-            "token_exchange_unexpected_error",
+            "oauth_exchange_error",
             error=str(e),
             operation="exchange_code_for_tokens",
             exc_info=e,

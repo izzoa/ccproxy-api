@@ -1,4 +1,4 @@
-"""OAuth configuration for Claude API plugin."""
+"""OAuth configuration for Claude OAuth plugin."""
 
 from pydantic import BaseModel, Field
 

@@ -1,48 +1,48 @@
-"""Claude OAuth provider for plugin registration."""
+"""Codex/OpenAI OAuth provider for plugin registration."""
 
 import hashlib
 from base64 import urlsafe_b64encode
 from typing import Any
 from urllib.parse import urlencode
 
-from ccproxy.auth.models import ClaudeCredentials
+from ccproxy.auth.models import OpenAICredentials
 from ccproxy.auth.oauth.registry import OAuthProviderInfo
 from ccproxy.core.logging import get_plugin_logger
-from plugins.claude_api.auth.oauth.client import ClaudeOAuthClient
-from plugins.claude_api.auth.oauth.config import ClaudeOAuthConfig
-from plugins.claude_api.auth.storage import ClaudeApiTokenStorage as ClaudeTokenStorage
+from plugins.oauth_codex.client import CodexOAuthClient
+from plugins.oauth_codex.config import CodexOAuthConfig
+from plugins.oauth_codex.storage import CodexOAuthStorage
 
 
 logger = get_plugin_logger()
 
 
-class ClaudeOAuthProvider:
-    """Claude OAuth provider implementation for registry."""
+class CodexOAuthProvider:
+    """Codex/OpenAI OAuth provider implementation for registry."""
 
     def __init__(
         self,
-        config: ClaudeOAuthConfig | None = None,
-        storage: ClaudeTokenStorage | None = None,
+        config: CodexOAuthConfig | None = None,
+        storage: CodexOAuthStorage | None = None,
     ):
-        """Initialize Claude OAuth provider.
+        """Initialize Codex OAuth provider.
 
         Args:
             config: OAuth configuration
             storage: Token storage
         """
-        self.config = config or ClaudeOAuthConfig()
-        self.storage = storage or ClaudeTokenStorage()
-        self.client = ClaudeOAuthClient(self.config, self.storage)
+        self.config = config or CodexOAuthConfig()
+        self.storage = storage or CodexOAuthStorage()
+        self.client = CodexOAuthClient(self.config, self.storage)
 
     @property
     def provider_name(self) -> str:
         """Internal provider name."""
-        return "claude-api"
+        return "codex"
 
     @property
     def provider_display_name(self) -> str:
         """Display name for UI."""
-        return "Claude API"
+        return "OpenAI Codex"
 
     @property
     def supports_pkce(self) -> bool:
@@ -57,7 +57,7 @@ class ClaudeOAuthProvider:
     @property
     def requires_client_secret(self) -> bool:
         """Whether this provider requires a client secret."""
-        return False  # Claude uses PKCE-like flow without client secret
+        return False  # OpenAI uses PKCE flow without client secret
 
     async def get_authorization_url(
         self, state: str, code_verifier: str | None = None
@@ -77,6 +77,7 @@ class ClaudeOAuthProvider:
             "response_type": "code",
             "scope": " ".join(self.config.scopes),
             "state": state,
+            "audience": self.config.audience,
         }
 
         # Add PKCE challenge if supported and verifier provided
@@ -92,9 +93,10 @@ class ClaudeOAuthProvider:
         auth_url = f"{self.config.authorize_url}?{urlencode(params)}"
 
         logger.info(
-            "claude_auth_url_generated",
+            "codex_oauth_auth_url_generated",
             state=state,
             has_pkce=bool(code_verifier and self.config.use_pkce),
+            audience=self.config.audience,
             category="auth",
         )
 
@@ -111,22 +113,23 @@ class ClaudeOAuthProvider:
             code_verifier: PKCE code verifier (if PKCE is used)
 
         Returns:
-            Claude credentials object
+            OpenAI credentials object
         """
         # Use the client's handle_callback method which includes code exchange
-        credentials: ClaudeCredentials = await self.client.handle_callback(
+        credentials: OpenAICredentials = await self.client.handle_callback(
             code, state, code_verifier or ""
         )
 
         # The client already saves to storage if available, but we can save again
         # to our specific storage if needed
-        if self.storage and hasattr(self.storage, "save_credentials"):
-            await self.storage.save_credentials(credentials)
+        if self.storage:
+            await self.storage.save(credentials)
 
         logger.info(
-            "claude_oauth_callback_handled",
+            "codex_oauth_callback_handled",
             state=state,
             has_credentials=bool(credentials),
+            has_id_token=bool(credentials.id_token),
             category="auth",
         )
 
@@ -145,9 +148,9 @@ class ClaudeOAuthProvider:
 
         # Store updated credentials
         if self.storage:
-            await self.storage.save_credentials(credentials)
+            await self.storage.save(credentials)
 
-        logger.info("claude_token_refreshed", category="auth")
+        logger.info("codex_oauth_token_refreshed", category="auth")
 
         return credentials
 
@@ -157,11 +160,11 @@ class ClaudeOAuthProvider:
         Args:
             token: Token to revoke
         """
-        # Claude doesn't have a revoke endpoint, so we just delete stored credentials
+        # OpenAI doesn't have a revoke endpoint, so we just delete stored credentials
         if self.storage:
-            await self.storage.delete_credentials()
+            await self.storage.delete()
 
-        logger.info("claude_token_revoked_locally", category="auth")
+        logger.info("codex_oauth_token_revoked_locally", category="auth")
 
     def get_provider_info(self) -> OAuthProviderInfo:
         """Get provider information for discovery.
@@ -172,11 +175,11 @@ class ClaudeOAuthProvider:
         return OAuthProviderInfo(
             name=self.provider_name,
             display_name=self.provider_display_name,
-            description="OAuth authentication for Claude AI",
+            description="OAuth authentication for OpenAI Codex",
             supports_pkce=self.supports_pkce,
             scopes=self.config.scopes,
             is_available=True,
-            plugin_name="claude_api",
+            plugin_name="oauth_codex",
         )
 
     async def validate_token(self, access_token: str) -> bool:
@@ -188,14 +191,11 @@ class ClaudeOAuthProvider:
         Returns:
             True if token is valid
         """
-        # Claude doesn't have a validation endpoint, so we check if stored token matches
+        # OpenAI doesn't have a validation endpoint, so we check if stored token matches
         if self.storage:
-            credentials = await self.storage.load_credentials()
-            if credentials and credentials.claude_ai_oauth:
-                stored_token = (
-                    credentials.claude_ai_oauth.access_token.get_secret_value()
-                )
-                return stored_token == access_token
+            credentials = await self.storage.load()
+            if credentials:
+                return credentials.access_token == access_token
         return False
 
     async def get_user_info(self, access_token: str) -> dict[str, Any] | None:
@@ -207,15 +207,36 @@ class ClaudeOAuthProvider:
         Returns:
             User information or None
         """
-        # Load stored credentials which contain user info
+        # Load stored credentials
         if self.storage:
-            credentials = await self.storage.load_credentials()
-            if credentials and credentials.claude_ai_oauth:
-                return {
-                    "subscription_type": credentials.claude_ai_oauth.subscription_type,
-                    "scopes": credentials.claude_ai_oauth.scopes,
-                    "token_type": credentials.claude_ai_oauth.token_type,
+            credentials = await self.storage.load()
+            if credentials:
+                info = {
+                    "account_id": credentials.account_id,
+                    "active": credentials.active,
+                    "has_id_token": bool(credentials.id_token),
                 }
+
+                # Try to extract info from ID token if present
+                if credentials.id_token:
+                    try:
+                        import jwt
+
+                        decoded = jwt.decode(
+                            credentials.id_token,
+                            options={"verify_signature": False},
+                        )
+                        info.update(
+                            {
+                                "email": decoded.get("email"),
+                                "name": decoded.get("name"),
+                                "sub": decoded.get("sub"),
+                            }
+                        )
+                    except Exception:
+                        pass
+
+                return info
         return None
 
     def get_storage(self) -> Any:
@@ -234,35 +255,35 @@ class ClaudeOAuthProvider:
         """
         return self.config
 
-    def get_credential_summary(self, credentials: ClaudeCredentials) -> dict[str, Any]:
+    def get_credential_summary(self, credentials: OpenAICredentials) -> dict[str, Any]:
         """Get a summary of credentials for display.
 
         Args:
-            credentials: Claude credentials
+            credentials: OpenAI credentials
 
         Returns:
             Dictionary with display-friendly credential summary
         """
         summary = {
             "provider": self.provider_display_name,
-            "authenticated": bool(credentials and credentials.claude_ai_oauth),
+            "authenticated": bool(credentials),
         }
 
-        if credentials and credentials.claude_ai_oauth:
-            oauth = credentials.claude_ai_oauth
+        if credentials:
             summary.update(
                 {
-                    "subscription_type": oauth.subscription_type,
-                    "scopes": oauth.scopes,
-                    "has_refresh_token": bool(oauth.refresh_token),
-                    "expired": oauth.is_expired
-                    if hasattr(oauth, "is_expired")
+                    "account_id": credentials.account_id,
+                    "active": credentials.active,
+                    "has_refresh_token": bool(credentials.refresh_token),
+                    "has_id_token": bool(credentials.id_token),
+                    "expired": credentials.is_expired()
+                    if hasattr(credentials, "is_expired")
                     else False,
                 }
             )
 
             # Add expiration info if available
-            if hasattr(oauth, "expires_at_datetime"):
-                summary["expires_at"] = oauth.expires_at_datetime.isoformat()
+            if hasattr(credentials, "expires_at"):
+                summary["expires_at"] = str(credentials.expires_at)
 
         return summary
