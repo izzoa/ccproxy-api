@@ -9,7 +9,6 @@ from typing import Any, Protocol, TextIO
 import structlog
 from rich.console import Console
 from rich.traceback import Traceback
-from structlog.stdlib import BoundLogger
 from structlog.typing import ExcInfo, Processor
 
 

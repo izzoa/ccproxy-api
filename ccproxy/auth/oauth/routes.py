@@ -1,6 +1,5 @@
 """OAuth authentication routes for Anthropic OAuth login."""
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +16,6 @@ from ccproxy.auth.exceptions import (
 )
 from ccproxy.auth.models import (
     ClaudeCredentials,
-    OAuthToken,
 )
 from ccproxy.auth.oauth.registry import get_oauth_registry
 
@@ -193,7 +191,9 @@ async def oauth_callback(
         custom_paths = flow["custom_paths"]
 
         # Exchange authorization code for tokens
-        success = await _exchange_code_for_tokens(code, code_verifier, state, custom_paths)
+        success = await _exchange_code_for_tokens(
+            code, code_verifier, state, custom_paths
+        )
 
         # Update flow result
         _pending_flows[state].update(
@@ -382,12 +382,13 @@ async def oauth_callback(
 
 
 async def _exchange_code_for_tokens(
-    authorization_code: str, code_verifier: str, state: str, custom_paths: list[Path] | None = None
+    authorization_code: str,
+    code_verifier: str,
+    state: str,
+    custom_paths: list[Path] | None = None,
 ) -> bool:
     """Exchange authorization code for access tokens."""
     try:
-        from datetime import UTC, datetime
-
         # Get OAuth provider from registry
         registry = get_oauth_registry()
         oauth_provider = registry.get_provider("claude-api")

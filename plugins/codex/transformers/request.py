@@ -1,13 +1,11 @@
 """Codex request transformer - headers and auth only."""
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ccproxy.core.logging import get_plugin_logger
 
-
-if TYPE_CHECKING:
-    from plugins.codex.detection_service import CodexDetectionService
+from ..detection_service import CodexDetectionService
 
 
 logger = get_plugin_logger()
@@ -18,12 +16,11 @@ class CodexRequestTransformer:
 
     Handles:
     - Header transformation and auth injection
-    - Session ID header addition
     - Codex CLI headers injection from detection service
-    - Minimal instructions field injection
+    - System prompt injection (instructions field) injection
     """
 
-    def __init__(self, detection_service: "CodexDetectionService | None" = None):
+    def __init__(self, detection_service: CodexDetectionService | None = None):
         """Initialize the request transformer.
 
         Args:
@@ -34,9 +31,8 @@ class CodexRequestTransformer:
     def transform_headers(
         self,
         headers: dict[str, str],
-        session_id: str,
         access_token: str | None = None,
-        **kwargs: str,
+        **kwargs: Any,
     ) -> dict[str, str]:
         """Transform request headers for Codex API.
 
@@ -49,6 +45,19 @@ class CodexRequestTransformer:
         Returns:
             Transformed headers with Codex-specific headers
         """
+        # Get logger with request context at the start of the function
+        logger = get_plugin_logger()
+
+        # Debug logging
+        logger.debug(
+            "transform_headers_called",
+            has_access_token=access_token is not None,
+            access_token_length=len(access_token) if access_token else 0,
+            header_count=len(headers),
+            has_authorization="Authorization" in headers,
+            category="transform",
+        )
+
         transformed = headers.copy()
 
         # Remove hop-by-hop headers
@@ -68,70 +77,44 @@ class CodexRequestTransformer:
             k: v for k, v in transformed.items() if k.lower() not in hop_by_hop
         }
 
-        # Add session ID
-        transformed["session_id"] = session_id
-
-        # Add authorization - Codex API expects it but we'll attempt anyway
-        if access_token:
-            # Remove any existing authorization headers and add the JWT token
-            transformed.pop("authorization", None)  # Remove lowercase variant
-            transformed.pop("Authorization", None)  # Remove capitalized variant
-            transformed["Authorization"] = f"Bearer {access_token}"
-            logger.info(
-                "codex_auth_token_added",
-                token_preview=f"{access_token[:20]}..."
-                if len(access_token) > 20
-                else access_token,
-                category="http",
-            )
-        else:
-            # Warn about missing/expired token but still attempt the request
-            logger.warning(
-                "OpenAI token is expired or missing. Attempting request anyway. "
-                "To refresh authentication, run 'ccproxy auth login-openai'",
-                category="http",
-            )
-            # Still set Authorization header even with no token
-            # The API will return 401 if auth is truly required
-            transformed["Authorization"] = "Bearer "
-
-        # Inject detected Codex CLI headers if available
+        # Inject detected headers if available
+        has_detected_headers = False
         if self.detection_service:
             cached_data = self.detection_service.get_cached_data()
             if cached_data and cached_data.headers:
                 detected_headers = cached_data.headers.to_headers_dict()
                 logger.debug(
-                    "injecting_detected_codex_headers",
+                    "injecting_detected_headers",
                     version=cached_data.codex_version,
                     header_count=len(detected_headers),
-                    category="http",
+                    category="transform",
                 )
-                # Override with detected headers (except session_id)
-                for key, value in detected_headers.items():
-                    if key.lower() != "session_id":
-                        transformed[key] = value
-        else:
-            # Fallback headers
-            transformed.update(
-                {
-                    "originator": "codex_cli_rs",
-                    "openai-beta": "responses=experimental",
-                    "version": "0.21.0",
-                }
-            )
+                # Detected headers take precedence
+                transformed.update(detected_headers)
+                has_detected_headers = True
 
-        # Set standard headers
-        if "content-type" not in [k.lower() for k in transformed]:
-            transformed["Content-Type"] = "application/json"
-        if "accept" not in [k.lower() for k in transformed]:
-            transformed["Accept"] = "application/json"
+        if not access_token:
+            raise RuntimeError("access_token parameter is required")
 
-        logger.info(
-            "codex_headers_final",
-            headers=dict(transformed),
-            session_id=session_id,
+        # TODO: Disabled injection of content-type and accept headers for now
+        # it's normally set by the client
+        # if "content-type" not in [k.lower() for k in transformed]:
+        #     transformed["Content-Type"] = "application/json"
+        # if "accept" not in [k.lower() for k in transformed]:
+        #     transformed["Accept"] = "application/json"
+
+        # Inject access token in Authentication header
+        transformed["Authorization"] = f"Bearer {access_token}"
+
+        # Debug logging - what headers are we returning?
+        logger.debug(
+            "transform_headers_result",
+            has_authorization="Authorization" in transformed,
+            header_count=len(transformed),
+            detected_headers_used=has_detected_headers,
             category="transform",
         )
+
         return transformed
 
     def transform_body(self, body: bytes | None) -> bytes | None:
@@ -143,11 +126,16 @@ class CodexRequestTransformer:
         Returns:
             Body with instructions injected if needed
         """
-        logger.info(
+        logger = get_plugin_logger()
+
+        logger.debug(
             "transform_body_called",
+            has_body=body is not None,
             body_length=len(body) if body else 0,
+            has_detection_service=self.detection_service is not None,
             category="transform",
         )
+
         if not body:
             return body
 
@@ -156,11 +144,17 @@ class CodexRequestTransformer:
             logger.info(
                 "parsed_request_body",
                 keys=list(data.keys()),
-                has_instructions="instructions" in data,
                 category="transform",
             )
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.warning("body_decode_failed", error=str(e), category="transform")
+            logger.warning(
+                "body_decode_failed",
+                error=str(e),
+                body_preview=body[:100].decode("utf-8", errors="replace")
+                if body
+                else None,
+                category="transform",
+            )
             return body
 
         # Only inject instructions if missing or None

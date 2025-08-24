@@ -111,6 +111,52 @@ class ClaudeApiTokenManager(BaseTokenManager[ClaudeCredentials]):
         wrapper = ClaudeTokenWrapper(credentials=credentials)
         return wrapper.expires_at_datetime
 
+    async def get_access_token(self) -> str | None:
+        """Get valid access token, automatically refreshing if expired.
+
+        Returns:
+            Access token if available and valid, None otherwise
+        """
+        credentials = await self.load_credentials()
+        if not credentials:
+            logger.debug("no_credentials_found", category="auth")
+            return None
+
+        # Check if token is expired
+        if self.is_expired(credentials):
+            logger.info("claude_token_expired_attempting_refresh", category="auth")
+
+            # Try to refresh if we have a refresh token
+            wrapper = ClaudeTokenWrapper(credentials=credentials)
+            refresh_token = wrapper.refresh_token_value
+            if refresh_token:
+                try:
+                    refreshed = await self.refresh_token()
+                    if refreshed:
+                        logger.info(
+                            "claude_token_refreshed_successfully", category="auth"
+                        )
+                        wrapper = ClaudeTokenWrapper(credentials=refreshed)
+                        return wrapper.access_token_value
+                    else:
+                        logger.error("claude_token_refresh_failed", category="auth")
+                        return None
+                except Exception as e:
+                    logger.error(
+                        "Error refreshing Claude token", error=str(e), category="auth"
+                    )
+                    return None
+            else:
+                logger.warning(
+                    "Cannot refresh Claude token - no refresh token available",
+                    category="auth",
+                )
+                return None
+
+        # Token is still valid
+        wrapper = ClaudeTokenWrapper(credentials=credentials)
+        return wrapper.access_token_value
+
     async def get_access_token_value(self) -> str | None:
         """Get the actual access token value.
 

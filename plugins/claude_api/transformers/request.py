@@ -1,9 +1,11 @@
 """Claude API request transformer."""
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ccproxy.core.logging import get_plugin_logger
+
+from ..detection_service import ClaudeAPIDetectionService
 
 
 logger = get_plugin_logger()
@@ -13,12 +15,12 @@ class ClaudeAPIRequestTransformer:
     """Transform requests for Claude API.
 
     Handles:
-    - Header transformation and injection of detected Claude CLI headers
+    - Header transformation and auth injection
+    - Claude CLI headers injection from detection service
     - System prompt injection from detected Claude CLI data
-    - OAuth token conversion (Bearer -> x-api-key)
     """
 
-    def __init__(self, detection_service: Any | None = None):
+    def __init__(self, detection_service: ClaudeAPIDetectionService | None = None):
         """Initialize the request transformer.
 
         Args:
@@ -29,7 +31,6 @@ class ClaudeAPIRequestTransformer:
     def transform_headers(
         self,
         headers: dict[str, str],
-        session_id: str = "",
         access_token: str | None = None,
         **kwargs: Any,
     ) -> dict[str, str]:
@@ -97,25 +98,11 @@ class ClaudeAPIRequestTransformer:
                 transformed.update(detected_headers)
                 has_detected_headers = True
 
-        # Only convert to x-api-key if we don't have detected headers
-        # (detected headers should include proper Authorization)
-        if not has_detected_headers:
-            # Convert Authorization header to x-api-key if needed
-            # First check if we got an access_token parameter (from new interface)
-            if access_token:  # and "x-api-key" not in transformed:
-                transformed["x-api-key"] = access_token
-                # Remove any Authorization header since we're using x-api-key
-                transformed.pop("Authorization", None)
-                logger.debug("converted_bearer_to_api_key", category="transform")
-            # Fallback to old method if no access_token parameter
-            elif "Authorization" in transformed and "x-api-key" not in transformed:
-                auth_header = transformed.pop("Authorization")
-                if auth_header.startswith("Bearer "):
-                    token = auth_header.replace("Bearer ", "")
-                    transformed["x-api-key"] = token
-                    logger.debug("converted_bearer_to_api_key", category="transform")
-        else:
-            logger.debug("using_detected_headers_for_auth", category="transform")
+        if not access_token:
+            raise RuntimeError("access_token parameter is required")
+
+        # Inject access token in Authentication header
+        transformed["Authorization"] = f"Bearer {access_token}"
 
         # Debug logging - what headers are we returning?
         logger.debug(
@@ -156,6 +143,11 @@ class ClaudeAPIRequestTransformer:
 
         try:
             data = json.loads(body.decode("utf-8"))
+            logger.info(
+                "parsed_request_body",
+                keys=list(data.keys()),
+                category="transform",
+            )
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.warning(
                 "body_decode_failed",
@@ -208,45 +200,3 @@ class ClaudeAPIRequestTransformer:
             logger.debug("no_detection_service_available", category="transform")
 
         return json.dumps(data).encode("utf-8")
-
-    async def transform(
-        self, headers: dict[str, str], body: bytes | None
-    ) -> tuple[dict[str, str], bytes | None]:
-        """Transform both headers and body.
-
-        Args:
-            headers: Request headers
-            body: Request body
-
-        Returns:
-            Tuple of (transformed_headers, transformed_body)
-        """
-        transformed_headers = self.transform_headers(headers)
-        transformed_body = self.transform_body(body)
-        return transformed_headers, transformed_body
-
-    async def adapt_request(self, request_json: dict[str, Any]) -> dict[str, Any]:
-        """Adapt request for compatibility with ProxyService.
-
-        This method provides the interface expected by ProxyService.
-
-        Args:
-            request_json: Request body as JSON dict
-
-        Returns:
-            Transformed request body as JSON dict
-        """
-        # Convert to bytes for transformation
-        body_bytes = json.dumps(request_json).encode("utf-8")
-
-        # Apply body transformation (system prompt injection)
-        transformed_bytes = self.transform_body(body_bytes)
-
-        # Convert back to dict
-        if transformed_bytes:
-            result = json.loads(transformed_bytes.decode("utf-8"))
-            if isinstance(result, dict):
-                return result
-            # If not a dict, return original
-            return request_json
-        return request_json
