@@ -8,13 +8,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from ccproxy.core.system import get_xdg_cache_home
 
 
-class PricingSettings(BaseSettings):
+class PricingConfig(BaseSettings):
     """
     Configuration settings for the pricing system.
 
     Controls pricing cache behavior, data sources, and update mechanisms.
     Settings can be configured via environment variables with PRICING__ prefix.
     """
+
+    enabled: bool = Field(
+        default=True,
+        description="Whether the pricing plugin is enabled",
+    )
 
     # Cache settings
     cache_dir: Path = Field(
@@ -59,6 +64,19 @@ class PricingSettings(BaseSettings):
         ge=1,
         le=3600,  # Max 1 hour
         description="Time to live for in-memory pricing cache in seconds",
+    )
+
+    # Task scheduling settings
+    update_interval_hours: float = Field(
+        default=6.0,
+        ge=0.1,
+        le=168.0,  # Max 1 week
+        description="Hours between scheduled pricing updates",
+    )
+
+    force_refresh_on_startup: bool = Field(
+        default=False,
+        description="Whether to force pricing refresh on plugin startup",
     )
 
     @field_validator("cache_dir", mode="before")

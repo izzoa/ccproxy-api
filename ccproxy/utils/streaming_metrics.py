@@ -169,13 +169,9 @@ class StreamingMetricsCollector:
         Returns:
             Final cost in USD or None if calculation fails
         """
-        cost_usd = calculate_token_cost(
-            self.metrics["tokens_input"],
-            self.metrics["tokens_output"],
-            model,
-            self.metrics["cache_read_tokens"],
-            self.metrics["cache_write_tokens"],
-        )
+        # Pricing calculation is now async and handled by plugin
+        # For now, cost calculation is not available in streaming context
+        cost_usd = None
         self.metrics["cost_usd"] = cost_usd
 
         logger.debug(

@@ -9,7 +9,6 @@ from .errors import SchedulerError, TaskRegistrationError
 from .registry import register_task
 from .tasks import (
     PoolStatsTask,
-    PricingCacheUpdateTask,
     PushgatewayTask,
     StatsPrintingTask,
     VersionUpdateCheckTask,
@@ -103,38 +102,13 @@ async def setup_scheduler_tasks(scheduler: Scheduler, settings: Settings) -> Non
                 exc_info=e,
             )
 
-    # Add pricing cache update task if enabled
+    # Pricing cache update task is now handled by the pricing plugin
     if scheduler_config.pricing_update_enabled:
-        try:
-            # Convert hours to seconds
-            interval_seconds = scheduler_config.pricing_update_interval_hours * 3600
-
-            await scheduler.add_task(
-                task_name="pricing_cache_update",
-                task_type="pricing_cache_update",
-                interval_seconds=interval_seconds,
-                enabled=True,
-                force_refresh_on_startup=scheduler_config.pricing_force_refresh_on_startup,
-            )
-            logger.debug(
-                "pricing_update_task_added",
-                interval_hours=scheduler_config.pricing_update_interval_hours,
-                force_refresh_on_startup=scheduler_config.pricing_force_refresh_on_startup,
-            )
-        except TaskRegistrationError as e:
-            logger.error(
-                "pricing_update_task_registration_failed",
-                error=str(e),
-                error_type=type(e).__name__,
-                exc_info=e,
-            )
-        except Exception as e:
-            logger.error(
-                "pricing_update_task_add_failed",
-                error=str(e),
-                error_type=type(e).__name__,
-                exc_info=e,
-            )
+        logger.info(
+            "pricing_update_task_handled_by_plugin",
+            message="Pricing updates are now managed by the pricing plugin",
+            interval_hours=scheduler_config.pricing_update_interval_hours,
+        )
 
     # Add version update check task if enabled
     if scheduler_config.version_check_enabled:
@@ -190,8 +164,6 @@ def _register_default_tasks(settings: Settings) -> None:
         register_task("stats_printing", StatsPrintingTask)
 
     # Always register core tasks (not metrics-related)
-    if not registry.is_registered("pricing_cache_update"):
-        register_task("pricing_cache_update", PricingCacheUpdateTask)
     if not registry.is_registered("version_update_check"):
         register_task("version_update_check", VersionUpdateCheckTask)
     if not registry.is_registered("pool_stats"):

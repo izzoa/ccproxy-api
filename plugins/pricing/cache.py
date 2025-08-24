@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from structlog import get_logger
 
-from ccproxy.config.pricing import PricingSettings
+from .config import PricingConfig
 
 
 logger = get_logger(__name__)
@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 class PricingCache:
     """Manages caching of model pricing data from external sources."""
 
-    def __init__(self, settings: PricingSettings) -> None:
+    def __init__(self, settings: PricingConfig) -> None:
         """Initialize pricing cache.
 
         Args:

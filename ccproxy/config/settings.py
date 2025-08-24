@@ -20,7 +20,6 @@ from .cors import CORSSettings
 from .docker_settings import DockerSettings
 from .http import HTTPSettings
 from .observability import ObservabilitySettings
-from .pricing import PricingSettings
 from .reverse_proxy import ReverseProxySettings
 from .scheduler import SchedulerSettings
 from .security import SecuritySettings
@@ -142,12 +141,6 @@ class Settings(BaseSettings):
     scheduler: SchedulerSettings = Field(
         default_factory=SchedulerSettings,
         description="Task scheduler configuration settings",
-    )
-
-    # Pricing settings
-    pricing: PricingSettings = Field(
-        default_factory=PricingSettings,
-        description="Pricing and cost calculation configuration settings",
     )
 
     # Plugin settings

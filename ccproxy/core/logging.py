@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Any, Protocol, TextIO
 
 import structlog
-from structlog.stdlib import BoundLogger
 from rich.console import Console
 from rich.traceback import Traceback
+from structlog.stdlib import BoundLogger
 from structlog.typing import ExcInfo, Processor
 
 
@@ -71,7 +71,7 @@ logging.Logger.trace = trace  # type: ignore[attr-defined]
 # Custom BoundLogger that includes trace method
 class TraceBoundLoggerImpl(BoundLogger):
     """BoundLogger with trace method support."""
-    
+
     def trace(self, msg: str, *args: Any, **kwargs: Any) -> Any:
         """Log at TRACE level."""
         return self.log(TRACE_LEVEL, msg, *args, **kwargs)

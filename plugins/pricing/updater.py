@@ -8,9 +8,8 @@ import httpx
 from pydantic import ValidationError
 from structlog import get_logger
 
-from ccproxy.config.pricing import PricingSettings
-
 from .cache import PricingCache
+from .config import PricingConfig
 from .loader import PricingLoader
 from .models import PricingData
 
@@ -24,7 +23,7 @@ class PricingUpdater:
     def __init__(
         self,
         cache: PricingCache,
-        settings: PricingSettings,
+        settings: PricingConfig,
     ) -> None:
         """Initialize pricing updater.
 

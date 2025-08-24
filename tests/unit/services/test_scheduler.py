@@ -19,7 +19,6 @@ from ccproxy.scheduler.errors import (
 from ccproxy.scheduler.manager import start_scheduler, stop_scheduler
 from ccproxy.scheduler.registry import TaskRegistry, get_task_registry
 from ccproxy.scheduler.tasks import (
-    PricingCacheUpdateTask,
     PushgatewayTask,
     StatsPrintingTask,
 )
@@ -42,7 +41,6 @@ class TestSchedulerCore:
         """Create a test scheduler instance."""
         # Register tasks before creating scheduler
         from ccproxy.scheduler.tasks import (
-            PricingCacheUpdateTask,
             PushgatewayTask,
             StatsPrintingTask,
         )
@@ -53,7 +51,6 @@ class TestSchedulerCore:
         # Register default tasks
         registry.register("pushgateway", PushgatewayTask)
         registry.register("stats_printing", StatsPrintingTask)
-        registry.register("pricing_cache_update", PricingCacheUpdateTask)
 
         scheduler = Scheduler(
             max_concurrent_tasks=5,
@@ -331,43 +328,6 @@ class TestScheduledTasks:
             await task.cleanup()
 
     @pytest.mark.asyncio
-    async def test_pricing_cache_update_task_lifecycle(self) -> None:
-        """Test PricingCacheUpdateTask lifecycle management."""
-        with patch(
-            "ccproxy.pricing.updater.PricingUpdater"
-        ) as mock_pricing_updater_class:
-            mock_pricing_updater = AsyncMock()
-            mock_pricing_updater.get_current_pricing.return_value = {
-                "model": "claude-3"
-            }
-            mock_pricing_updater.force_refresh.return_value = True
-            mock_pricing_updater_class.return_value = mock_pricing_updater
-
-            task = PricingCacheUpdateTask(
-                name="test_pricing",
-                interval_seconds=0.1,
-                enabled=True,
-                force_refresh_on_startup=True,
-            )
-
-            await task.setup()
-            assert task._pricing_updater is not None
-
-            # Test force refresh on first run
-            result = await task.run()
-            assert result is True
-            mock_pricing_updater.force_refresh.assert_called_once()
-
-            # Test regular update on second run
-            result = await task.run()
-            assert result is True
-            mock_pricing_updater.get_current_pricing.assert_called_with(
-                force_refresh=False
-            )
-
-            await task.cleanup()
-
-    @pytest.mark.asyncio
     async def test_task_error_handling(self) -> None:
         """Test task error handling and backoff calculation."""
         with patch("ccproxy.observability.metrics.get_metrics") as mock_get_metrics:
@@ -462,7 +422,6 @@ class TestSchedulerManagerIntegration:
         """Setup task registry for integration tests."""
         from ccproxy.scheduler.registry import get_task_registry
         from ccproxy.scheduler.tasks import (
-            PricingCacheUpdateTask,
             PushgatewayTask,
             StatsPrintingTask,
         )
@@ -473,7 +432,6 @@ class TestSchedulerManagerIntegration:
         # Register default tasks
         registry.register("pushgateway", PushgatewayTask)
         registry.register("stats_printing", StatsPrintingTask)
-        registry.register("pricing_cache_update", PricingCacheUpdateTask)
 
         yield
 
@@ -634,7 +592,6 @@ class TestSchedulerErrorScenarios:
         """Setup task registry for error scenario tests."""
         from ccproxy.scheduler.registry import get_task_registry
         from ccproxy.scheduler.tasks import (
-            PricingCacheUpdateTask,
             PushgatewayTask,
             StatsPrintingTask,
         )
@@ -645,7 +602,6 @@ class TestSchedulerErrorScenarios:
         # Register default tasks
         registry.register("pushgateway", PushgatewayTask)
         registry.register("stats_printing", StatsPrintingTask)
-        registry.register("pricing_cache_update", PricingCacheUpdateTask)
 
         yield
 
