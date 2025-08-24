@@ -1,12 +1,25 @@
 # CCProxy API Server
 
-`ccproxy` is a local reverse proxy server for Anthropic Claude LLM at `api.anthropic.com/v1/messages`. It allows you to use your existing Claude Max subscription to interact with the Anthropic API, bypassing the need for separate API key billing.
+`ccproxy` is a local reverse proxy server that provides unified access to multiple AI providers through a plugin-based architecture. It supports Anthropic Claude and OpenAI Codex through dedicated provider plugins, allowing you to use your existing subscriptions and API keys.
 
-The server provides two primary modes of operation:
-*   **SDK Mode (`/sdk`):** Routes requests through the local `claude-code-sdk`. This enables access to tools configured in your Claude environment and includes an integrated MCP (Model Context Protocol) server for permission management.
-*   **API Mode (`/api`):** Acts as a direct reverse proxy, injecting the necessary authentication headers. This provides full access to the underlying API features and model settings.
+## Architecture
 
-It includes a translation layer to support both Anthropic and OpenAI-compatible API formats for requests and responses, including streaming.
+CCProxy uses a modern plugin system that provides:
+
+- **Provider Plugins**: Handle specific AI providers (Claude SDK, Claude API, Codex)
+- **System Plugins**: Add functionality like logging, monitoring, and permissions
+- **Unified API**: Consistent interface across all providers
+- **Format Translation**: Seamless conversion between Anthropic and OpenAI formats
+
+## Provider Modes
+
+The server provides access through different provider plugins:
+
+*   **Claude SDK (`/claude/`):** Routes requests through the local `claude-code-sdk`. This enables access to tools configured in your Claude environment and includes an integrated MCP (Model Context Protocol) server for permission management.
+*   **Claude API (`/api/`):** Acts as a direct reverse proxy to `api.anthropic.com`, injecting the necessary authentication headers. This provides full access to the underlying API features and model settings.
+*   **Codex (`/api/codex/`):** Provides access to OpenAI Codex models through OAuth2 authentication.
+
+All modes support both Anthropic and OpenAI-compatible API formats for requests and responses, including streaming.
 
 ## Installation
 
@@ -36,31 +49,38 @@ For dev version replace `ccproxy-api` with `git+https://github.com/caddyglow/ccp
 
 ## Authentication
 
-The proxy uses two different authentication mechanisms depending on the mode.
+Each provider plugin has its own authentication mechanism:
 
-1.  **Claude CLI (`sdk` mode):**
-    This mode relies on the authentication handled by the `claude-code-sdk`.
+1.  **Claude SDK Plugin:**
+    Relies on the authentication handled by the `claude-code-sdk`.
     ```bash
     claude /login
     ```
 
-    It's also possible now to get a long live token to avoid renewing issues
-    using
-    ```sh
+    For long-lived tokens:
     ```bash
-    claude setup-token`
-
-2.  **ccproxy (`api` mode):**
-    This mode uses its own OAuth2 flow to obtain credentials for direct API access.
-    ```bash
-    ccproxy auth login
+    claude setup-token
     ```
 
-    If you are already connected with Claude CLI the credentials should be found automatically
+2.  **Claude API Plugin:**
+    Uses OAuth2 flow to obtain credentials for direct API access.
+    ```bash
+    ccproxy auth login claude-api
+    ```
 
-You can check the status of these credentials with `ccproxy auth validate` and `ccproxy auth info`.
+3.  **Codex Plugin:**
+    Uses OpenAI OAuth2 flow for Codex access.
+    ```bash  
+    ccproxy auth login codex
+    ```
 
-Warning is show on start up if no credentials are setup.
+You can check the status of these credentials with:
+```bash
+ccproxy auth status          # Check all providers
+ccproxy auth status claude-api  # Check specific provider
+```
+
+A warning is shown on startup if no provider credentials are configured.
 
 ## Usage
 
@@ -78,19 +98,21 @@ Point your existing tools and applications to the local proxy instance by settin
 
 **For OpenAI-compatible clients:**
 ```bash
-# For SDK mode
-export OPENAI_BASE_URL="http://localhost:8000/sdk/v1"
-# For API mode
+# Claude SDK plugin (routes at /claude)
+export OPENAI_BASE_URL="http://localhost:8000/claude/v1"
+# Claude API plugin (routes at /api)
 export OPENAI_BASE_URL="http://localhost:8000/api/v1"
+# Codex plugin (routes at /api/codex)
+export OPENAI_BASE_URL="http://localhost:8000/api/codex/v1"
 
 export OPENAI_API_KEY="dummy-key"
 ```
 
 **For Anthropic-compatible clients:**
 ```bash
-# For SDK mode
-export ANTHROPIC_BASE_URL="http://localhost:8000/sdk"
-# For API mode
+# Claude SDK plugin (routes at /claude)
+export ANTHROPIC_BASE_URL="http://localhost:8000/claude"
+# Claude API plugin (routes at /api)
 export ANTHROPIC_BASE_URL="http://localhost:8000/api"
 
 export ANTHROPIC_API_KEY="dummy-key"
@@ -157,6 +179,7 @@ CCProxy works seamlessly with Aider and other AI coding assistants:
 ### Anthropic Mode
 ```bash
 export ANTHROPIC_API_KEY=dummy
+# Use Claude API plugin
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8000/api
 aider --model claude-sonnet-4-20250514
 ```
@@ -167,25 +190,30 @@ If your tool only supports OpenAI settings, ccproxy automatically maps OpenAI mo
 
 ```bash
 export OPENAI_API_KEY=dummy
+# Use Claude API plugin
 export OPENAI_BASE_URL=http://127.0.0.1:8000/api/v1
 aider --model o3-mini
+
+# Or use Codex plugin for OpenAI models  
+export OPENAI_BASE_URL=http://127.0.0.1:8000/api/codex/v1
+aider --model gpt-4-turbo
 ```
 
-### API Mode (Direct Proxy)
+### Claude SDK Mode (With Tools)
 
-For minimal interference and direct API access:
+For accessing Claude with local development tools:
 
 ```bash
 export OPENAI_API_KEY=dummy
-export OPENAI_BASE_URL=http://127.0.0.1:8000/api/v1
-aider --model o3-mini
+export OPENAI_BASE_URL=http://127.0.0.1:8000/claude/v1
+aider --model claude-3-5-sonnet-20241022
 ```
 
 ### `curl` Example
 
 ```bash
-# SDK mode
-curl -X POST http://localhost:8000/sdk/v1/messages \
+# Claude SDK plugin
+curl -X POST http://localhost:8000/claude/v1/messages \
   -H "Content-Type: application/json" \
   -d '{
     "model": "claude-3-5-sonnet-20241022",
@@ -193,7 +221,7 @@ curl -X POST http://localhost:8000/sdk/v1/messages \
     "max_tokens": 100
   }'
 
-# API mode
+# Claude API plugin
 curl -X POST http://localhost:8000/api/v1/messages \
   -H "Content-Type: application/json" \
   -d '{
@@ -206,33 +234,39 @@ More examples are available in the `examples/` directory.
 
 ## Endpoints
 
-The proxy exposes endpoints under two prefixes, corresponding to its operating modes.
+The proxy exposes endpoints through different provider plugins:
 
-| Mode | URL Prefix | Description | Use Case |
-|------|------------|-------------|----------|
-| **SDK** | `/sdk/` | Uses `claude-code-sdk` with its configured tools. | Accessing Claude with local tools. |
-| **API** | `/api/` | Direct proxy with header injection. | Full API control, direct access. |
+| Plugin | URL Prefix | Description | Use Case |
+|--------|------------|-------------|----------|
+| **Claude SDK** | `/claude/` | Uses `claude-code-sdk` with its configured tools. | Accessing Claude with local tools. |
+| **Claude API** | `/api/` | Direct proxy with header injection. | Full API control, direct access. |
+| **Codex** | `/api/codex/` | OpenAI Codex access via OAuth2. | OpenAI Codex models. |
 
-*   **Anthropic:**
-    *   `POST /sdk/v1/messages`
-    *   `POST /api/v1/messages`
-*   **OpenAI-Compatible:**
-    *   `POST /sdk/v1/chat/completions`
-    *   `POST /api/v1/chat/completions`
+*   **Anthropic Format:**
+    *   `POST /claude/v1/messages` (Claude SDK)
+    *   `POST /api/v1/messages` (Claude API)
+*   **OpenAI Format:**
+    *   `POST /claude/v1/chat/completions` (Claude SDK)
+    *   `POST /api/v1/chat/completions` (Claude API)
+    *   `POST /api/codex/v1/chat/completions` (Codex)
+*   **Plugin Management:**
+    *   `GET /api/plugins` - List all plugins
+    *   `GET /api/plugins/{name}/health` - Plugin health check
+*   **Authentication:**
+    *   `GET /oauth/callback` - OAuth callback handler
 *   **Utility:**
-    *   `GET /health`
-    *   `GET /sdk/models`, `GET /api/models`
-    *   `GET /sdk/status`, `GET /api/status`
-    *   `GET /oauth/callback`
-*   **MCP & Permissions:**
-    *   `POST /mcp/permission/check` - MCP permission checking endpoint
+    *   `GET /health` - Server health check
+    *   `GET /claude/models`, `GET /api/models` - Available models
+    *   `GET /claude/status`, `GET /api/status` - Provider status
+*   **MCP & Permissions (when enabled):**
+    *   `POST /mcp/permission/check` - MCP permission checking
     *   `GET /permissions/stream` - SSE stream for permission requests
     *   `GET /permissions/{id}` - Get permission request details
     *   `POST /permissions/{id}/respond` - Respond to permission request
 *   **Observability (Optional):**
-    *   `GET /metrics`
-    *   `GET /logs/status`, `GET /logs/query`
-    *   `GET /dashboard`
+    *   `GET /metrics` - Prometheus metrics
+    *   `GET /logs/status`, `GET /logs/query` - Log querying
+    *   `GET /dashboard` - Real-time dashboard
 
 ## Supported Models
 
@@ -300,17 +334,21 @@ curl -H "Authorization: Bearer your-token" ...
 *   **Analytics API:** Endpoints to query and analyze historical usage data.
 *   **Real-time Dashboard:** A live web interface at `/dashboard` to visualize metrics and request streams.
 
-These features are disabled by default and can be enabled via configuration. For a complete guide on setting up and using these features, see the [Observability Documentation](docs/observability.md).
+These features are disabled by default and can be enabled via configuration. For a complete guide on setting up and using these features, see the [Observability Documentation](observability.md).
 
 ## Troubleshooting
 
 ### Common Issues
 
-1.  **Authentication Error:** Ensure you're using the correct mode (`/sdk` or `/api`) for your authentication method.
-2.  **Claude Credentials Expired:** Run `ccproxy auth login` to refresh credentials for API mode. Run `claude /login` for SDK mode.
+1.  **Authentication Error:** Ensure you're using the correct plugin endpoint for your authentication method.
+2.  **Plugin Credentials Expired:**
+    - Claude API: Run `ccproxy auth login claude-api`
+    - Codex: Run `ccproxy auth login codex`  
+    - Claude SDK: Run `claude /login`
 3.  **Missing API Auth Token:** If you've enabled security, include the token in your request headers.
 4.  **Port Already in Use:** Start the server on a different port: `ccproxy --port 8001`.
-5.  **Model Not Available:** Check that your Claude subscription includes the requested model.
+5.  **Model Not Available:** Check that your subscription includes the requested model for the specific provider.
+6.  **Plugin Not Loading:** Check logs for plugin initialization errors: `ccproxy --log-level debug`
 
 ## Contributing
 
@@ -323,8 +361,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Documentation
 
 - **[Online Documentation](https://caddyglow.github.io/ccproxy-api)**
-- **[API Reference](https://caddyglow.github.io/ccproxy-api/api-reference/overview/)**
-- **[Developer Guide](https://caddyglow.github.io/ccproxy-api/developer-guide/architecture/)**
+- **[Plugin System Guide](PLUGIN_SYSTEM_DOCUMENTATION.md)**
+- **[OAuth Architecture](OAUTH_PLUGIN_ARCHITECTURE.md)**
 
 ## Support
 
