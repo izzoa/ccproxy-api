@@ -5,12 +5,15 @@ from Anthropic streaming responses in a testable, modular way.
 """
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
 from ccproxy.models.types import StreamingTokenMetrics, UsageData
-from ccproxy.utils.cost_calculator import calculate_token_cost
+
+
+if TYPE_CHECKING:
+    from plugins.pricing.service import PricingService
 
 
 logger = structlog.get_logger(__name__)
@@ -159,32 +162,6 @@ class StreamingMetricsCollector:
             )
 
         return False
-
-    def calculate_final_cost(self, model: str | None) -> float | None:
-        """Calculate the final cost based on collected metrics.
-
-        Args:
-            model: Model name for pricing lookup
-
-        Returns:
-            Final cost in USD or None if calculation fails
-        """
-        # Pricing calculation is now async and handled by plugin
-        # For now, cost calculation is not available in streaming context
-        cost_usd = None
-        self.metrics["cost_usd"] = cost_usd
-
-        logger.debug(
-            "Final streaming token metrics",
-            tokens_input=self.metrics["tokens_input"],
-            tokens_output=self.metrics["tokens_output"],
-            cache_read_tokens=self.metrics["cache_read_tokens"],
-            cache_write_tokens=self.metrics["cache_write_tokens"],
-            cost_usd=cost_usd,
-            request_id=self.request_id,
-        )
-
-        return cost_usd
 
     def get_metrics(self) -> StreamingTokenMetrics:
         """Get the current collected metrics.

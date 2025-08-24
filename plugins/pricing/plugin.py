@@ -98,20 +98,26 @@ class PricingRuntime(SystemPluginRuntime):
 
             if self.service:
                 cache_info = self.service.get_cache_info()
-                health_details.update({
-                    "cache_valid": cache_info.get("valid", False),
-                    "cache_age_hours": cache_info.get("age_hours"),
-                    "cache_exists": cache_info.get("exists", False),
-                })
+                health_details.update(
+                    {
+                        "cache_valid": cache_info.get("valid", False),
+                        "cache_age_hours": cache_info.get("age_hours"),
+                        "cache_exists": cache_info.get("exists", False),
+                    }
+                )
 
             if self.update_task:
                 task_status = self.update_task.get_status()
-                health_details.update({
-                    "update_task_running": task_status["running"],
-                    "consecutive_failures": task_status["consecutive_failures"],
-                    "last_success_ago_seconds": task_status["last_success_ago_seconds"],
-                    "next_run_in_seconds": task_status["next_run_in_seconds"],
-                })
+                health_details.update(
+                    {
+                        "update_task_running": task_status["running"],
+                        "consecutive_failures": task_status["consecutive_failures"],
+                        "last_success_ago_seconds": task_status[
+                            "last_success_ago_seconds"
+                        ],
+                        "next_run_in_seconds": task_status["next_run_in_seconds"],
+                    }
+                )
 
             return health_details
 

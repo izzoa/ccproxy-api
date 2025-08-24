@@ -114,6 +114,11 @@ class DeferredStreaming(Response):
                 total_chunks = 0
                 total_bytes = 0
 
+                # Create metrics collector for token usage extraction
+                from ccproxy.utils.streaming_metrics import StreamingMetricsCollector
+
+                collector = StreamingMetricsCollector(request_id=request_id)
+
                 # Trace stream start
                 if self.request_tracer and request_id:
                     await self.request_tracer.trace_stream_start(
@@ -146,6 +151,30 @@ class DeferredStreaming(Response):
                         async for chunk in response.aiter_bytes():
                             total_chunks += 1
                             total_bytes += len(chunk)
+
+                            # Process chunk for token usage extraction
+                            chunk_str = chunk.decode("utf-8", errors="ignore")
+
+                            # trace: Log first few chunks to see what we're processing
+                            if total_chunks <= 3:
+                                logger.trace(
+                                    "deferred_streaming_chunk_trace",
+                                    chunk_length=len(chunk_str),
+                                    chunk_preview=chunk_str[:200],
+                                    chunk_number=total_chunks,
+                                    request_id=request_id,
+                                )
+
+                            is_final = collector.process_chunk(chunk_str)
+
+                            # trace: Log collector state
+                            logger.trace(
+                                "deferred_streaming_collector_state",
+                                is_final=is_final,
+                                metrics=collector.get_metrics(),
+                                request_id=request_id,
+                            )
+
                             # Trace each chunk if tracer is available
                             if self.request_tracer and request_id:
                                 await self.request_tracer.trace_stream_chunk(
@@ -154,6 +183,37 @@ class DeferredStreaming(Response):
                                     chunk_number=total_chunks,
                                 )
                             yield chunk
+
+                    # Store final usage metrics in request context
+                    usage_metrics = collector.get_metrics()
+                    if usage_metrics and self.request_context:
+                        # Get model from request context metadata for logging
+                        model = None
+                        if hasattr(self.request_context, "metadata"):
+                            model = self.request_context.metadata.get("model")
+
+                        if model:
+                            logger.debug(
+                                "deferred_streaming_final_metrics",
+                                model=model,
+                                usage_metrics=usage_metrics,
+                                request_id=request_id,
+                                tokens_input=usage_metrics.get("tokens_input"),
+                                tokens_output=usage_metrics.get("tokens_output"),
+                                cache_read_tokens=usage_metrics.get(
+                                    "cache_read_tokens"
+                                ),
+                                cache_write_tokens=usage_metrics.get(
+                                    "cache_write_tokens"
+                                ),
+                            )
+
+                        # Store usage metrics in request context for provider cost calculation
+                        if hasattr(self.request_context, "metadata"):
+                            self.request_context.metadata.update(usage_metrics)
+
+                        # Calculate cost if this is a Claude API request (before access logging)
+                        await self._calculate_cost_if_claude_api()
 
                     # Update metrics if available
                     if self.request_context and hasattr(
@@ -308,3 +368,105 @@ class DeferredStreaming(Response):
 
         # Send final [DONE] event
         yield b"data: [DONE]\n\n"
+
+    async def _calculate_cost_if_claude_api(self) -> None:
+        """Calculate cost for Claude API requests using pricing service if available."""
+        if not self.request_context or not hasattr(self.request_context, "metadata"):
+            return
+
+        metadata = self.request_context.metadata
+        service_type = metadata.get("service_type")
+
+        # Only calculate cost for Claude API requests
+        if service_type != "claude_api":
+            return
+
+        model = metadata.get("model")
+        tokens_input = metadata.get("tokens_input")
+        tokens_output = metadata.get("tokens_output")
+
+        # Skip if we don't have essential data
+        if not model or (not tokens_input and not tokens_output):
+            logger.debug(
+                "deferred_streaming_cost_calculation_skipped",
+                reason="missing_model_or_tokens",
+                model=model,
+                tokens_input=tokens_input,
+                tokens_output=tokens_output,
+                request_id=getattr(self.request_context, "request_id", "unknown"),
+            )
+            return
+
+        try:
+            # Get pricing service from app state via plugin registry
+            pricing_service = await self._get_pricing_service()
+            if not pricing_service:
+                logger.debug(
+                    "deferred_streaming_cost_calculation_skipped",
+                    reason="pricing_service_not_available",
+                    request_id=getattr(self.request_context, "request_id", "unknown"),
+                )
+                return
+
+            # Calculate cost using the cost calculator utility
+            from ccproxy.utils.cost_calculator import calculate_token_cost
+
+            cost_usd = await calculate_token_cost(
+                tokens_input=tokens_input,
+                tokens_output=tokens_output,
+                model=model,
+                cache_read_tokens=metadata.get("cache_read_tokens"),
+                cache_write_tokens=metadata.get("cache_write_tokens"),
+                pricing_service=pricing_service,
+            )
+
+            if cost_usd is not None:
+                # Update metadata with calculated cost
+                metadata["cost_usd"] = cost_usd
+
+                logger.debug(
+                    "deferred_streaming_cost_calculated",
+                    model=model,
+                    cost_usd=cost_usd,
+                    tokens_input=tokens_input,
+                    tokens_output=tokens_output,
+                    cache_read_tokens=metadata.get("cache_read_tokens"),
+                    cache_write_tokens=metadata.get("cache_write_tokens"),
+                    request_id=getattr(self.request_context, "request_id", "unknown"),
+                )
+            else:
+                logger.debug(
+                    "deferred_streaming_cost_calculation_failed",
+                    reason="cost_calculator_returned_none",
+                    model=model,
+                    request_id=getattr(self.request_context, "request_id", "unknown"),
+                )
+
+        except Exception as e:
+            logger.debug(
+                "deferred_streaming_cost_calculation_error",
+                error=str(e),
+                model=model,
+                request_id=getattr(self.request_context, "request_id", "unknown"),
+                exc_info=e,
+            )
+
+    async def _get_pricing_service(self) -> Any | None:
+        """Get pricing service from plugin registry."""
+        try:
+            # Check if we have a handler config with plugin registry access
+            if self.handler_config and hasattr(self.handler_config, "plugin_registry"):
+                plugin_registry = self.handler_config.plugin_registry
+                pricing_runtime = plugin_registry.get_runtime("pricing")
+                if pricing_runtime and hasattr(pricing_runtime, "get_pricing_service"):
+                    return pricing_runtime.get_pricing_service()
+
+            return None
+
+        except Exception as e:
+            logger.debug(
+                "deferred_streaming_pricing_service_access_failed",
+                error=str(e),
+                request_id=getattr(self.request_context, "request_id", "unknown"),
+            )
+            return None

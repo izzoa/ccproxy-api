@@ -302,7 +302,7 @@ You can enable token authentication for the proxy. This supports multiple header
 
 **1. Generate a Token:**
 ```bash
-ccproxy generate-token
+ccproxy config generate-token
 # Output: SECURITY__AUTH_TOKEN=abc123xyz789...
 ```
 

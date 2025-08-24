@@ -6,25 +6,16 @@ The pricing functionality is optional and depends on the pricing plugin.
 """
 
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ccproxy.core.logging import get_logger
 
 
+if TYPE_CHECKING:
+    from plugins.pricing.service import PricingService
+
+
 logger = get_logger(__name__)
-
-
-def _get_pricing_service() -> Any | None:
-    """Get pricing service from plugin system if available."""
-    try:
-        # For now, pricing service is not available via cost calculator
-        # This will be implemented when plugin system is fully integrated
-        logger.debug("pricing_service_unavailable", reason="plugin_integration_pending")
-        return None
-
-    except Exception as e:
-        logger.debug("pricing_service_unavailable", error=str(e))
-        return None
 
 
 async def calculate_token_cost(
@@ -33,6 +24,7 @@ async def calculate_token_cost(
     model: str | None,
     cache_read_tokens: int | None = None,
     cache_write_tokens: int | None = None,
+    pricing_service: "PricingService | None" = None,
 ) -> float | None:
     """Calculate cost in USD for the given token usage including cache tokens.
 
@@ -45,6 +37,7 @@ async def calculate_token_cost(
         model: Model name for pricing lookup
         cache_read_tokens: Number of cache read tokens
         cache_write_tokens: Number of cache write tokens
+        pricing_service: Pricing service instance (optional)
 
     Returns:
         Cost in USD or None if calculation not possible
@@ -60,11 +53,10 @@ async def calculate_token_cost(
         return None
 
     try:
-        # Get pricing service from plugin
-        pricing_service = _get_pricing_service()
+        # Check if pricing service is provided
         if not pricing_service:
             logger.debug(
-                "cost_calculation_skipped", reason="pricing_service_unavailable"
+                "cost_calculation_skipped", reason="pricing_service_not_provided"
             )
             return None
 
@@ -110,6 +102,7 @@ async def calculate_cost_breakdown(
     model: str | None,
     cache_read_tokens: int | None = None,
     cache_write_tokens: int | None = None,
+    pricing_service: "PricingService | None" = None,
 ) -> dict[str, float | str] | None:
     """Calculate detailed cost breakdown for the given token usage.
 
@@ -132,8 +125,7 @@ async def calculate_cost_breakdown(
         return None
 
     try:
-        # Get pricing service from plugin
-        pricing_service = _get_pricing_service()
+        # Check if pricing service is provided
         if not pricing_service:
             return None
 

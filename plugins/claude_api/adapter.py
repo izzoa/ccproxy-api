@@ -90,6 +90,23 @@ class ClaudeAPIAdapter(BaseAdapter):
             ClaudeAPIResponseTransformer(cors_settings)
         )
 
+    def _get_pricing_service(self) -> Any | None:
+        """Get pricing service from plugin registry if available."""
+        try:
+            if (
+                hasattr(self, "context")
+                and self.context
+                and "plugin_registry" in self.context
+            ):
+                plugin_registry = self.context["plugin_registry"]
+                pricing_runtime = plugin_registry.get_runtime("pricing")
+                if pricing_runtime and hasattr(pricing_runtime, "get_pricing_service"):
+                    return pricing_runtime.get_pricing_service()
+            return None
+        except Exception as e:
+            self.logger.debug("failed_to_get_pricing_service", error=str(e))
+            return None
+
     async def handle_request(
         self, request: Request, endpoint: str, method: str, **kwargs: Any
     ) -> Response | StreamingResponse | DeferredStreaming:
@@ -299,9 +316,9 @@ class ClaudeAPIAdapter(BaseAdapter):
             request_context=request_context,  # Pass the actual RequestContext object
         )
 
-        # For deferred streaming responses, return as-is (they handle headers internally)
+        # For deferred streaming responses, wrap with cost calculation
         if isinstance(response, DeferredStreaming):
-            # DeferredStreaming already handles header preservation
+            # DeferredStreaming already handles header preservation and cost calculation
             self.logger.debug(
                 "claude_api_using_deferred_response",
                 response_type=type(response).__name__,
@@ -389,7 +406,28 @@ class ClaudeAPIAdapter(BaseAdapter):
 
                 # Process this chunk for usage data
                 chunk_str = chunk.decode("utf-8", errors="ignore")
+
+                # Debug: Log first few chunks to see what we're processing
+                if len(chunks) <= 3:
+                    self.logger.debug(
+                        "streaming_chunk_debug",
+                        chunk_length=len(chunk_str),
+                        chunk_preview=chunk_str[:200],
+                        chunk_number=len(chunks),
+                        request_id=request_context.request_id,
+                        category="debug",
+                    )
+
                 is_final = collector.process_chunk(chunk_str)
+
+                # Debug: Log collector state
+                self.logger.debug(
+                    "streaming_collector_state",
+                    is_final=is_final,
+                    metrics=collector.get_metrics(),
+                    request_id=request_context.request_id,
+                    category="debug",
+                )
 
                 # If we got final metrics, update context
                 if is_final:
@@ -397,8 +435,61 @@ class ClaudeAPIAdapter(BaseAdapter):
                     if usage_metrics:
                         # Calculate cost if we have model info
                         model = request_context.metadata.get("model")
+                        cost_usd = None
+
                         if model:
-                            cost_usd = collector.calculate_final_cost(model)
+                            # Try to calculate cost using pricing service
+                            pricing_service = self._get_pricing_service()
+                            if pricing_service:
+                                try:
+                                    cost_decimal = await pricing_service.calculate_cost(
+                                        model_name=model,
+                                        input_tokens=usage_metrics.get(
+                                            "tokens_input", 0
+                                        ),
+                                        output_tokens=usage_metrics.get(
+                                            "tokens_output", 0
+                                        ),
+                                        cache_read_tokens=usage_metrics.get(
+                                            "cache_read_tokens", 0
+                                        ),
+                                        cache_write_tokens=usage_metrics.get(
+                                            "cache_write_tokens", 0
+                                        ),
+                                    )
+
+                                    if cost_decimal is not None:
+                                        cost_usd = float(cost_decimal)
+
+                                    self.logger.debug(
+                                        "streaming_cost_calculated",
+                                        model=model,
+                                        cost_usd=cost_usd,
+                                        tokens_input=usage_metrics.get("tokens_input"),
+                                        tokens_output=usage_metrics.get(
+                                            "tokens_output"
+                                        ),
+                                        cache_read_tokens=usage_metrics.get(
+                                            "cache_read_tokens"
+                                        ),
+                                        cache_write_tokens=usage_metrics.get(
+                                            "cache_write_tokens"
+                                        ),
+                                        category="pricing",
+                                    )
+
+                                except Exception as e:
+                                    self.logger.debug(
+                                        "cost_calculation_failed",
+                                        error=str(e),
+                                        model=model,
+                                        category="pricing",
+                                    )
+                            else:
+                                self.logger.debug(
+                                    "pricing_service_not_available",
+                                    category="pricing",
+                                )
                         else:
                             cost_usd = usage_metrics.get("cost_usd")
 
