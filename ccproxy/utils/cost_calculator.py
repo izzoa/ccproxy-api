@@ -5,7 +5,6 @@ across different services to ensure consistent pricing calculations.
 The pricing functionality is optional and depends on the pricing plugin.
 """
 
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from ccproxy.core.logging import get_logger

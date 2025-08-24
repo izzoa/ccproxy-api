@@ -5,13 +5,11 @@ import contextlib
 import random
 import time
 from abc import ABC, abstractmethod
-from datetime import UTC
 from typing import Any
 
 import structlog
 
 from ccproxy.core.async_task_manager import create_managed_task
-from ccproxy.scheduler.errors import SchedulerError
 
 from .service import PricingService
 

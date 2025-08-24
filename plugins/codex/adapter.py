@@ -23,7 +23,7 @@ from ccproxy.services.interfaces import IRequestHandler
 
 
 if TYPE_CHECKING:
-    pass
+    from ccproxy.streaming.interfaces import IStreamingMetricsCollector
 
 from .format_adapter import CodexFormatAdapter
 from .transformers import CodexRequestTransformer, CodexResponseTransformer
@@ -147,6 +147,24 @@ class CodexAdapter(BaseAdapter):
         # Build target URL
         target_url = f"{CODEX_API_BASE_URL}{CODEX_RESPONSES_ENDPOINT}"
 
+        # Get RequestContext - it must exist when called via ProxyService
+        from ccproxy.observability.context import RequestContext
+
+        request_context: RequestContext | None = RequestContext.get_current()
+        if not request_context:
+            raise HTTPException(
+                status_code=500,
+                detail="RequestContext not available - plugin must be called via ProxyService",
+            )
+
+        # Create metrics collector for this request
+        metrics_collector: IStreamingMetricsCollector | None = None
+        if request_context:
+            from .streaming_metrics import CodexStreamingMetricsCollector
+
+            request_id = getattr(request_context, "request_id", None)
+            metrics_collector = CodexStreamingMetricsCollector(request_id=request_id)
+
         # Create simplified provider context
         context = HandlerConfig(
             request_adapter=self.format_adapter if needs_conversion else None,
@@ -154,6 +172,7 @@ class CodexAdapter(BaseAdapter):
             request_transformer=self.request_transformer,
             response_transformer=self.response_transformer,
             supports_streaming=True,
+            metrics_collector=metrics_collector,
         )
 
         # Prepare request using HTTP handler
@@ -193,6 +212,20 @@ class CodexAdapter(BaseAdapter):
             category="http",
         )
 
+        # Update context with codex specific metadata
+        request_context.metadata.update(
+            {
+                "provider": "codex",
+                "service_type": "codex",
+                "endpoint": endpoint.rstrip("/").split("/")[-1]
+                if endpoint
+                else "responses",
+                "model": parsed_body.get("model", "unknown"),
+                "stream": is_streaming,
+                "needs_conversion": needs_conversion,
+            }
+        )
+
         # Make the actual HTTP request using the shared handler
         if not self.proxy_service:
             raise HTTPException(status_code=503, detail="Proxy service not available")
@@ -204,7 +237,7 @@ class CodexAdapter(BaseAdapter):
         if is_streaming and isinstance(self.proxy_service, ProxyService):
             streaming_handler = self.proxy_service.streaming_handler
 
-        return await self._http_handler.handle_request(
+        response = await self._http_handler.handle_request(
             method=method,
             url=target_url,
             headers=headers,
@@ -212,8 +245,23 @@ class CodexAdapter(BaseAdapter):
             handler_config=context,
             is_streaming=is_streaming,
             streaming_handler=streaming_handler,
-            request_context={},
+            request_context=request_context,
         )
+
+        # For deferred streaming responses, return as-is
+        from ccproxy.streaming.deferred_streaming import DeferredStreaming
+
+        if isinstance(response, DeferredStreaming):
+            self.logger.debug(
+                "codex_using_deferred_response",
+                response_type=type(response).__name__,
+                category="http",
+            )
+            return response
+
+        # For other responses, return as-is
+        # DeferredStreaming already handles metrics collection
+        return response
 
     async def handle_streaming(
         self, request: Request, endpoint: str, **kwargs: Any

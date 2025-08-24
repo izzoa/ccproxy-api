@@ -1,19 +1,16 @@
-"""Streaming metrics extraction utilities.
+"""Claude API streaming metrics extraction utilities.
 
-This module provides utilities for extracting token usage and calculating costs
-from Anthropic streaming responses in a testable, modular way.
+This module provides utilities for extracting token usage from
+Anthropic streaming responses.
 """
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
-from ccproxy.models.types import StreamingTokenMetrics, UsageData
-
-
-if TYPE_CHECKING:
-    from plugins.pricing.service import PricingService
+from ccproxy.models.types import UsageData
+from ccproxy.streaming.interfaces import StreamingMetrics
 
 
 logger = structlog.get_logger(__name__)
@@ -67,7 +64,10 @@ def extract_usage_from_streaming_chunk(chunk_data: Any) -> UsageData | None:
 
 
 class StreamingMetricsCollector:
-    """Collects and manages token metrics during streaming responses."""
+    """Collects and manages token metrics during Anthropic streaming responses.
+
+    Implements IStreamingMetricsCollector interface for Claude API.
+    """
 
     def __init__(self, request_id: str | None = None) -> None:
         """Initialize the metrics collector.
@@ -76,13 +76,30 @@ class StreamingMetricsCollector:
             request_id: Optional request ID for logging context
         """
         self.request_id = request_id
-        self.metrics = StreamingTokenMetrics(
-            tokens_input=None,
-            tokens_output=None,
-            cache_read_tokens=None,
-            cache_write_tokens=None,
-            cost_usd=None,
-        )
+        self.metrics: StreamingMetrics = {
+            "tokens_input": None,
+            "tokens_output": None,
+            "cache_read_tokens": None,
+            "cache_write_tokens": None,
+            "cost_usd": None,
+        }
+
+    def process_raw_chunk(self, chunk_str: str) -> bool:
+        """Process raw Anthropic format chunk before any conversion.
+
+        This processes chunks in Anthropic's native format.
+        """
+        return self.process_chunk(chunk_str)
+
+    def process_converted_chunk(self, chunk_str: str) -> bool:
+        """Process chunk after conversion to OpenAI format.
+
+        When Claude API responses are converted to OpenAI format,
+        this method can extract metrics from the converted format.
+        """
+        # For now, we prefer raw chunks for Claude API
+        # but this could handle OpenAI format if needed
+        return False
 
     def process_chunk(self, chunk_str: str) -> bool:
         """Process a streaming chunk to extract token metrics.
@@ -163,7 +180,7 @@ class StreamingMetricsCollector:
 
         return False
 
-    def get_metrics(self) -> StreamingTokenMetrics:
+    def get_metrics(self) -> StreamingMetrics:
         """Get the current collected metrics.
 
         Returns:

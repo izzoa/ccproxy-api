@@ -7,7 +7,6 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-import structlog
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 

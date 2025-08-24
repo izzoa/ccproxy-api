@@ -163,7 +163,13 @@ class PricingUpdater:
 
         if raw_data is not None:
             # Load and validate pricing data using Pydantic
-            pricing_data = PricingLoader.load_pricing_from_data(raw_data, verbose=False)
+            # Use the configured provider setting (defaults to "all")
+            pricing_data = PricingLoader.load_pricing_from_data(
+                raw_data,
+                provider=self.settings.pricing_provider,
+                map_to_claude=False,  # Don't map OpenAI models to Claude
+                verbose=False,
+            )
 
             if pricing_data:
                 # Get cache info to display age
@@ -303,14 +309,30 @@ class PricingUpdater:
             if raw_data is None:
                 return False
 
-            # Try to parse Claude models
-            claude_models = PricingLoader.extract_claude_models(raw_data)
-            if not claude_models:
-                logger.warning("claude_models_not_found_in_external")
-                return False
+            # Try to extract models based on configured provider
+            if self.settings.pricing_provider == "claude":
+                models = PricingLoader.extract_claude_models(raw_data)
+                if not models:
+                    logger.warning("claude_models_not_found_in_external")
+                    return False
+            else:
+                models = PricingLoader.extract_models_by_provider(
+                    raw_data, provider=self.settings.pricing_provider
+                )
+                if not models:
+                    logger.warning(
+                        "models_not_found_in_external",
+                        provider=self.settings.pricing_provider,
+                    )
+                    return False
 
             # Try to load and validate using Pydantic
-            pricing_data = PricingLoader.load_pricing_from_data(raw_data, verbose=False)
+            pricing_data = PricingLoader.load_pricing_from_data(
+                raw_data,
+                provider=self.settings.pricing_provider,
+                map_to_claude=False,
+                verbose=False,
+            )
             if not pricing_data:
                 logger.warning("external_pricing_load_failed")
                 return False

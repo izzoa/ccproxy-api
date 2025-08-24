@@ -1,6 +1,7 @@
 """Pricing configuration settings."""
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -77,6 +78,11 @@ class PricingConfig(BaseSettings):
     force_refresh_on_startup: bool = Field(
         default=False,
         description="Whether to force pricing refresh on plugin startup",
+    )
+
+    pricing_provider: Literal["claude", "anthropic", "openai", "all"] = Field(
+        default="all",
+        description="Which provider pricing to load: 'claude', 'anthropic', 'openai', or 'all'",
     )
 
     @field_validator("cache_dir", mode="before")

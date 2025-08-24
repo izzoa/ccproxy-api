@@ -18,6 +18,7 @@ from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import CoreRequestTracer
 from ccproxy.testing import RealisticMockResponseGenerator
+from plugins.pricing.service import PricingService
 
 
 if TYPE_CHECKING:
@@ -76,6 +77,7 @@ class ConcreteServiceFactory:
         settings: Settings,
         metrics: PrometheusMetrics | None = None,
         request_tracer: CoreRequestTracer | None = None,
+        pricing_service: PricingService | None = None,
     ) -> StreamingHandler:
         """Create streaming handler instance.
 
@@ -83,6 +85,7 @@ class ConcreteServiceFactory:
             settings: Application settings
             metrics: Optional metrics service
             request_tracer: Optional request tracer
+            service_container: Optional service container for pricing service access
 
         Returns:
             Configured streaming handler instance with header preservation
@@ -91,6 +94,7 @@ class ConcreteServiceFactory:
             metrics=metrics,
             verbose_streaming=settings.server.verbose_api,
             request_tracer=request_tracer,
+            pricing_service=pricing_service,
         )
         return handler
 

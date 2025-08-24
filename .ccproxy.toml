@@ -16,7 +16,7 @@ enabled = true
 
 [plugins.claude_sdk]
 enabled = true
-default_session_id = "default-session"
+# default_session_id = "default-session"  # Commented out - should be None for normal operations
 
 [plugins.claude_sdk.sdk_session_pool]
 enabled = true

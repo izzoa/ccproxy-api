@@ -1,9 +1,13 @@
 """Handler configuration for unified request handling."""
 
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ccproxy.adapters.base import APIAdapter
+
+
+if TYPE_CHECKING:
+    from ccproxy.streaming.interfaces import IStreamingMetricsCollector
 
 
 @runtime_checkable
@@ -43,3 +47,6 @@ class HandlerConfig:
 
     # Feature flag
     supports_streaming: bool = True
+
+    # Streaming metrics collection (provider-specific)
+    metrics_collector: "IStreamingMetricsCollector | None" = None

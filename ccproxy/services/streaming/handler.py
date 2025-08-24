@@ -11,6 +11,7 @@ from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.services.tracing import CoreRequestTracer
 from ccproxy.streaming.deferred_streaming import DeferredStreaming
+from plugins.pricing.service import PricingService
 
 
 logger = structlog.get_logger(__name__)
@@ -24,6 +25,7 @@ class StreamingHandler:
         metrics: PrometheusMetrics | None = None,
         verbose_streaming: bool = False,
         request_tracer: CoreRequestTracer | None = None,
+        pricing_service: PricingService | None = None,
     ) -> None:
         """Initialize with metrics collector and debug settings.
 
@@ -34,6 +36,7 @@ class StreamingHandler:
         self.metrics = metrics
         self.verbose_streaming = verbose_streaming
         self.request_tracer = request_tracer
+        self.pricing_service = pricing_service
 
     def should_stream_response(self, headers: dict[str, str]) -> bool:
         """Check Accept header for streaming indicators.
@@ -107,4 +110,5 @@ class StreamingHandler:
             request_tracer=self.request_tracer,
             metrics=self.metrics,
             verbose_streaming=self.verbose_streaming,
+            pricing_service=self.pricing_service,
         )

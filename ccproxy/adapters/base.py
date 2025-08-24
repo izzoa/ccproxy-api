@@ -43,7 +43,7 @@ class APIAdapter(ABC):
         pass
 
     @abstractmethod
-    async def adapt_stream(
+    def adapt_stream(
         self, stream: AsyncIterator[dict[str, Any]]
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Convert a streaming response from one API format to another.

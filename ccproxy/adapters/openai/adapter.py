@@ -505,7 +505,7 @@ class OpenAIAdapter(APIAdapter):
             + usage_info.get("output_tokens", 0),
         )
 
-    async def adapt_stream(  # type: ignore[override]
+    def adapt_stream(
         self, stream: AsyncIterator[dict[str, Any]]
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Convert Anthropic streaming response to OpenAI streaming format.
@@ -519,6 +519,12 @@ class OpenAIAdapter(APIAdapter):
         Raises:
             ValueError: If the stream format is invalid or unsupported
         """
+        return self._adapt_stream_impl(stream)
+
+    async def _adapt_stream_impl(
+        self, stream: AsyncIterator[dict[str, Any]]
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Implementation of stream adaptation."""
         # Get logger with request context at the start of the function
         logger = get_logger(__name__)
 

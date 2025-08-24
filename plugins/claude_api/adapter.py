@@ -1,11 +1,16 @@
 """Claude API adapter implementation."""
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request
 from httpx import AsyncClient
 from starlette.responses import Response, StreamingResponse
+
+
+if TYPE_CHECKING:
+    from ccproxy.observability.context import RequestContext
+    from ccproxy.streaming.interfaces import IStreamingMetricsCollector
 
 from ccproxy.config.constants import (
     CLAUDE_API_BASE_URL,
@@ -124,6 +129,16 @@ class ClaudeAPIAdapter(BaseAdapter):
         # Validate prerequisites
         self._validate_prerequisites()
 
+        # Get RequestContext - it must exist when called via ProxyService
+        from ccproxy.observability.context import RequestContext
+
+        request_context: RequestContext | None = RequestContext.get_current()
+        if not request_context:
+            raise HTTPException(
+                status_code=500,
+                detail="RequestContext not available - plugin must be called via ProxyService",
+            )
+
         # Get request body and auth
         body = await request.body()
 
@@ -137,7 +152,7 @@ class ClaudeAPIAdapter(BaseAdapter):
         target_url, needs_conversion = self._resolve_endpoint(endpoint)
 
         # Create handler configuration
-        handler_config = self._create_handler_config(needs_conversion)
+        handler_config = self._create_handler_config(needs_conversion, request_context)
 
         # Prepare and execute request
         return await self._execute_request(
@@ -150,6 +165,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             handler_config=handler_config,
             endpoint=endpoint,
             needs_conversion=needs_conversion,
+            request_context=request_context,
         )
 
     def _validate_prerequisites(self) -> None:
@@ -182,21 +198,33 @@ class ClaudeAPIAdapter(BaseAdapter):
                 detail=f"Endpoint {endpoint} not supported by Claude API plugin",
             )
 
-    def _create_handler_config(self, needs_conversion: bool) -> HandlerConfig:
+    def _create_handler_config(
+        self, needs_conversion: bool, request_context: "RequestContext | None" = None
+    ) -> HandlerConfig:
         """Create handler configuration based on conversion needs.
 
         Args:
             needs_conversion: Whether format conversion is needed
+            request_context: Request context for creating metrics collector
 
         Returns:
             HandlerConfig instance
         """
+        # Create metrics collector for this request
+        metrics_collector: IStreamingMetricsCollector | None = None
+        if request_context:
+            from .streaming_metrics import StreamingMetricsCollector
+
+            request_id = getattr(request_context, "request_id", None)
+            metrics_collector = StreamingMetricsCollector(request_id=request_id)
+
         return HandlerConfig(
             request_adapter=self.openai_adapter if needs_conversion else None,
             response_adapter=self.openai_adapter if needs_conversion else None,
             request_transformer=self._request_transformer,
             response_transformer=self._response_transformer,
             supports_streaming=True,
+            metrics_collector=metrics_collector,
         )
 
     async def _execute_request(
@@ -210,6 +238,7 @@ class ClaudeAPIAdapter(BaseAdapter):
         handler_config: HandlerConfig,
         endpoint: str,
         needs_conversion: bool,
+        request_context: "RequestContext",
     ) -> Response | StreamingResponse | DeferredStreaming:
         """Execute the HTTP request.
 
@@ -223,6 +252,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             handler_config: Handler configuration
             endpoint: Original endpoint for logging
             needs_conversion: Whether conversion was needed for logging
+            request_context: Request context for observability
 
         Returns:
             Response or StreamingResponse
@@ -249,44 +279,19 @@ class ClaudeAPIAdapter(BaseAdapter):
         except json.JSONDecodeError:
             request_data = {}
 
-        # Get or create RequestContext
-        from ccproxy.observability.context import RequestContext
-
-        request_context = RequestContext.get_current()
-        if request_context:
-            # Update existing context with claude_api specific metadata
-            request_context.metadata.update(
-                {
-                    "provider": "claude_api",
-                    "service_type": "claude_api",
-                    "endpoint": endpoint.rstrip("/").split("/")[-1]
-                    if endpoint
-                    else "messages",
-                    "model": request_data.get("model", "unknown"),
-                    "stream": is_streaming,
-                    "needs_conversion": needs_conversion,
-                }
-            )
-        else:
-            # Create new context if none exists (shouldn't happen with ProxyService)
-            import time
-            import uuid
-
-            request_context = RequestContext(
-                request_id=str(uuid.uuid4()),
-                start_time=time.time(),
-                logger=self.logger,
-                metadata={
-                    "provider": "claude_api",
-                    "service_type": "claude_api",
-                    "endpoint": endpoint.rstrip("/").split("/")[-1]
-                    if endpoint
-                    else "messages",
-                    "model": request_data.get("model", "unknown"),
-                    "stream": is_streaming,
-                    "needs_conversion": needs_conversion,
-                },
-            )
+        # Update context with claude_api specific metadata
+        request_context.metadata.update(
+            {
+                "provider": "claude_api",
+                "service_type": "claude_api",
+                "endpoint": endpoint.rstrip("/").split("/")[-1]
+                if endpoint
+                else "messages",
+                "model": request_data.get("model", "unknown"),
+                "stream": is_streaming,
+                "needs_conversion": needs_conversion,
+            }
+        )
 
         self.logger.info(
             "plugin_request",
@@ -333,7 +338,7 @@ class ClaudeAPIAdapter(BaseAdapter):
         return response
 
     async def _wrap_streaming_response(
-        self, response: StreamingResponse, request_context: Any
+        self, response: StreamingResponse, request_context: "RequestContext"
     ) -> StreamingResponse:
         """Wrap streaming response to accumulate chunks and extract headers.
 
@@ -354,7 +359,7 @@ class ClaudeAPIAdapter(BaseAdapter):
         headers_extracted = False
 
         # Create metrics collector for usage extraction
-        from ccproxy.utils.streaming_metrics import StreamingMetricsCollector
+        from .streaming_metrics import StreamingMetricsCollector
 
         collector = StreamingMetricsCollector(request_id=request_context.request_id)
 

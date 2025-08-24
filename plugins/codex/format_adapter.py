@@ -45,7 +45,7 @@ class CodexFormatAdapter(APIAdapter):
             if "model" not in codex_request:
                 codex_request["model"] = "gpt-5"
 
-            logger.trace(
+            logger.debug(
                 "codex_request_conversion",
                 original_keys=list(request_data.keys()),
                 converted_keys=list(codex_request.keys()),
@@ -53,7 +53,7 @@ class CodexFormatAdapter(APIAdapter):
             return codex_request
 
         # Native Response API format - passthrough
-        logger.trace("request_passthrough", request_keys=list(request_data.keys()))
+        logger.debug("request_passthrough", request_keys=list(request_data.keys()))
         return request_data
 
     async def adapt_response(self, response_data: dict[str, Any]) -> dict[str, Any]:
@@ -75,7 +75,7 @@ class CodexFormatAdapter(APIAdapter):
 
         return response_data
 
-    async def adapt_stream(  # type: ignore[override]
+    def adapt_stream(
         self, stream: AsyncIterator[dict[str, Any]]
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Convert individual Response API events to Chat Completions format.
@@ -88,6 +88,12 @@ class CodexFormatAdapter(APIAdapter):
         Yields:
             OpenAI Chat Completions streaming chunks
         """
+        return self._adapt_stream_impl(stream)
+
+    async def _adapt_stream_impl(
+        self, stream: AsyncIterator[dict[str, Any]]
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Implementation of stream adaptation."""
         # Extract the stream processing logic from OpenAI adapter pattern
         import time
         from collections import defaultdict

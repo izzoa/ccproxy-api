@@ -388,7 +388,7 @@ members = [
 
 [tool.pyright]
 pythonVersion = "3.11"
-typeCheckingMode = "standard" # or "strict" 
+typeCheckingMode = "standard" # or "strict"
 
 include = ["ccproxy", "plugins", "tests"] # Include all your workspace members
 

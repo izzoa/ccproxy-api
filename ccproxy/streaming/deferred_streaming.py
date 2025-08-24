@@ -11,6 +11,8 @@ import httpx
 import structlog
 from starlette.responses import Response, StreamingResponse
 
+from plugins.pricing.service import PricingService
+
 
 if TYPE_CHECKING:
     from ccproxy.adapters.base import APIAdapter
@@ -39,6 +41,7 @@ class DeferredStreaming(Response):
         request_tracer: "CoreRequestTracer | None" = None,
         metrics: "PrometheusMetrics | None" = None,
         verbose_streaming: bool = False,
+        pricing_service: PricingService | None = None,
     ):
         """Store request details to execute later.
 
@@ -54,6 +57,7 @@ class DeferredStreaming(Response):
             request_tracer: Optional request tracer for verbose logging
             metrics: Optional metrics collector
             verbose_streaming: Enable verbose streaming logs
+            pricing_service: Optional pricing service for cost calculation
         """
         super().__init__(content=b"", media_type=media_type)
         self.method = method
@@ -67,6 +71,7 @@ class DeferredStreaming(Response):
         self.request_tracer = request_tracer
         self.metrics = metrics
         self.verbose_streaming = verbose_streaming
+        self.pricing_service = pricing_service
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         """Execute the request when ASGI calls us."""
@@ -114,10 +119,22 @@ class DeferredStreaming(Response):
                 total_chunks = 0
                 total_bytes = 0
 
-                # Create metrics collector for token usage extraction
-                from ccproxy.utils.streaming_metrics import StreamingMetricsCollector
-
-                collector = StreamingMetricsCollector(request_id=request_id)
+                # Get metrics collector from handler config (provider-specific)
+                collector = None
+                if self.handler_config and hasattr(
+                    self.handler_config, "metrics_collector"
+                ):
+                    collector = self.handler_config.metrics_collector
+                    if not collector:
+                        logger.debug(
+                            "deferred_streaming_no_metrics_collector",
+                            service_type=getattr(
+                                self.request_context, "metadata", {}
+                            ).get("service_type")
+                            if self.request_context
+                            else None,
+                            request_id=request_id,
+                        )
 
                 # Trace stream start
                 if self.request_tracer and request_id:
@@ -134,11 +151,13 @@ class DeferredStreaming(Response):
 
                     # Stream the response with optional SSE processing
                     if self.handler_config and self.handler_config.response_adapter:
+                        # Metrics collection happens inside _process_sse_events now
                         async for chunk in self._process_sse_events(
                             response, self.handler_config.response_adapter
                         ):
                             total_chunks += 1
                             total_bytes += len(chunk)
+
                             # Trace each chunk if tracer is available
                             if self.request_tracer and request_id:
                                 await self.request_tracer.trace_stream_chunk(
@@ -148,44 +167,117 @@ class DeferredStreaming(Response):
                                 )
                             yield chunk
                     else:
-                        async for chunk in response.aiter_bytes():
-                            total_chunks += 1
-                            total_bytes += len(chunk)
+                        # Check if response is SSE format based on content-type OR if it's Codex
+                        content_type = response.headers.get("content-type", "").lower()
+                        # Codex doesn't send content-type header but uses SSE format
+                        is_codex = (
+                            self.request_context
+                            and self.request_context.metadata.get("service_type")
+                            == "codex"
+                        )
+                        is_sse_format = "text/event-stream" in content_type or is_codex
 
-                            # Process chunk for token usage extraction
-                            chunk_str = chunk.decode("utf-8", errors="ignore")
+                        if is_sse_format and collector:
+                            # Buffer and parse SSE events for metrics extraction
+                            sse_buffer = b""
+                            async for chunk in response.aiter_bytes():
+                                total_chunks += 1
+                                total_bytes += len(chunk)
+                                sse_buffer += chunk
 
-                            # trace: Log first few chunks to see what we're processing
-                            if total_chunks <= 3:
-                                logger.trace(
-                                    "deferred_streaming_chunk_trace",
-                                    chunk_length=len(chunk_str),
-                                    chunk_preview=chunk_str[:200],
-                                    chunk_number=total_chunks,
-                                    request_id=request_id,
-                                )
+                                # Process complete SSE events in buffer
+                                while b"\n\n" in sse_buffer:
+                                    event_end = sse_buffer.index(b"\n\n") + 2
+                                    event_data = sse_buffer[:event_end]
+                                    sse_buffer = sse_buffer[event_end:]
 
-                            is_final = collector.process_chunk(chunk_str)
+                                    # Process the complete SSE event with collector
+                                    event_str = event_data.decode(
+                                        "utf-8", errors="ignore"
+                                    )
 
-                            # trace: Log collector state
-                            logger.trace(
-                                "deferred_streaming_collector_state",
-                                is_final=is_final,
-                                metrics=collector.get_metrics(),
-                                request_id=request_id,
-                            )
+                                    # trace: Log SSE event
+                                    if total_chunks <= 3:
+                                        logger.trace(
+                                            "deferred_streaming_sse_event",
+                                            event_preview=event_str[:200],
+                                            event_number=total_chunks,
+                                            request_id=request_id,
+                                        )
 
-                            # Trace each chunk if tracer is available
-                            if self.request_tracer and request_id:
-                                await self.request_tracer.trace_stream_chunk(
-                                    request_id=request_id,
-                                    chunk=chunk,
-                                    chunk_number=total_chunks,
-                                )
-                            yield chunk
+                                    is_final = collector.process_chunk(event_str)
+
+                                    # trace: Log collector state
+                                    logger.trace(
+                                        "deferred_streaming_collector_state",
+                                        is_final=is_final,
+                                        metrics=collector.get_metrics()
+                                        if hasattr(collector, "get_metrics")
+                                        else None,
+                                        request_id=request_id,
+                                    )
+
+                                    # Yield the complete event
+                                    yield event_data
+
+                                # Trace each chunk if tracer is available
+                                if self.request_tracer and request_id:
+                                    await self.request_tracer.trace_stream_chunk(
+                                        request_id=request_id,
+                                        chunk=chunk,
+                                        chunk_number=total_chunks,
+                                    )
+
+                            # Yield any remaining data in buffer
+                            if sse_buffer:
+                                yield sse_buffer
+                        else:
+                            # Stream the raw response without SSE parsing
+                            async for chunk in response.aiter_bytes():
+                                total_chunks += 1
+                                total_bytes += len(chunk)
+
+                                # Process chunk for token usage extraction if collector available
+                                if collector and not is_sse_format:
+                                    chunk_str = chunk.decode("utf-8", errors="ignore")
+
+                                    # trace: Log first few chunks to see what we're processing
+                                    if total_chunks <= 3:
+                                        logger.trace(
+                                            "deferred_streaming_chunk_trace",
+                                            chunk_length=len(chunk_str),
+                                            chunk_preview=chunk_str[:200],
+                                            chunk_number=total_chunks,
+                                            request_id=request_id,
+                                        )
+
+                                    is_final = collector.process_chunk(chunk_str)
+
+                                    # trace: Log collector state
+                                    logger.trace(
+                                        "deferred_streaming_collector_state",
+                                        is_final=is_final,
+                                        metrics=collector.get_metrics()
+                                        if hasattr(collector, "get_metrics")
+                                        else None,
+                                        request_id=request_id,
+                                    )
+
+                                # Trace each chunk if tracer is available
+                                if self.request_tracer and request_id:
+                                    await self.request_tracer.trace_stream_chunk(
+                                        request_id=request_id,
+                                        chunk=chunk,
+                                        chunk_number=total_chunks,
+                                    )
+                                yield chunk
 
                     # Store final usage metrics in request context
-                    usage_metrics = collector.get_metrics()
+                    usage_metrics = (
+                        collector.get_metrics()
+                        if collector and hasattr(collector, "get_metrics")
+                        else {}
+                    )
                     if usage_metrics and self.request_context:
                         # Get model from request context metadata for logging
                         model = None
@@ -212,8 +304,8 @@ class DeferredStreaming(Response):
                         if hasattr(self.request_context, "metadata"):
                             self.request_context.metadata.update(usage_metrics)
 
-                        # Calculate cost if this is a Claude API request (before access logging)
-                        await self._calculate_cost_if_claude_api()
+                        # Calculate cost for supported providers (before access logging)
+                        await self._calculate_cost_for_provider()
 
                     # Update metrics if available
                     if self.request_context and hasattr(
@@ -298,31 +390,60 @@ class DeferredStreaming(Response):
         """Parse and adapt SSE events from response stream.
 
         - Parse raw SSE bytes to JSON chunks
+        - Optionally process raw chunks with metrics collector
         - Pass entire JSON stream through adapter (maintains state)
         - Serialize adapted chunks back to SSE format
+        - Optionally process converted chunks with metrics collector
         """
+        # Get metrics collector if available
+        collector = None
+        if self.handler_config and hasattr(self.handler_config, "metrics_collector"):
+            collector = self.handler_config.metrics_collector
+
         # Create streaming pipeline:
-        # 1. Parse raw SSE bytes to JSON chunks
-        json_stream = self._parse_sse_to_json_stream(response.aiter_bytes())
+        # 1. Parse raw SSE bytes to JSON chunks, optionally collecting metrics from raw format
+        json_stream = self._parse_sse_to_json_stream(response.aiter_bytes(), collector)
 
         # 2. Pass entire JSON stream through adapter (maintains state)
         adapted_stream = adapter.adapt_stream(json_stream)
 
-        # 3. Serialize adapted chunks back to SSE format
-        async for sse_bytes in self._serialize_json_to_sse_stream(adapted_stream):  # type: ignore[arg-type]
+        # 3. Serialize adapted chunks back to SSE format, optionally collecting metrics from converted format
+        async for sse_bytes in self._serialize_json_to_sse_stream(
+            adapted_stream,
+            collector,
+        ):
             yield sse_bytes
 
     async def _parse_sse_to_json_stream(
-        self, raw_stream: AsyncIterator[bytes]
+        self, raw_stream: AsyncIterator[bytes], collector: Any = None
     ) -> AsyncIterator[dict[str, Any]]:
         """Parse raw SSE bytes stream into JSON chunks.
 
         Yields JSON objects extracted from SSE events without buffering
-        the entire response.
+        the entire response. Optionally processes raw chunks with metrics collector
+        before parsing.
+
+        Args:
+            raw_stream: Raw bytes stream from provider
+            collector: Optional metrics collector to process raw provider format
         """
         buffer = b""
 
         async for chunk in raw_stream:
+            # Process raw chunk with collector if available (before any conversion)
+            if collector and hasattr(collector, "process_raw_chunk"):
+                chunk_str = chunk.decode("utf-8", errors="ignore")
+                is_final = collector.process_raw_chunk(chunk_str)
+
+                if self.verbose_streaming:
+                    logger.debug(
+                        "raw_chunk_metrics_processing",
+                        is_final=is_final,
+                        metrics=collector.get_metrics()
+                        if hasattr(collector, "get_metrics")
+                        else None,
+                    )
+
             buffer += chunk
 
             # Process complete SSE events in buffer
@@ -353,32 +474,51 @@ class DeferredStreaming(Response):
                         continue
 
     async def _serialize_json_to_sse_stream(
-        self, json_stream: AsyncIterator[dict[str, Any]]
-    ) -> AsyncIterator[bytes]:
+        self, json_stream: AsyncIterator[dict[str, Any]], collector: Any = None
+    ) -> AsyncGenerator[bytes, None]:
         """Serialize JSON chunks back to SSE format.
 
         Converts JSON objects to SSE event format:
         data: {json}\\n\\n
+
+        Args:
+            json_stream: Stream of JSON objects after format conversion
+            collector: Optional metrics collector to process converted format
         """
         async for json_obj in json_stream:
             # Convert to SSE format
             json_str = json.dumps(json_obj, ensure_ascii=False)
             sse_event = f"data: {json_str}\n\n"
-            yield sse_event.encode("utf-8")
+            sse_bytes = sse_event.encode("utf-8")
+
+            # Process converted chunk with collector if available
+            if collector and hasattr(collector, "process_converted_chunk"):
+                is_final = collector.process_converted_chunk(sse_event)
+
+                if self.verbose_streaming:
+                    logger.debug(
+                        "converted_chunk_metrics_processing",
+                        is_final=is_final,
+                        metrics=collector.get_metrics()
+                        if hasattr(collector, "get_metrics")
+                        else None,
+                    )
+
+            yield sse_bytes
 
         # Send final [DONE] event
         yield b"data: [DONE]\n\n"
 
-    async def _calculate_cost_if_claude_api(self) -> None:
-        """Calculate cost for Claude API requests using pricing service if available."""
+    async def _calculate_cost_for_provider(self) -> None:
+        """Calculate cost for any provider using pricing service if available."""
         if not self.request_context or not hasattr(self.request_context, "metadata"):
             return
 
         metadata = self.request_context.metadata
         service_type = metadata.get("service_type")
 
-        # Only calculate cost for Claude API requests
-        if service_type != "claude_api":
+        # Skip if no service_type is set
+        if not service_type:
             return
 
         model = metadata.get("model")
@@ -390,6 +530,7 @@ class DeferredStreaming(Response):
             logger.debug(
                 "deferred_streaming_cost_calculation_skipped",
                 reason="missing_model_or_tokens",
+                service_type=service_type,
                 model=model,
                 tokens_input=tokens_input,
                 tokens_output=tokens_output,
@@ -399,11 +540,11 @@ class DeferredStreaming(Response):
 
         try:
             # Get pricing service from app state via plugin registry
-            pricing_service = await self._get_pricing_service()
-            if not pricing_service:
+            if not self.pricing_service:
                 logger.debug(
                     "deferred_streaming_cost_calculation_skipped",
                     reason="pricing_service_not_available",
+                    service_type=service_type,
                     request_id=getattr(self.request_context, "request_id", "unknown"),
                 )
                 return
@@ -417,7 +558,7 @@ class DeferredStreaming(Response):
                 model=model,
                 cache_read_tokens=metadata.get("cache_read_tokens"),
                 cache_write_tokens=metadata.get("cache_write_tokens"),
-                pricing_service=pricing_service,
+                pricing_service=self.pricing_service,
             )
 
             if cost_usd is not None:
@@ -426,6 +567,7 @@ class DeferredStreaming(Response):
 
                 logger.debug(
                     "deferred_streaming_cost_calculated",
+                    service_type=service_type,
                     model=model,
                     cost_usd=cost_usd,
                     tokens_input=tokens_input,
@@ -438,6 +580,7 @@ class DeferredStreaming(Response):
                 logger.debug(
                     "deferred_streaming_cost_calculation_failed",
                     reason="cost_calculator_returned_none",
+                    service_type=service_type,
                     model=model,
                     request_id=getattr(self.request_context, "request_id", "unknown"),
                 )
@@ -446,27 +589,8 @@ class DeferredStreaming(Response):
             logger.debug(
                 "deferred_streaming_cost_calculation_error",
                 error=str(e),
+                service_type=service_type,
                 model=model,
                 request_id=getattr(self.request_context, "request_id", "unknown"),
                 exc_info=e,
             )
-
-    async def _get_pricing_service(self) -> Any | None:
-        """Get pricing service from plugin registry."""
-        try:
-            # Check if we have a handler config with plugin registry access
-            if self.handler_config and hasattr(self.handler_config, "plugin_registry"):
-                plugin_registry = self.handler_config.plugin_registry
-                pricing_runtime = plugin_registry.get_runtime("pricing")
-                if pricing_runtime and hasattr(pricing_runtime, "get_pricing_service"):
-                    return pricing_runtime.get_pricing_service()
-
-            return None
-
-        except Exception as e:
-            logger.debug(
-                "deferred_streaming_pricing_service_access_failed",
-                error=str(e),
-                request_id=getattr(self.request_context, "request_id", "unknown"),
-            )
-            return None

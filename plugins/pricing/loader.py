@@ -2,13 +2,17 @@
 
 import json
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from pydantic import ValidationError
 from structlog import get_logger
 
-from ccproxy.utils.model_mapping import get_claude_aliases_mapping, map_model_to_claude
+from ccproxy.utils.model_mapping import (
+    get_claude_aliases_mapping,
+    is_openai_model,
+    map_model_to_claude,
+)
 
 from .models import PricingData
 
@@ -54,15 +58,132 @@ class PricingLoader:
         return claude_models
 
     @staticmethod
+    def extract_openai_models(
+        litellm_data: dict[str, Any], verbose: bool = True
+    ) -> dict[str, Any]:
+        """Extract OpenAI model entries from LiteLLM data.
+
+        Args:
+            litellm_data: Raw LiteLLM pricing data
+            verbose: Whether to log individual model discoveries
+
+        Returns:
+            Dictionary with only OpenAI models
+        """
+        openai_models = {}
+
+        for model_name, model_data in litellm_data.items():
+            # Check if this is an OpenAI model
+            if isinstance(model_data, dict) and (
+                model_data.get("litellm_provider") == "openai"
+                or is_openai_model(model_name)
+            ):
+                openai_models[model_name] = model_data
+                if verbose:
+                    logger.debug("openai_model_found", model_name=model_name)
+
+        if verbose:
+            logger.info(
+                "openai_models_extracted",
+                model_count=len(openai_models),
+                source="LiteLLM",
+            )
+        return openai_models
+
+    @staticmethod
+    def extract_anthropic_models(
+        litellm_data: dict[str, Any], verbose: bool = True
+    ) -> dict[str, Any]:
+        """Extract all Anthropic model entries from LiteLLM data.
+
+        This includes Claude models and any other Anthropic models.
+
+        Args:
+            litellm_data: Raw LiteLLM pricing data
+            verbose: Whether to log individual model discoveries
+
+        Returns:
+            Dictionary with all Anthropic models
+        """
+        anthropic_models = {}
+
+        for model_name, model_data in litellm_data.items():
+            # Check if this is an Anthropic model
+            if (
+                isinstance(model_data, dict)
+                and model_data.get("litellm_provider") == "anthropic"
+            ):
+                anthropic_models[model_name] = model_data
+                if verbose:
+                    logger.debug("anthropic_model_found", model_name=model_name)
+
+        if verbose:
+            logger.info(
+                "anthropic_models_extracted",
+                model_count=len(anthropic_models),
+                source="LiteLLM",
+            )
+        return anthropic_models
+
+    @staticmethod
+    def extract_models_by_provider(
+        litellm_data: dict[str, Any],
+        provider: Literal["anthropic", "openai", "all", "claude"] = "all",
+        verbose: bool = True,
+    ) -> dict[str, Any]:
+        """Extract models by provider from LiteLLM data.
+
+        Args:
+            litellm_data: Raw LiteLLM pricing data
+            provider: Provider to extract models for ("anthropic", "openai", "claude", or "all")
+            verbose: Whether to log individual model discoveries
+
+        Returns:
+            Dictionary with models from specified provider(s)
+        """
+        if provider == "claude":
+            return PricingLoader.extract_claude_models(litellm_data, verbose)
+        elif provider == "anthropic":
+            return PricingLoader.extract_anthropic_models(litellm_data, verbose)
+        elif provider == "openai":
+            return PricingLoader.extract_openai_models(litellm_data, verbose)
+        elif provider == "all":
+            # Extract all models that have pricing data
+            all_models = {}
+            for model_name, model_data in litellm_data.items():
+                if isinstance(model_data, dict):
+                    all_models[model_name] = model_data
+                    if verbose:
+                        provider_name = model_data.get("litellm_provider", "unknown")
+                        logger.debug(
+                            "model_found",
+                            model_name=model_name,
+                            provider=provider_name,
+                        )
+
+            if verbose:
+                logger.info(
+                    "all_models_extracted",
+                    model_count=len(all_models),
+                    source="LiteLLM",
+                )
+            return all_models
+        else:
+            raise ValueError(
+                f"Invalid provider: {provider}. Use 'anthropic', 'openai', 'claude', or 'all'"
+            )
+
+    @staticmethod
     def convert_to_internal_format(
-        claude_models: dict[str, Any], verbose: bool = True
+        models: dict[str, Any], map_to_claude: bool = True, verbose: bool = True
     ) -> dict[str, dict[str, Decimal]]:
         """Convert LiteLLM pricing format to internal format.
 
         LiteLLM format uses cost per token, we use cost per 1M tokens as Decimal.
 
         Args:
-            claude_models: Claude models in LiteLLM format
+            models: Models in LiteLLM format
+            map_to_claude: Whether to map model names to Claude equivalents
             verbose: Whether to log individual model conversions
 
         Returns:
@@ -70,7 +191,7 @@ class PricingLoader:
         """
         internal_format = {}
 
-        for model_name, model_data in claude_models.items():
+        for model_name, model_data in models.items():
             try:
                 # Extract pricing fields
                 input_cost_per_token = model_data.get("input_cost_per_token")
@@ -99,8 +220,12 @@ class PricingLoader:
                 if cache_read_cost is not None:
                     pricing["cache_read"] = Decimal(str(cache_read_cost * 1_000_000))
 
-                # Map to canonical model name if needed
-                canonical_name = map_model_to_claude(model_name)
+                # Optionally map to canonical model name
+                if map_to_claude:
+                    canonical_name = map_model_to_claude(model_name)
+                else:
+                    canonical_name = model_name
+
                 internal_format[canonical_name] = pricing
 
                 if verbose:
@@ -125,31 +250,45 @@ class PricingLoader:
 
     @staticmethod
     def load_pricing_from_data(
-        litellm_data: dict[str, Any], verbose: bool = True
+        litellm_data: dict[str, Any],
+        provider: Literal["anthropic", "openai", "all", "claude"] = "claude",
+        map_to_claude: bool = True,
+        verbose: bool = True,
     ) -> PricingData | None:
         """Load and convert pricing data from LiteLLM format.
 
         Args:
             litellm_data: Raw LiteLLM pricing data
+            provider: Provider to load pricing for ("anthropic", "openai", "all", or "claude")
+                     "claude" is kept for backward compatibility and extracts only Claude models
+            map_to_claude: Whether to map model names to Claude equivalents
             verbose: Whether to enable verbose logging
 
         Returns:
             Validated pricing data as PricingData model, or None if invalid
         """
         try:
-            # Extract Claude models
-            claude_models = PricingLoader.extract_claude_models(
-                litellm_data, verbose=verbose
-            )
+            # Extract models based on provider
+            if provider == "claude":
+                # Backward compatibility - extract only Claude models
+                models = PricingLoader.extract_claude_models(
+                    litellm_data, verbose=verbose
+                )
+            else:
+                models = PricingLoader.extract_models_by_provider(
+                    litellm_data, provider=provider, verbose=verbose
+                )
 
-            if not claude_models:
+            if not models:
                 if verbose:
-                    logger.warning("claude_models_not_found", source="LiteLLM")
+                    logger.warning(
+                        "models_not_found", provider=provider, source="LiteLLM"
+                    )
                 return None
 
             # Convert to internal format
             internal_pricing = PricingLoader.convert_to_internal_format(
-                claude_models, verbose=verbose
+                models, map_to_claude=map_to_claude, verbose=verbose
             )
 
             if not internal_pricing:
@@ -161,7 +300,11 @@ class PricingLoader:
             pricing_data = PricingData.from_dict(internal_pricing)
 
             if verbose:
-                logger.info("pricing_data_loaded", model_count=len(pricing_data))
+                logger.info(
+                    "pricing_data_loaded",
+                    model_count=len(pricing_data),
+                    provider=provider,
+                )
 
             return pricing_data
 

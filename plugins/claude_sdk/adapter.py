@@ -10,6 +10,7 @@ from fastapi import HTTPException, Request
 from starlette.responses import Response, StreamingResponse
 
 from ccproxy.core.logging import get_plugin_logger
+from ccproxy.observability.streaming_response import StreamingResponseWithLogging
 from ccproxy.services.adapters.base import BaseAdapter
 
 from .auth import NoOpAuthManager
@@ -183,32 +184,28 @@ class ClaudeSDKAdapter(BaseAdapter):
                 ),
             )
 
-        # Get or create request context for observability
-        request_context = getattr(request.state, "context", None)
+        # Get RequestContext - it must exist when called via ProxyService
+        from ccproxy.observability.context import RequestContext
+
+        request_context: RequestContext | None = RequestContext.get_current()
         if not request_context:
-            # Create a new context if one doesn't exist
-            import time
-            import uuid
-
-            from ccproxy.observability.context import RequestContext
-
-            request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-            request_logger = get_plugin_logger().bind(
-                request_id=request_id,
-                provider="claude_sdk",
-                endpoint=endpoint,
+            raise HTTPException(
+                status_code=500,
+                detail="RequestContext not available - plugin must be called via ProxyService",
             )
 
-            request_context = RequestContext(
-                request_id=request_id,
-                start_time=time.perf_counter(),
-                logger=request_logger,
-                metadata={
-                    "provider": "claude_sdk",
-                    "endpoint": endpoint,
-                    "method": method,
-                },
-            )
+        # Update context with claude_sdk specific metadata
+        request_context.metadata.update(
+            {
+                "provider": "claude_sdk",
+                "service_type": "claude_sdk",
+                "endpoint": endpoint.rstrip("/").split("/")[-1]
+                if endpoint
+                else "messages",
+                "model": model,
+                "stream": stream,
+            }
+        )
 
         self.logger.debug(
             "plugin_request",
@@ -332,8 +329,17 @@ class ClaudeSDKAdapter(BaseAdapter):
                         yield f"data: {json.dumps(error_chunk)}\n\n".encode()
                         # Don't add extra [DONE] here as OpenAIStreamProcessor already adds it
 
-                return StreamingResponse(
-                    stream_generator(),
+                # Get metrics from proxy_service if available
+                metrics = None
+                if self.proxy_service and hasattr(self.proxy_service, "metrics"):
+                    metrics = self.proxy_service.metrics
+
+                # Use StreamingResponseWithLogging for automatic access logging
+                return StreamingResponseWithLogging(
+                    content=stream_generator(),
+                    request_context=request_context,
+                    metrics=metrics,
+                    status_code=200,
                     media_type="text/event-stream",
                     headers={
                         "Cache-Control": "no-cache",
