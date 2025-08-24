@@ -51,7 +51,7 @@ class OAuthClaudeRuntime(ProviderPluginRuntime):
         registry = get_oauth_registry()
         registry.register_provider(self.oauth_provider)
 
-        logger.info(
+        logger.debug(
             "oauth_claude_plugin_initialized",
             status="initialized",
             provider_name=self.oauth_provider.provider_name,

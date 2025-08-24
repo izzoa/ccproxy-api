@@ -297,7 +297,7 @@ class SessionPool:
         """Handle ongoing stream timeout - interrupt stream but keep session (requires lock)."""
         old_handle_id = session_client.active_stream_handle.handle_id
 
-        logger.info(
+        logger.trace(
             "session_pool_interrupting_ongoing_timeout",
             session_id=session_id,
             old_handle_id=old_handle_id,
@@ -311,7 +311,7 @@ class SessionPool:
             # Interrupt the old stream handle
             interrupted = await session_client.active_stream_handle.interrupt()
             if interrupted:
-                logger.info(
+                logger.trace(
                     "session_pool_interrupted_ongoing_timeout",
                     session_id=session_id,
                     old_handle_id=old_handle_id,

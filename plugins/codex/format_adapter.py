@@ -45,7 +45,7 @@ class CodexFormatAdapter(APIAdapter):
             if "model" not in codex_request:
                 codex_request["model"] = "gpt-5"
 
-            logger.info(
+            logger.trace(
                 "codex_request_conversion",
                 original_keys=list(request_data.keys()),
                 converted_keys=list(codex_request.keys()),
@@ -53,7 +53,7 @@ class CodexFormatAdapter(APIAdapter):
             return codex_request
 
         # Native Response API format - passthrough
-        logger.info("request_passthrough", request_keys=list(request_data.keys()))
+        logger.trace("request_passthrough", request_keys=list(request_data.keys()))
         return request_data
 
     async def adapt_response(self, response_data: dict[str, Any]) -> dict[str, Any]:

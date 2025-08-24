@@ -439,7 +439,7 @@ class ClaudeSDKHandler:
                     await self._log_sdk_streaming_chunk(request_id, chunk, timestamp)
                 yield chunk
         except GeneratorExit:
-            logger.info(
+            logger.debug(
                 "claude_sdk_handler_client_disconnected",
                 request_id=request_id,
                 session_id=session_id,

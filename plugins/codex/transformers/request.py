@@ -1,7 +1,7 @@
 """Codex request transformer - headers and auth only."""
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ccproxy.core.logging import get_plugin_logger
 
@@ -141,7 +141,7 @@ class CodexRequestTransformer:
 
         try:
             data = json.loads(body.decode("utf-8"))
-            logger.info(
+            logger.trace(
                 "parsed_request_body",
                 keys=list(data.keys()),
                 category="transform",
@@ -160,7 +160,7 @@ class CodexRequestTransformer:
         # Only inject instructions if missing or None
         if "instructions" not in data or data.get("instructions") is None:
             instructions = self._get_instructions()
-            logger.info(
+            logger.trace(
                 "getting_instructions",
                 has_detection_service=bool(self.detection_service),
                 instructions_length=len(instructions) if instructions else 0,
@@ -168,7 +168,7 @@ class CodexRequestTransformer:
             )
             if instructions:
                 data["instructions"] = instructions
-                logger.info(
+                logger.trace(
                     "injected_codex_instructions",
                     instructions_length=len(instructions),
                     instructions_preview=f"{instructions[:100]}..."
@@ -186,7 +186,7 @@ class CodexRequestTransformer:
             )
 
         result = json.dumps(data).encode("utf-8")
-        logger.info(
+        logger.trace(
             "transform_body_result", result_length=len(result), category="transform"
         )
         return result

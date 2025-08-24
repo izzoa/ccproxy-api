@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Protocol, TextIO
 
 import structlog
+from structlog.stdlib import BoundLogger
 from rich.console import Console
 from rich.traceback import Traceback
 from structlog.typing import ExcInfo, Processor
@@ -65,6 +66,15 @@ def trace(self: logging.Logger, message: str, *args: Any, **kwargs: Any) -> None
 
 
 logging.Logger.trace = trace  # type: ignore[attr-defined]
+
+
+# Custom BoundLogger that includes trace method
+class TraceBoundLoggerImpl(BoundLogger):
+    """BoundLogger with trace method support."""
+    
+    def trace(self, msg: str, *args: Any, **kwargs: Any) -> Any:
+        """Log at TRACE level."""
+        return self.log(TRACE_LEVEL, msg, *args, **kwargs)
 
 
 suppress_debug = [
@@ -303,7 +313,7 @@ def configure_structlog(log_level: int = logging.INFO) -> None:
         processors=processors,
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
+        wrapper_class=TraceBoundLoggerImpl,
         cache_logger_on_first_use=True,
     )
 
@@ -534,15 +544,6 @@ def get_logger(name: str | None = None) -> TraceBoundLogger:
         TraceBoundLogger with request_id bound if available
     """
     logger = structlog.get_logger(name)
-
-    # Add trace method to logger if not present
-    if not hasattr(logger, "trace"):
-
-        def trace_method(msg: str, *args: Any, **kwargs: Any) -> Any:
-            """Log at TRACE level."""
-            return logger.log(TRACE_LEVEL, msg, *args, **kwargs)
-
-        logger.trace = trace_method
 
     # Try to get request context and bind request_id if available
     try:

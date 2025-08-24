@@ -64,7 +64,7 @@ class ClaudeSDKRuntime(ProviderPluginRuntime):
 
             if cli_path:
                 # Single consolidated log message with both CLI detection and plugin initialization status
-                logger.info(
+                logger.debug(
                     "plugin_initialized",
                     status="initialized",
                     cli_available=True,

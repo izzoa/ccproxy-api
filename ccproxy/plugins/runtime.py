@@ -59,7 +59,7 @@ class BasePluginRuntime(PluginRuntimeProtocol):
         await self._on_initialize()
 
         self.initialized = True
-        logger.info(
+        logger.debug(
             "plugin_initialized",
             plugin=self.name,
             version=self.version,

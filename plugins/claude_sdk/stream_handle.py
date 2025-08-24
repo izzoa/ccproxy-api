@@ -224,7 +224,7 @@ class StreamHandle:
                         )
                         # Still stop the worker to ensure cleanup
                         if self._worker:
-                            logger.info(
+                            logger.trace(
                                 "stream_handle_stopping_worker_direct",
                                 handle_id=self.handle_id,
                                 message="Stopping worker directly since SDK interrupt not needed",
@@ -303,7 +303,7 @@ class StreamHandle:
 
             # Stop our worker after SDK interrupt to ensure it's not blocking the session
             if self._worker:
-                logger.info(
+                logger.trace(
                     "stream_handle_stopping_worker_after_interrupt",
                     handle_id=self.handle_id,
                     message="Stopping worker to free up session for reuse",
@@ -327,7 +327,7 @@ class StreamHandle:
 
             # Fallback: Stop our worker manually if SDK interrupt timed out
             if self._worker:
-                logger.info(
+                logger.trace(
                     "stream_handle_fallback_worker_stop",
                     handle_id=self.handle_id,
                     message="SDK interrupt timed out, stopping worker as fallback",
@@ -353,7 +353,7 @@ class StreamHandle:
 
             # Fallback: Stop our worker manually if SDK interrupt failed
             if self._worker:
-                logger.info(
+                logger.trace(
                     "stream_handle_fallback_worker_stop_after_error",
                     handle_id=self.handle_id,
                     message="SDK interrupt failed, stopping worker as fallback",
@@ -397,7 +397,7 @@ class StreamHandle:
                 listener.close()
             self._listeners.clear()
 
-            logger.info(
+            logger.trace(
                 "stream_handle_interrupted",
                 handle_id=self.handle_id,
             )

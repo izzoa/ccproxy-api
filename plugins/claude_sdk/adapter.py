@@ -50,7 +50,7 @@ class ClaudeSDKAdapter(BaseAdapter):
         ):
             # Generate a random session ID for this runtime
             self._runtime_default_session_id = f"auto-{uuid.uuid4().hex[:12]}"
-            self.logger.info(
+            self.logger.debug(
                 "auto_generated_session",
                 session_id=self._runtime_default_session_id,
                 lifetime="runtime",
@@ -210,7 +210,7 @@ class ClaudeSDKAdapter(BaseAdapter):
                 },
             )
 
-        self.logger.info(
+        self.logger.debug(
             "plugin_request",
             plugin="claude_sdk",
             endpoint=endpoint,

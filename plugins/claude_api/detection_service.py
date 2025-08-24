@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request, Response
 
 from ccproxy.config.discovery import get_ccproxy_cache_dir
 from ccproxy.config.settings import Settings
-from ccproxy.core.logging import TraceBoundLogger, get_logger
+from ccproxy.core.logging import get_plugin_logger
 from ccproxy.models.detection import (
     ClaudeCacheData,
     ClaudeCodeHeaders,
@@ -23,7 +23,7 @@ from ccproxy.services.cli_detection import CLIDetectionService
 from ccproxy.utils.caching import async_ttl_cache
 
 
-logger: TraceBoundLogger = get_logger()
+logger = get_plugin_logger()
 
 
 class ClaudeAPIDetectionService:

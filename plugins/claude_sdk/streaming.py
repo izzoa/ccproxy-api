@@ -139,7 +139,7 @@ class ClaudeStreamProcessor:
                             mode=sdk_message_mode.value,
                             request_id=request_id,
                         )
-                        logger.info(
+                        logger.debug(
                             "sdk_tool_use_block",
                             tool_id=block.id,
                             tool_name=block.name,
@@ -176,7 +176,7 @@ class ClaudeStreamProcessor:
                             mode=sdk_message_mode.value,
                             request_id=request_id,
                         )
-                        logger.info(
+                        logger.debug(
                             "sdk_tool_result_block",
                             tool_use_id=block.tool_use_id,
                             is_error=block.is_error,
@@ -325,7 +325,7 @@ class ClaudeStreamProcessor:
         # NOTE: Access logging is now handled by StreamingResponseWithLogging
         # No need for manual access logging here anymore
 
-        logger.info(
+        logger.debug(
             "streaming_complete",
             request_id=request_id,
             plugin="claude_sdk",

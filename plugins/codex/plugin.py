@@ -74,7 +74,7 @@ class CodexRuntime(ProviderPluginRuntime):
                 }
             )
 
-        logger.info(
+        logger.debug(
             "plugin_initialized",
             status="initialized",
             has_credentials=self.auth_manager is not None,

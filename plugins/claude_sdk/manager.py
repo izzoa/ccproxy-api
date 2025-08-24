@@ -171,7 +171,7 @@ class SessionManager:
             )
             return False
 
-        logger.info(
+        logger.debug(
             "session_manager_interrupt_session",
             session_id=session_id,
         )
@@ -188,7 +188,7 @@ class SessionManager:
             logger.warning("session_manager_interrupt_all_no_pool")
             return 0
 
-        logger.info("session_manager_interrupt_all_sessions")
+        logger.debug("session_manager_interrupt_all_sessions")
         return await self._session_pool.interrupt_all_sessions()
 
     async def get_session_pool_stats(self) -> dict[str, Any]:

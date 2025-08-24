@@ -508,7 +508,7 @@ class ClaudeSDKClient:
                     exc_info=e,
                 )
                 # Fall back to direct query
-                logger.info(
+                logger.debug(
                     "claude_sdk_fallback_to_direct_query", session_id=session_id
                 )
                 async for msg in self._query(message, options, request_id, session_id):
@@ -681,7 +681,7 @@ class ClaudeSDKClient:
 
         async def drain_stream() -> None:
             try:
-                logger.info(
+                logger.trace(
                     "claude_sdk_starting_stream_drain",
                     session_id=session_id,
                     request_id=request_id,
@@ -697,7 +697,7 @@ class ClaudeSDKClient:
                 ):
                     message_count += 1
 
-                logger.info(
+                logger.trace(
                     "claude_sdk_stream_drained",
                     session_id=session_id,
                     request_id=request_id,
@@ -787,7 +787,7 @@ class ClaudeSDKClient:
         """
         logger.debug("sdk_client_interrupt_session_started", session_id=session_id)
         if self._session_manager:
-            logger.info(
+            logger.debug(
                 "client_interrupt_session_requested",
                 session_id=session_id,
                 has_session_manager=True,

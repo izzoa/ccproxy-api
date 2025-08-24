@@ -95,7 +95,7 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
                 }
             )
 
-        logger.info(
+        logger.debug(
             "plugin_initialized",
             status="initialized",
             base_url=self.config.base_url,

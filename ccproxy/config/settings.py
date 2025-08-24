@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ccproxy.config.discovery import find_toml_config_file
+from ccproxy.core.logging import get_logger
 
 from .auth import AuthSettings
 from .binary import BinarySettings
@@ -285,30 +286,21 @@ class Settings(BaseSettings):
         config_data = {}
         if config_path and config_path.exists():
             config_data = cls.load_config_file(config_path)
-            # Log loaded config
-            logger = structlog.get_logger(__name__)
-            logger.info(
-                "config_file_loaded",
-                path=str(config_path),
-                http_config=config_data.get("http", {}),
-                category="config",
-            )
+            # Log loaded config only if not already logged by config manager
+            if not config_manager._config_logged:
+                logger = get_logger(__name__)
+                logger.info(
+                    "config_file_loaded",
+                    path=str(config_path),
+                    category="config",
+                )
+                config_manager.mark_config_logged()
 
         # Merge config with kwargs (kwargs take precedence)
         merged_config = {**config_data, **kwargs}
 
         # Create Settings instance with merged config
         settings = cls(**merged_config)
-
-        # Log final HTTP settings
-        if hasattr(settings, "http"):
-            logger = structlog.get_logger(__name__)
-            logger.info(
-                "final_http_settings",
-                compression_enabled=settings.http.compression_enabled,
-                accept_encoding=settings.http.accept_encoding,
-                category="config",
-            )
 
         return settings
 
@@ -320,6 +312,7 @@ class ConfigurationManager:
         self._settings: Settings | None = None
         self._config_path: Path | None = None
         self._logging_configured = False
+        self._config_logged = False
 
     def _apply_plugin_settings_overrides(
         self, settings: dict[str, Any], overrides: list[str]
@@ -362,6 +355,10 @@ class ConfigurationManager:
                     f"Invalid plugin setting format: {override}", category="config"
                 )
 
+    def mark_config_logged(self) -> None:
+        """Mark that config loading has been logged to prevent duplicates."""
+        self._config_logged = True
+
     def load_settings(
         self,
         config_path: Path | None = None,
@@ -374,6 +371,14 @@ class ConfigurationManager:
                 config_data = {}
                 if config_path and config_path.exists():
                     config_data = Settings.load_config_file(config_path)
+                    # Log config loading once
+                    if not self._config_logged:
+                        logger.info(
+                            "config_file_loaded",
+                            path=str(config_path),
+                            category="config",
+                        )
+                        self._config_logged = True
 
                 # Apply CLI overrides to the loaded config data
                 if cli_overrides:
@@ -457,12 +462,13 @@ class ConfigurationManager:
         self._settings = None
         self._config_path = None
         self._logging_configured = False
+        self._config_logged = False
 
 
 # Global configuration manager instance
 config_manager = ConfigurationManager()
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 def get_settings(config_path: Path | str | None = None) -> Settings:

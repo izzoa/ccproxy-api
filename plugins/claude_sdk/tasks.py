@@ -62,7 +62,7 @@ class ClaudeSDKDetectionRefreshTask(BaseScheduledTask):
         self._first_run = False
 
         try:
-            logger.info(
+            logger.debug(
                 "claude_sdk_detection_refresh_starting",
                 task_name=self.name,
             )
@@ -70,7 +70,7 @@ class ClaudeSDKDetectionRefreshTask(BaseScheduledTask):
             # Refresh Claude CLI detection
             detection_data = await self.detection_service.initialize_detection()
 
-            logger.info(
+            logger.debug(
                 "claude_sdk_detection_refresh_completed",
                 task_name=self.name,
                 version=detection_data.claude_version or "unknown",

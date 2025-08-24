@@ -123,7 +123,7 @@ class CLIDetectionService:
                 cached=False,
             )
 
-            logger.info(
+            logger.debug(
                 "cli_detection_success",
                 binary=binary_name,
                 version=version,

@@ -1,7 +1,7 @@
 """Claude API request transformer."""
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ccproxy.core.logging import get_plugin_logger
 
@@ -51,7 +51,7 @@ class ClaudeAPIRequestTransformer:
         logger = get_plugin_logger()
 
         # Debug logging
-        logger.debug(
+        logger.trace(
             "transform_headers_called",
             has_access_token=access_token is not None,
             access_token_length=len(access_token) if access_token else 0,
@@ -88,7 +88,7 @@ class ClaudeAPIRequestTransformer:
             cached_data = self.detection_service.get_cached_data()
             if cached_data and cached_data.headers:
                 detected_headers = cached_data.headers.to_headers_dict()
-                logger.debug(
+                logger.trace(
                     "injecting_detected_headers",
                     version=cached_data.claude_version,
                     header_count=len(detected_headers),
@@ -105,7 +105,7 @@ class ClaudeAPIRequestTransformer:
         transformed["Authorization"] = f"Bearer {access_token}"
 
         # Debug logging - what headers are we returning?
-        logger.debug(
+        logger.trace(
             "transform_headers_result",
             has_x_api_key="x-api-key" in transformed,
             has_authorization="Authorization" in transformed,
@@ -130,7 +130,7 @@ class ClaudeAPIRequestTransformer:
         # Get logger with request context at the start of the function
         logger = get_plugin_logger()
 
-        logger.debug(
+        logger.trace(
             "transform_body_called",
             has_body=body is not None,
             body_length=len(body) if body else 0,
@@ -143,7 +143,7 @@ class ClaudeAPIRequestTransformer:
 
         try:
             data = json.loads(body.decode("utf-8"))
-            logger.info(
+            logger.trace(
                 "parsed_request_body",
                 keys=list(data.keys()),
                 category="transform",
@@ -177,7 +177,7 @@ class ClaudeAPIRequestTransformer:
             if cached_data and cached_data.system_prompt and "system" not in data:
                 # Inject the detected system prompt (as list or string)
                 data["system"] = cached_data.system_prompt.system_field
-                logger.debug(
+                logger.trace(
                     "injected_system_prompt",
                     version=cached_data.claude_version,
                     system_type=type(cached_data.system_prompt.system_field).__name__,
