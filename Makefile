@@ -235,12 +235,11 @@ docker-compose-down:
 
 # Development server
 dev:
-	# uv run fastapi dev ccproxy/main.py
-	CCPROXY_REQUEST_LOG_DIR=/tmp/ccproxy/request \
-	  CCPROXY_VERBOSE_API=true \
-	  SERVER__LOG_FILE=/tmp/ccproxy/ccproxy.log \
-	  SERVER__LOG_LEVEL=debug \
-		uv run ccproxy serve --reload
+  PLUGINS__RAWHTTPLOGGERCONFIG__ENABLED=true \
+		PLUGINS__RAWHTTPLOGGERCONFIG__LOG_DIR=/tmp/ccproxy/raw \
+		SERVER__LOG_FILE=/tmp/ccproxy/ccproxy.log \
+		SERVER__LOG_LEVEL=debug \
+		uv run ccproxy-api serve --port 8000 --reload
 
 prod:
 	uv run ccproxy serve

@@ -156,7 +156,7 @@ async def test_claude_sdk_native() -> str | None:
             "http://127.0.0.1:8000/claude/v1/messages",
             headers={"Content-Type": "application/json"},
             json={
-                "model": "claude-3-haiku-20240307",
+                "model": "claude-sonnet-4-20250514",
                 "messages": [
                     {"role": "user", "content": "Say 'test' and nothing else"}
                 ],
@@ -190,7 +190,7 @@ async def test_claude_api_native() -> str | None:
             "http://127.0.0.1:8000/api/v1/messages",
             headers={"Content-Type": "application/json"},
             json={
-                "model": "claude-3-haiku-20240307",
+                "model": "claude-sonnet-4-20250514",
                 "messages": [
                     {"role": "user", "content": "Say 'test' and nothing else"}
                 ],
