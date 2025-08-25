@@ -132,6 +132,7 @@ class ClaudeSDKFactory(ProviderPluginFactory):
             description="Claude SDK plugin providing access to Claude through the Claude Code SDK",
             is_provider=True,
             config_class=ClaudeSDKSettings,
+            optional_requires=["pricing"],  # Optional dependency on pricing service
             routes=[
                 RouteSpec(
                     router=router,

@@ -114,6 +114,58 @@ class RequestContext:
         """
         request_context_var.reset(token)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the context to a dictionary for JSON logging.
+
+        Returns all context data including:
+        - Request ID and timing information
+        - All metadata (costs, tokens, model, etc.)
+        - All metrics
+        - Computed properties (duration_ms, duration_seconds)
+
+        Excludes non-serializable fields like logger and storage.
+        """
+        import json
+
+        # Start with basic fields
+        data = {
+            "request_id": self.request_id,
+            "start_time": self.start_time,
+        }
+
+        # Add computed timing properties
+        try:
+            data["duration_ms"] = self.duration_ms
+            data["duration_seconds"] = self.duration_seconds
+        except Exception:
+            pass
+
+        # Add log timestamp if present
+        if self.log_timestamp:
+            try:
+                data["log_timestamp"] = self.log_timestamp.isoformat()
+            except Exception:
+                data["log_timestamp"] = str(self.log_timestamp)
+
+        # Add all metadata (includes costs, tokens, model info, etc.)
+        if self.metadata:
+            # Try to deep copy metadata to avoid reference issues
+            try:
+                # Ensure metadata is JSON serializable
+                data["metadata"] = json.loads(json.dumps(self.metadata, default=str))
+            except Exception:
+                data["metadata"] = self.metadata
+
+        # Add all metrics
+        if self.metrics:
+            try:
+                # Ensure metrics is JSON serializable
+                data["metrics"] = json.loads(json.dumps(self.metrics, default=str))
+            except Exception:
+                data["metrics"] = self.metrics
+
+        return data
+
 
 @asynccontextmanager
 async def request_context(

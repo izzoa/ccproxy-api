@@ -9,19 +9,37 @@ plugin_log_base_dir = "/tmp/ccproxy"
 
 # Per-plugin logging overrides
 [logging.plugin_overrides]
-raw_http_logger = true
+request_tracer = true
+access_log = true
 pricing = true
 permissions = true
 
-# Raw HTTP Logger plugin configuration
-[plugins.raw_http_logger]
+# Request Tracer plugin configuration (unified tracer with JSON and raw HTTP)
+[plugins.request_tracer]
 enabled = true
-log_dir = "/tmp/ccproxy/raw"
+log_dir = "/tmp/ccproxy/tracer"
+json_logs_enabled = true
+raw_http_enabled = false                                   # Set to true if you want raw HTTP dumps
+verbose_api = true
 log_client_request = true
 log_client_response = true
 log_provider_request = true
 log_provider_response = true
-exclude_headers = []
+exclude_headers = ["authorization", "x-api-key", "cookie"]
+max_body_size = 10485760                                   # 10MB
+
+# Access Log plugin configuration
+[plugins.access_log]
+enabled = true
+client_enabled = true
+client_format = "combined"                                   # Options: combined, common, structured
+client_log_file = "/tmp/ccproxy/combined_access.log"
+provider_enabled = false
+provider_format = "structured"
+provider_log_file = "/tmp/ccproxy/provider_access.log"
+exclude_paths = ["/health", "/metrics", "/readyz", "/livez"]
+buffer_size = 100
+flush_interval = 1.0
 
 [plugins.claude_api]
 enabled = true

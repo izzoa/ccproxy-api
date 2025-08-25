@@ -134,6 +134,7 @@ async def initialize_plugins_startup(app: FastAPI, settings: Settings) -> None:
             self.proxy_service = getattr(app.state, "proxy_service", None)
             self.cli_detection_service = container.get_cli_detection_service()
             self.scheduler = getattr(app.state, "scheduler", None)
+            self.plugin_registry = app.state.plugin_registry
             self._container = container
 
         def get_plugin_config(self, plugin_name: str) -> Any:

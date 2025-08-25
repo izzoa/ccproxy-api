@@ -5,7 +5,7 @@ from plugin manifests and manages the plugin lifecycle.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, TypeVar
 
 import structlog
 
@@ -14,6 +14,9 @@ from .runtime import BasePluginRuntime, ProviderPluginRuntime, SystemPluginRunti
 
 
 logger = structlog.get_logger(__name__)
+
+# Type variable for service type checking
+T = TypeVar("T")
 
 
 class PluginFactory(ABC):
@@ -104,6 +107,10 @@ class BasePluginFactory(PluginFactory):
         # Add scheduler if available
         if hasattr(core_services, "scheduler"):
             context["scheduler"] = core_services.scheduler
+
+        # Add plugin registry (SINGLE SOURCE for all plugin/service access)
+        if hasattr(core_services, "plugin_registry"):
+            context["plugin_registry"] = core_services.plugin_registry
 
         # Add plugin-specific config if available
         if hasattr(core_services, "get_plugin_config"):
@@ -221,6 +228,79 @@ class PluginRegistry:
         self.runtimes: dict[str, BasePluginRuntime] = {}
         self.initialization_order: list[str] = []
 
+        # Service management
+        self._services: dict[str, Any] = {}
+        self._service_providers: dict[str, str] = {}  # service_name -> plugin_name
+
+    def register_service(
+        self, service_name: str, service_instance: Any, provider_plugin: str
+    ) -> None:
+        """Register a service provided by a plugin.
+
+        Args:
+            service_name: Name of the service
+            service_instance: Service instance
+            provider_plugin: Name of the plugin providing the service
+        """
+        if service_name in self._services:
+            logger.warning(
+                "service_already_registered",
+                service=service_name,
+                existing_provider=self._service_providers[service_name],
+                new_provider=provider_plugin,
+            )
+        self._services[service_name] = service_instance
+        self._service_providers[service_name] = provider_plugin
+        logger.debug(
+            "service_registered", service=service_name, provider=provider_plugin
+        )
+
+    def get_service(
+        self, service_name: str, service_type: type[T] | None = None
+    ) -> T | None:
+        """Get a service by name with optional type checking.
+
+        Args:
+            service_name: Name of the service
+            service_type: Optional expected service type
+
+        Returns:
+            Service instance or None if not found
+        """
+        service = self._services.get(service_name)
+        if service and service_type and not isinstance(service, service_type):
+            logger.warning(
+                "service_type_mismatch",
+                service=service_name,
+                expected_type=service_type,
+                actual_type=type(service),
+            )
+            return None
+        return service
+
+    def has_service(self, service_name: str) -> bool:
+        """Check if a service is registered.
+
+        Args:
+            service_name: Name of the service
+
+        Returns:
+            True if service is registered
+        """
+        return service_name in self._services
+
+    def get_required_services(self, plugin_name: str) -> tuple[list[str], list[str]]:
+        """Get required and optional services for a plugin.
+
+        Args:
+            plugin_name: Name of the plugin
+
+        Returns:
+            Tuple of (required_services, optional_services)
+        """
+        manifest = self.factories[plugin_name].get_manifest()
+        return manifest.requires, manifest.optional_requires
+
     def register_factory(self, factory: PluginFactory) -> None:
         """Register a plugin factory.
 
@@ -274,11 +354,29 @@ class PluginRegistry:
         manifests = self.get_all_manifests()
         available = set(manifests.keys())
 
-        # Check for missing dependencies
+        # Check for missing plugin dependencies
         for name, manifest in manifests.items():
             missing = manifest.validate_dependencies(available)
             if missing:
                 raise ValueError(f"Plugin {name} has missing dependencies: {missing}")
+
+        # Add service dependency validation
+        for name, manifest in manifests.items():
+            # Check required services will be available
+            for required_service in manifest.requires:
+                # Find which plugin provides this service
+                provider_found = False
+                for other_name, other_manifest in manifests.items():
+                    if required_service in other_manifest.provides:
+                        provider_found = True
+                        # Ensure provider loads before consumer
+                        if other_name not in manifest.dependencies:
+                            manifest.dependencies.append(other_name)
+                        break
+                if not provider_found:
+                    raise ValueError(
+                        f"Plugin {name} requires service {required_service} but no plugin provides it"
+                    )
 
         # Topological sort for dependency resolution
         visited = set()

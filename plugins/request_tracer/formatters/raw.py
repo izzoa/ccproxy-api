@@ -177,7 +177,11 @@ class RawHTTPFormatter:
 
         # Add Host header if not present
         has_host = any(
-            (h[0].lower() == b"host" if isinstance(h[0], bytes) else h[0].lower() == "host")
+            (
+                h[0].lower() == b"host"
+                if isinstance(h[0], bytes)
+                else h[0].lower() == "host"
+            )
             for h in headers
         )
         if not has_host and parsed.netloc:

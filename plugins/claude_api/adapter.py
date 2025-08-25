@@ -43,6 +43,7 @@ class ClaudeAPIAdapter(BaseAdapter):
         detection_service: Any,
         http_client: AsyncClient | None = None,
         logger: Any | None = None,
+        context: Any | None = None,  # Can be dict or PluginContext TypedDict
     ) -> None:
         """Initialize the Claude API adapter.
 
@@ -52,12 +53,14 @@ class ClaudeAPIAdapter(BaseAdapter):
             detection_service: Detection service for Claude CLI detection
             http_client: Optional HTTP client for making requests
             logger: Optional structured logger instance
+            context: Optional plugin context containing plugin_registry and other services
         """
         # Use plugin logger for proper plugin context
         self.logger = logger or get_plugin_logger()
         self.proxy_service = proxy_service
         self._auth_manager = auth_manager
         self._detection_service = detection_service
+        self.context = context or {}
 
         # Initialize OpenAI adapter for format conversion
         from ccproxy.adapters.openai.adapter import OpenAIAdapter
@@ -98,16 +101,17 @@ class ClaudeAPIAdapter(BaseAdapter):
     def _get_pricing_service(self) -> Any | None:
         """Get pricing service from plugin registry if available."""
         try:
-            if (
-                hasattr(self, "context")
-                and self.context
-                and "plugin_registry" in self.context
-            ):
-                plugin_registry = self.context["plugin_registry"]
-                pricing_runtime = plugin_registry.get_runtime("pricing")
-                if pricing_runtime and hasattr(pricing_runtime, "get_pricing_service"):
-                    return pricing_runtime.get_pricing_service()
-            return None
+            if not self.context or "plugin_registry" not in self.context:
+                return None
+
+            plugin_registry = self.context["plugin_registry"]
+
+            # Import locally to avoid circular dependency
+            from plugins.pricing.service import PricingService
+
+            # Get service from registry with type checking
+            return plugin_registry.get_service("pricing", PricingService)
+
         except Exception as e:
             self.logger.debug("failed_to_get_pricing_service", error=str(e))
             return None
@@ -199,7 +203,9 @@ class ClaudeAPIAdapter(BaseAdapter):
             )
 
     def _create_handler_config(
-        self, needs_conversion: bool, request_context: "RequestContext | None" = None
+        self,
+        needs_conversion: bool,
+        request_context: "RequestContext | None" = None,
     ) -> HandlerConfig:
         """Create handler configuration based on conversion needs.
 
@@ -210,13 +216,20 @@ class ClaudeAPIAdapter(BaseAdapter):
         Returns:
             HandlerConfig instance
         """
-        # Create metrics collector for this request
+        # Create metrics collector for this request with cost calculation capability
         metrics_collector: IStreamingMetricsCollector | None = None
         if request_context:
             from .streaming_metrics import StreamingMetricsCollector
 
             request_id = getattr(request_context, "request_id", None)
-            metrics_collector = StreamingMetricsCollector(request_id=request_id)
+            # Get pricing service for cost calculation
+            pricing_service = self._get_pricing_service()
+
+            # Create enhanced metrics collector with pricing capability
+            # The collector will extract the model from the streaming chunks
+            metrics_collector = StreamingMetricsCollector(
+                request_id=request_id, pricing_service=pricing_service
+            )
 
         return HandlerConfig(
             request_adapter=self.openai_adapter if needs_conversion else None,
@@ -320,21 +333,120 @@ class ClaudeAPIAdapter(BaseAdapter):
             request_context=request_context,  # Pass the actual RequestContext object
         )
 
-        # For deferred streaming responses, wrap with cost calculation
+        # For deferred streaming responses, return directly (metrics collector already has cost calculation)
         if isinstance(response, DeferredStreaming):
-            # DeferredStreaming already handles header preservation and cost calculation
-            self.logger.debug(
-                "claude_api_using_deferred_response",
-                response_type=type(response).__name__,
-                category="http",
-            )
             return response
 
         # For regular streaming responses, wrap to accumulate chunks and extract headers
         if is_streaming and isinstance(response, StreamingResponse):
             return await self._wrap_streaming_response(response, request_context)
 
+        # For non-streaming responses, extract usage data if available
+        if not is_streaming and hasattr(response, "body"):
+            # Get response body (might be bytes or memoryview)
+            response_body = response.body
+            if isinstance(response_body, memoryview):
+                response_body = bytes(response_body)
+            await self._extract_usage_from_response(response_body, request_context)
+
         return response
+
+    async def _extract_usage_from_response(
+        self, body: bytes | str, request_context: "RequestContext"
+    ) -> None:
+        """Extract usage data from response body and update context.
+
+        Common function used by both streaming and non-streaming responses.
+
+        Args:
+            body: Response body (bytes or string)
+            request_context: Request context to update with usage data
+        """
+        try:
+            import json
+
+            # Convert body to string if needed
+            body_str = body
+            if isinstance(body_str, bytes):
+                body_str = body_str.decode("utf-8")
+
+            # Parse response to extract usage
+            response_data = json.loads(body_str)
+            usage = response_data.get("usage", {})
+
+            if not usage:
+                return
+
+            # Extract Claude-specific usage fields
+            tokens_input = usage.get("input_tokens", 0)
+            tokens_output = usage.get("output_tokens", 0)
+            cache_read_tokens = usage.get("cache_read_input_tokens", 0)
+            cache_write_tokens = usage.get("cache_creation_input_tokens", 0)
+
+            # Calculate cost using pricing service if available
+            cost_usd = None
+            pricing_service = self._get_pricing_service()
+            self.logger.debug(
+                "pricing_service_check",
+                has_pricing_service=pricing_service is not None,
+                source="non_streaming",
+            )
+            if pricing_service:
+                try:
+                    model = request_context.metadata.get(
+                        "model", "claude-3-5-sonnet-20241022"
+                    )
+                    cost_decimal = await pricing_service.calculate_cost(
+                        model_name=model,
+                        input_tokens=tokens_input,
+                        output_tokens=tokens_output,
+                        cache_read_tokens=cache_read_tokens,
+                        cache_write_tokens=cache_write_tokens,
+                    )
+                    if cost_decimal is not None:
+                        cost_usd = float(cost_decimal)
+                        self.logger.debug(
+                            "cost_calculated",
+                            model=model,
+                            cost_usd=cost_usd,
+                            tokens_input=tokens_input,
+                            tokens_output=tokens_output,
+                        )
+                    else:
+                        self.logger.debug(
+                            "cost_not_available",
+                            model=model,
+                            reason="pricing_service_returned_none",
+                        )
+                except Exception as e:
+                    self.logger.debug(
+                        "cost_calculation_failed", error=str(e), model=model
+                    )
+
+            # Update request context with usage data
+            request_context.metadata.update(
+                {
+                    "tokens_input": tokens_input,
+                    "tokens_output": tokens_output,
+                    "tokens_total": tokens_input + tokens_output,
+                    "cache_read_tokens": cache_read_tokens,
+                    "cache_write_tokens": cache_write_tokens,
+                    "cost_usd": cost_usd or 0.0,
+                }
+            )
+
+            self.logger.debug(
+                "usage_extracted",
+                tokens_input=tokens_input,
+                tokens_output=tokens_output,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                cost_usd=cost_usd,
+                source="response_body",
+            )
+
+        except Exception as e:
+            self.logger.debug("usage_extraction_failed", error=str(e))
 
     async def _wrap_streaming_response(
         self, response: StreamingResponse, request_context: "RequestContext"
@@ -497,7 +609,7 @@ class ClaudeAPIAdapter(BaseAdapter):
                         else:
                             cost_usd = usage_metrics.get("cost_usd")
 
-                        # Update request context with usage data
+                        # Update request context with usage data using common format
                         request_context.metadata.update(
                             {
                                 "tokens_input": usage_metrics.get("tokens_input", 0),
@@ -514,6 +626,16 @@ class ClaudeAPIAdapter(BaseAdapter):
                                     "cache_write_tokens"
                                 ),
                             }
+                        )
+
+                        self.logger.debug(
+                            "usage_extracted",
+                            tokens_input=usage_metrics.get("tokens_input"),
+                            tokens_output=usage_metrics.get("tokens_output"),
+                            cache_read_tokens=usage_metrics.get("cache_read_tokens"),
+                            cache_write_tokens=usage_metrics.get("cache_write_tokens"),
+                            cost_usd=cost_usd,
+                            source="streaming",
                         )
 
                 yield chunk

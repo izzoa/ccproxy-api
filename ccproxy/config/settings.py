@@ -296,13 +296,50 @@ class Settings(BaseSettings):
             # by comparing with a fresh instance that has env vars applied
             if hasattr(settings, key):
                 # For nested models like logging, we need to handle them specially
-                if key in ['logging', 'server', 'security'] and isinstance(value, dict):
+                if key in ["logging", "server", "security"] and isinstance(value, dict):
                     nested_obj = getattr(settings, key)
                     for nested_key, nested_value in value.items():
                         # Only set if not already set by environment variable
                         env_key = f"{key.upper()}__{nested_key.upper()}"
                         if os.getenv(env_key) is None:
                             setattr(nested_obj, nested_key, nested_value)
+                # Handle plugins dict specially to merge with env vars
+                elif key == "plugins" and isinstance(value, dict):
+                    # Get the current plugins dict (which may have env var values)
+                    current_plugins = getattr(settings, key, {})
+
+                    # For each plugin in the config file
+                    for plugin_name, plugin_config in value.items():
+                        if isinstance(plugin_config, dict):
+                            # Check if any env vars exist for this plugin
+                            env_prefix = f"PLUGINS__{plugin_name.upper()}__"
+                            has_env_override = any(
+                                k.startswith(env_prefix) for k in os.environ
+                            )
+
+                            if has_env_override:
+                                # Merge config file values with env var values
+                                # Env vars take precedence
+                                if plugin_name in current_plugins:
+                                    # Start with config file values
+                                    merged_plugin_config = dict(plugin_config)
+                                    # Update with env var values
+                                    merged_plugin_config.update(
+                                        current_plugins[plugin_name]
+                                    )
+                                    current_plugins[plugin_name] = merged_plugin_config
+                                else:
+                                    # Just env vars, no merge needed
+                                    pass
+                            else:
+                                # No env vars for this plugin, use config file values
+                                current_plugins[plugin_name] = plugin_config
+                        else:
+                            # Non-dict plugin config, just use it
+                            current_plugins[plugin_name] = plugin_config
+
+                    # Set the merged plugins dict
+                    setattr(settings, key, current_plugins)
                 else:
                     # For top-level fields, check if env var exists
                     env_key = key.upper()
@@ -420,7 +457,7 @@ class ConfigurationManager:
         # Import here to avoid circular import
 
         effective_level = log_level or (
-            self._settings.server.log_level if self._settings else "INFO"
+            self._settings.logging.level if self._settings else "INFO"
         )
 
         # Determine format based on log level - Rich for DEBUG, JSON for production

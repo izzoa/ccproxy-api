@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
     from ccproxy.config.settings import Settings
     from ccproxy.hooks.base import Hook
+    from ccproxy.plugins.factory import PluginRegistry
     from ccproxy.plugins.protocol import OAuthClientProtocol
     from ccproxy.scheduler.core import Scheduler
     from ccproxy.scheduler.tasks import BaseScheduledTask
@@ -112,6 +113,13 @@ class PluginManifest:
     # Plugin type
     is_provider: bool = False  # True for provider plugins, False for system plugins
 
+    # Service declarations
+    provides: list[str] = field(default_factory=list)  # Services this plugin provides
+    requires: list[str] = field(default_factory=list)  # Required service dependencies
+    optional_requires: list[str] = field(
+        default_factory=list
+    )  # Optional service dependencies
+
     # Static specifications
     middleware: list[MiddlewareSpec] = field(default_factory=list)
     routes: list[RouteSpec] = field(default_factory=list)
@@ -148,6 +156,21 @@ class PluginManifest:
         """
         return [dep for dep in self.dependencies if dep not in available_plugins]
 
+    def validate_service_dependencies(self, available_services: set[str]) -> list[str]:
+        """Validate that required services are available.
+
+        Args:
+            available_services: Set of available service names
+
+        Returns:
+            List of missing required services
+        """
+        missing = []
+        for required in self.requires:
+            if required not in available_services:
+                missing.append(required)
+        return missing
+
     def get_sorted_middleware(self) -> list[MiddlewareSpec]:
         """Get middleware sorted by priority."""
         return sorted(self.middleware)
@@ -163,6 +186,7 @@ class PluginContext(TypedDict, total=False):
     scheduler: "Scheduler"  # Scheduler instance
     config: BaseModel | None  # Plugin-specific configuration
     cli_detection_service: "CLIDetectionService"  # Shared CLI detection service
+    plugin_registry: "PluginRegistry"  # Plugin registry for inter-plugin access (single source for all plugin/service access)
 
     # Provider-specific
     adapter: "BaseAdapter"  # BaseAdapter instance

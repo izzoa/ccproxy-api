@@ -24,7 +24,19 @@ from .context import (
     timed_operation,
     tracked_request_context,
 )
+from .events import (
+    ClientRequestEvent,
+    ClientResponseEvent,
+    ProviderRequestEvent,
+    ProviderResponseEvent,
+)
 from .metrics import PrometheusMetrics, get_metrics, reset_metrics
+from .pipeline import (
+    ObservabilityPipeline,
+    RequestObserver,
+    get_observability_pipeline,
+    reset_observability_pipeline,
+)
 from .pushgateway import (
     PushgatewayClient,
     get_pushgateway_client,
@@ -40,10 +52,22 @@ __all__ = [
     "tracked_request_context",
     "timed_operation",
     "get_context_tracker",
+    # Events
+    "ClientRequestEvent",
+    "ClientResponseEvent",
+    "ProviderRequestEvent",
+    "ProviderResponseEvent",
+    # Adapters
+    "RequestTracerAdapter",
     # Prometheus metrics
     "PrometheusMetrics",
     "get_metrics",
     "reset_metrics",
+    # Pipeline
+    "ObservabilityPipeline",
+    "RequestObserver",
+    "get_observability_pipeline",
+    "reset_observability_pipeline",
     # Pushgateway
     "PushgatewayClient",
     "get_pushgateway_client",

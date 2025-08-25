@@ -97,6 +97,49 @@ class PricingService:
 
         return total_cost
 
+    def calculate_cost_sync(
+        self,
+        model_name: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+    ) -> Decimal | None:
+        """Calculate cost synchronously using cached pricing data.
+        
+        This method uses the cached pricing data and doesn't make any async calls,
+        making it safe to use in streaming contexts where we can't await.
+        
+        Returns None if pricing data is not cached yet.
+        """
+        if self._current_pricing is None:
+            return None
+
+        model_pricing = self._current_pricing.get(model_name)
+        if model_pricing is None:
+            return None
+
+        # Calculate cost per million tokens, then scale to actual tokens
+        total_cost = Decimal("0")
+
+        if input_tokens > 0:
+            total_cost += (model_pricing.input * input_tokens) / Decimal("1000000")
+
+        if output_tokens > 0:
+            total_cost += (model_pricing.output * output_tokens) / Decimal("1000000")
+
+        if cache_read_tokens > 0:
+            total_cost += (model_pricing.cache_read * cache_read_tokens) / Decimal(
+                "1000000"
+            )
+
+        if cache_write_tokens > 0:
+            total_cost += (model_pricing.cache_write * cache_write_tokens) / Decimal(
+                "1000000"
+            )
+
+        return total_cost
+
     async def force_refresh_pricing(self) -> bool:
         """Force refresh of pricing data."""
         if not self.config.enabled:

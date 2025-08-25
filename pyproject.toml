@@ -72,6 +72,7 @@ ccproxy-api = "ccproxy.cli:main"
 ccproxy-perm = "ccproxy.cli.commands.permission:main"
 
 [project.entry-points."ccproxy.plugins"]
+access_log = "plugins.access_log.plugin:factory"
 claude_api = "plugins.claude_api.plugin:Plugin"
 claude_sdk = "plugins.claude_sdk.plugin:Plugin"
 codex = "plugins.codex.plugin:Plugin"

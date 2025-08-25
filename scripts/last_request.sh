@@ -4,10 +4,10 @@ fdcat() {
   fd -t f "$@" -x sh -c 'printf "\n\033[1;34m=== %s ===\033[0m\n" "$1" && cat "$1"' _ {}
 }
 PATH_LOG="/tmp/ccproxy"
-PATH_REQ="${PATH_LOG}/raw/"
+PATH_REQ="${PATH_LOG}/tracer/raw/"
 
 # Parse arguments
-N=-1  # Default to last request
+N=-1 # Default to last request
 if [[ $# -gt 0 ]]; then
   if [[ $1 =~ ^-[0-9]+$ ]]; then
     N=$1

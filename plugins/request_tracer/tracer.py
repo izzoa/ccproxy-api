@@ -1,7 +1,6 @@
 """Unified request tracer implementation."""
 
 from collections.abc import Sequence
-from typing import Optional
 
 import structlog
 
@@ -38,7 +37,9 @@ class RequestTracerImpl(RequestTracer, StreamingTracer):
 
         # For backward compatibility
         self.verbose_api = config.verbose_api
-        self.request_log_dir = config.get_json_log_dir() if config.json_logs_enabled else None
+        self.request_log_dir = (
+            config.get_json_log_dir() if config.json_logs_enabled else None
+        )
 
         if self.enabled:
             logger.info(
@@ -124,9 +125,7 @@ class RequestTracerImpl(RequestTracer, StreamingTracer):
             return
 
         if self.json_formatter:
-            await self.json_formatter.log_stream_chunk(
-                request_id, chunk, chunk_number
-            )
+            await self.json_formatter.log_stream_chunk(request_id, chunk, chunk_number)
 
     async def trace_stream_complete(
         self,
@@ -177,7 +176,9 @@ class RequestTracerImpl(RequestTracer, StreamingTracer):
 
     def should_log_raw(self) -> bool:
         """Check if raw HTTP logging is enabled."""
-        return bool(self.enabled and self.raw_formatter and self.raw_formatter.should_log())
+        return bool(
+            self.enabled and self.raw_formatter and self.raw_formatter.should_log()
+        )
 
     def should_trace_path(self, path: str) -> bool:
         """Check if a path should be traced based on include/exclude rules."""

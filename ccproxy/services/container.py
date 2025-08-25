@@ -22,7 +22,6 @@ from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler
 from ccproxy.services.tracing import NullRequestTracer, RequestTracer
 from ccproxy.utils.binary_resolver import BinaryResolver
-from plugins.pricing.service import PricingService
 
 
 if TYPE_CHECKING:
@@ -155,7 +154,11 @@ class ServiceContainer:
             tracer: The request tracer implementation
         """
         self._request_tracer = tracer
-        logger.info("request_tracer_set", tracer_type=type(tracer).__name__, category="lifecycle")
+        logger.info(
+            "request_tracer_set",
+            tracer_type=type(tracer).__name__,
+            category="lifecycle",
+        )
 
     def get_mock_handler(self) -> MockResponseHandler:
         """Get mock handler service instance.
@@ -191,12 +194,10 @@ class ServiceContainer:
         service_key = "streaming_handler"
         if service_key not in self._services:
             request_tracer = self.get_request_tracer()
-            pricing_service = self.get_pricing_service()
             self._services[service_key] = self._factory.create_streaming_handler(
                 self.settings,
                 metrics=metrics,
                 request_tracer=request_tracer,
-                pricing_service=pricing_service,
             )
         return cast(StreamingHandler, self._services[service_key])
 
@@ -343,22 +344,3 @@ class ServiceContainer:
         # Clear service cache
         self._services.clear()
         logger.debug("service_container_resources_closed", category="lifecycle")
-
-    def get_pricing_service(self) -> PricingService:
-        """Get pricing service instance.
-
-        Uses caching to ensure single instance per container lifetime,
-        but allows multiple containers for testing.
-
-        Returns:
-            Pricing service instance
-        """
-        service_key = "pricing_service"
-        if service_key not in self._services:
-            from plugins.pricing.config import PricingConfig
-            from plugins.pricing.service import PricingService
-
-            # Create pricing service with default config
-            config = PricingConfig()
-            self._services[service_key] = PricingService(config)
-        return self._services[service_key]  # type: ignore

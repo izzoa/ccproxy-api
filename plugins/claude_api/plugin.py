@@ -191,6 +191,7 @@ class ClaudeAPIFactory(ProviderPluginFactory):
             dependencies=[
                 "oauth_claude"
             ],  # Depends on OAuth Claude plugin for authentication
+            optional_requires=["pricing"],  # Optional dependency on pricing service
             routes=[
                 RouteSpec(
                     router=claude_api_router,
@@ -243,6 +244,7 @@ class ClaudeAPIFactory(ProviderPluginFactory):
             detection_service=detection_service,
             http_client=http_client,
             logger=logger_instance,
+            context=context,  # Pass the full context for plugin registry access
         )
 
     def create_detection_service(

@@ -11,22 +11,22 @@ import httpx
 import structlog
 from starlette.responses import Response, StreamingResponse
 
-from plugins.pricing.service import PricingService
-
 
 if TYPE_CHECKING:
     from ccproxy.adapters.base import APIAdapter
     from ccproxy.observability.context import RequestContext
     from ccproxy.observability.metrics import PrometheusMetrics
     from ccproxy.services.handler_config import HandlerConfig
-    from ccproxy.services.tracing import RequestTracer
+
+    # Import the specific implementation that has both interfaces
+    from plugins.request_tracer.tracer import RequestTracerImpl
 
 
 logger = structlog.get_logger(__name__)
 
 
 class DeferredStreaming(Response):
-    """Deferred response that starts the stream to get headers and optionally processes SSE."""
+    """Deferred response that starts the stream to get headers and processes SSE."""
 
     def __init__(
         self,
@@ -38,10 +38,9 @@ class DeferredStreaming(Response):
         media_type: str = "text/event-stream",
         handler_config: "HandlerConfig | None" = None,
         request_context: "RequestContext | None" = None,
-        request_tracer: "RequestTracer | None" = None,
+        request_tracer: "RequestTracerImpl | None" = None,
         metrics: "PrometheusMetrics | None" = None,
         verbose_streaming: bool = False,
-        pricing_service: PricingService | None = None,
     ):
         """Store request details to execute later.
 
@@ -57,7 +56,6 @@ class DeferredStreaming(Response):
             request_tracer: Optional request tracer for verbose logging
             metrics: Optional metrics collector
             verbose_streaming: Enable verbose streaming logs
-            pricing_service: Optional pricing service for cost calculation
         """
         super().__init__(content=b"", media_type=media_type)
         self.method = method
@@ -71,10 +69,10 @@ class DeferredStreaming(Response):
         self.request_tracer = request_tracer
         self.metrics = metrics
         self.verbose_streaming = verbose_streaming
-        self.pricing_service = pricing_service
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         """Execute the request when ASGI calls us."""
+
         # Prepare extensions for request ID tracking
         extensions = {}
         request_id = None
@@ -167,7 +165,8 @@ class DeferredStreaming(Response):
                                 )
                             yield chunk
                     else:
-                        # Check if response is SSE format based on content-type OR if it's Codex
+                        # Check if response is SSE format based on content-type OR if
+                        # it's Codex
                         content_type = response.headers.get("content-type", "").lower()
                         # Codex doesn't send content-type header but uses SSE format
                         is_codex = (
@@ -237,11 +236,13 @@ class DeferredStreaming(Response):
                                 total_chunks += 1
                                 total_bytes += len(chunk)
 
-                                # Process chunk for token usage extraction if collector available
+                                # Process chunk for token usage extraction if collector
+                                # available
                                 if collector and not is_sse_format:
                                     chunk_str = chunk.decode("utf-8", errors="ignore")
 
-                                    # trace: Log first few chunks to see what we're processing
+                                    # trace: Log first few chunks to see what we're
+                                    # processing
                                     if total_chunks <= 3:
                                         logger.trace(
                                             "deferred_streaming_chunk_trace",
@@ -300,12 +301,9 @@ class DeferredStreaming(Response):
                                 ),
                             )
 
-                        # Store usage metrics in request context for provider cost calculation
+                        # Store usage metrics in request context
                         if hasattr(self.request_context, "metadata"):
                             self.request_context.metadata.update(usage_metrics)
-
-                        # Calculate cost for supported providers (before access logging)
-                        await self._calculate_cost_for_provider()
 
                     # Update metrics if available
                     if self.request_context and hasattr(
@@ -401,13 +399,15 @@ class DeferredStreaming(Response):
             collector = self.handler_config.metrics_collector
 
         # Create streaming pipeline:
-        # 1. Parse raw SSE bytes to JSON chunks, optionally collecting metrics from raw format
+        # 1. Parse raw SSE bytes to JSON chunks, optionally collecting metrics from raw
+        # format
         json_stream = self._parse_sse_to_json_stream(response.aiter_bytes(), collector)
 
         # 2. Pass entire JSON stream through adapter (maintains state)
         adapted_stream = adapter.adapt_stream(json_stream)
 
-        # 3. Serialize adapted chunks back to SSE format, optionally collecting metrics from converted format
+        # 3. Serialize adapted chunks back to SSE format, optionally collecting metrics
+        # from converted format
         async for sse_bytes in self._serialize_json_to_sse_stream(
             adapted_stream,
             collector,
@@ -509,88 +509,4 @@ class DeferredStreaming(Response):
         # Send final [DONE] event
         yield b"data: [DONE]\n\n"
 
-    async def _calculate_cost_for_provider(self) -> None:
-        """Calculate cost for any provider using pricing service if available."""
-        if not self.request_context or not hasattr(self.request_context, "metadata"):
-            return
 
-        metadata = self.request_context.metadata
-        service_type = metadata.get("service_type")
-
-        # Skip if no service_type is set
-        if not service_type:
-            return
-
-        model = metadata.get("model")
-        tokens_input = metadata.get("tokens_input")
-        tokens_output = metadata.get("tokens_output")
-
-        # Skip if we don't have essential data
-        if not model or (not tokens_input and not tokens_output):
-            logger.debug(
-                "deferred_streaming_cost_calculation_skipped",
-                reason="missing_model_or_tokens",
-                service_type=service_type,
-                model=model,
-                tokens_input=tokens_input,
-                tokens_output=tokens_output,
-                request_id=getattr(self.request_context, "request_id", "unknown"),
-            )
-            return
-
-        try:
-            # Get pricing service from app state via plugin registry
-            if not self.pricing_service:
-                logger.debug(
-                    "deferred_streaming_cost_calculation_skipped",
-                    reason="pricing_service_not_available",
-                    service_type=service_type,
-                    request_id=getattr(self.request_context, "request_id", "unknown"),
-                )
-                return
-
-            # Calculate cost using the cost calculator utility
-            from ccproxy.utils.cost_calculator import calculate_token_cost
-
-            cost_usd = await calculate_token_cost(
-                tokens_input=tokens_input,
-                tokens_output=tokens_output,
-                model=model,
-                cache_read_tokens=metadata.get("cache_read_tokens"),
-                cache_write_tokens=metadata.get("cache_write_tokens"),
-                pricing_service=self.pricing_service,
-            )
-
-            if cost_usd is not None:
-                # Update metadata with calculated cost
-                metadata["cost_usd"] = cost_usd
-
-                logger.debug(
-                    "deferred_streaming_cost_calculated",
-                    service_type=service_type,
-                    model=model,
-                    cost_usd=cost_usd,
-                    tokens_input=tokens_input,
-                    tokens_output=tokens_output,
-                    cache_read_tokens=metadata.get("cache_read_tokens"),
-                    cache_write_tokens=metadata.get("cache_write_tokens"),
-                    request_id=getattr(self.request_context, "request_id", "unknown"),
-                )
-            else:
-                logger.debug(
-                    "deferred_streaming_cost_calculation_failed",
-                    reason="cost_calculator_returned_none",
-                    service_type=service_type,
-                    model=model,
-                    request_id=getattr(self.request_context, "request_id", "unknown"),
-                )
-
-        except Exception as e:
-            logger.debug(
-                "deferred_streaming_cost_calculation_error",
-                error=str(e),
-                service_type=service_type,
-                model=model,
-                request_id=getattr(self.request_context, "request_id", "unknown"),
-                exc_info=e,
-            )

@@ -50,6 +50,14 @@ class PricingRuntime(SystemPluginRuntime):
             # Initialize the service
             await self.service.initialize()
 
+            # Register service with plugin registry
+            plugin_registry = self.context.get("plugin_registry")
+            if plugin_registry:
+                plugin_registry.register_service(
+                    "pricing", self.service, self.manifest.name
+                )
+                logger.info("pricing_service_registered")
+
             # Create and start pricing update task
             interval_seconds = self.config.update_interval_hours * 3600
             self.update_task = PricingCacheUpdateTask(
@@ -146,6 +154,7 @@ class PricingFactory(SystemPluginFactory):
             description="Dynamic pricing plugin for AI model cost calculation",
             is_provider=False,
             config_class=PricingConfig,
+            provides=["pricing"],  # This plugin provides the pricing service
         )
 
         # Initialize with manifest

@@ -3,7 +3,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 
@@ -79,6 +79,8 @@ class JSONFormatter:
         url: str,
         headers: dict[str, str],
         body: bytes | None,
+        request_type: str = "provider",  # "client" or "provider"
+        context: Any = None,  # RequestContext
     ) -> None:
         """Log structured request data.
 
@@ -115,15 +117,56 @@ class JSONFormatter:
 
         # Write to file if configured
         if self.request_log_dir and self.json_logs_enabled:
-            request_file = self.request_log_dir / f"{request_id}_request.json"
+            # Use different file names for client vs provider
+            file_suffix = (
+                f"{request_type}_request" if request_type != "provider" else "request"
+            )
+            request_file = self.request_log_dir / f"{request_id}_{file_suffix}.json"
+
+            # Try to parse body as JSON first, then string, then base64
+            body_content = None
+            if body:
+                try:
+                    # First try to decode as UTF-8 string
+                    body_str = body.decode("utf-8")
+                    # Then try to parse as JSON
+                    body_content = json.loads(body_str)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    # Not JSON, try plain string
+                    try:
+                        body_content = body.decode("utf-8", errors="replace")
+                    except Exception:
+                        # Last resort: encode as base64
+                        import base64
+
+                        body_content = {
+                            "_type": "base64",
+                            "data": base64.b64encode(body).decode("ascii"),
+                        }
+
             request_data = {
                 "request_id": request_id,
                 "method": method,
                 "url": url,
                 "headers": dict(headers),  # Full headers in file
-                "body": body.decode("utf-8", errors="replace") if body else None,
+                "body": body_content,
+                "type": request_type,
             }
-            request_file.write_text(json.dumps(request_data, indent=2))
+
+            # Add context data if available
+            if context and hasattr(context, "to_dict"):
+                try:
+                    context_data = context.to_dict()
+                    if context_data:
+                        request_data["context"] = context_data
+                except Exception as e:
+                    logger.debug(
+                        "context_serialization_error",
+                        error=str(e),
+                        request_id=request_id,
+                    )
+
+            request_file.write_text(json.dumps(request_data, indent=2, default=str))
 
     async def log_response(
         self,
@@ -131,6 +174,8 @@ class JSONFormatter:
         status: int,
         headers: dict[str, str],
         body: bytes,
+        response_type: str = "provider",  # "client" or "provider"
+        context: Any = None,  # RequestContext
     ) -> None:
         """Log structured response data.
 
@@ -168,14 +213,67 @@ class JSONFormatter:
 
         # Write to file if configured
         if self.request_log_dir and self.json_logs_enabled:
-            response_file = self.request_log_dir / f"{request_id}_response.json"
+            # Use different file names for client vs provider
+            file_suffix = (
+                f"{response_type}_response"
+                if response_type != "provider"
+                else "response"
+            )
+            logger.debug(
+                "Writing response JSON file",
+                request_id=request_id,
+                status=status,
+                response_type=response_type,
+                file_suffix=file_suffix,
+                body_type=type(body).__name__,
+                body_size=len(body) if body else 0,
+                body_preview=body[:100] if body else None,
+            )
+            response_file = self.request_log_dir / f"{request_id}_{file_suffix}.json"
+
+            # Try to parse body as JSON first, then string, then base64
+            body_content: str | dict[str, Any] = ""
+            if body:
+                try:
+                    # First try to decode as UTF-8 string
+                    body_str = body.decode("utf-8")
+                    # Then try to parse as JSON
+                    body_content = json.loads(body_str)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    # Not JSON, try plain string
+                    try:
+                        body_content = body.decode("utf-8", errors="replace")
+                    except Exception:
+                        # Last resort: encode as base64
+                        import base64
+
+                        body_content = {
+                            "_type": "base64",
+                            "data": base64.b64encode(body).decode("ascii"),
+                        }
+
             response_data = {
                 "request_id": request_id,
                 "status": status,
                 "headers": dict(headers),
-                "body": body.decode("utf-8", errors="replace"),
+                "body": body_content,
+                "type": response_type,
             }
-            response_file.write_text(json.dumps(response_data, indent=2))
+
+            # Add context data if available (including cost/metrics)
+            if context and hasattr(context, "to_dict"):
+                try:
+                    context_data = context.to_dict()
+                    if context_data:
+                        response_data["context"] = context_data
+                except Exception as e:
+                    logger.debug(
+                        "context_serialization_error",
+                        error=str(e),
+                        request_id=request_id,
+                    )
+
+            response_file.write_text(json.dumps(response_data, indent=2, default=str))
 
     def _get_body_preview(self, body: bytes) -> str:
         """Extract readable preview from body bytes.
@@ -208,9 +306,7 @@ class JSONFormatter:
             return "<binary data>"
 
     # Streaming methods
-    async def log_stream_start(
-        self, request_id: str, headers: dict[str, str]
-    ) -> None:
+    async def log_stream_start(self, request_id: str, headers: dict[str, str]) -> None:
         """Mark beginning of stream with initial headers."""
         if not self.verbose_api:
             return
@@ -219,7 +315,7 @@ class JSONFormatter:
             "stream_start",
             category="streaming",
             request_id=request_id,
-            headers=dict(headers)
+            headers=dict(headers),
         )
 
     async def log_stream_chunk(

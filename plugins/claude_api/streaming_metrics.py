@@ -37,6 +37,8 @@ def extract_usage_from_streaming_chunk(chunk_data: Any) -> UsageData | None:
     # Look for message_start events with initial usage (input tokens)
     if chunk_type == "message_start" and "message" in chunk_data:
         message = chunk_data["message"]
+        # Extract model name if present
+        model = message.get("model")
         if "usage" in message:
             usage = message["usage"]
             return UsageData(
@@ -47,6 +49,7 @@ def extract_usage_from_streaming_chunk(chunk_data: Any) -> UsageData | None:
                 cache_read_input_tokens=usage.get("cache_read_input_tokens"),
                 cache_creation_input_tokens=usage.get("cache_creation_input_tokens"),
                 event_type="message_start",
+                model=model,  # Include model in usage data
             )
 
     # Look for message_delta events with final usage (output tokens)
@@ -69,13 +72,22 @@ class StreamingMetricsCollector:
     Implements IStreamingMetricsCollector interface for Claude API.
     """
 
-    def __init__(self, request_id: str | None = None) -> None:
+    def __init__(
+        self,
+        request_id: str | None = None,
+        pricing_service: Any = None,
+        model: str | None = None,
+    ) -> None:
         """Initialize the metrics collector.
 
         Args:
             request_id: Optional request ID for logging context
+            pricing_service: Optional pricing service for cost calculation
+            model: Optional model name for cost calculation (can also be extracted from chunks)
         """
         self.request_id = request_id
+        self.pricing_service = pricing_service
+        self.model = model
         self.metrics: StreamingMetrics = {
             "tokens_input": None,
             "tokens_output": None,
@@ -146,6 +158,17 @@ class StreamingMetricsCollector:
                                     usage_data.get("cache_creation_input_tokens")
                                     or self.metrics["cache_write_tokens"]
                                 )
+
+                                # Extract model from the message_start event if we don't have it yet
+                                if not self.model and usage_data.get("model"):
+                                    self.model = usage_data.get("model")
+                                    logger.debug(
+                                        "model_extracted_from_stream",
+                                        plugin="claude_api",
+                                        model=self.model,
+                                        request_id=self.request_id,
+                                    )
+
                                 logger.debug(
                                     "token_metrics_extracted",
                                     plugin="claude_api",
@@ -155,6 +178,7 @@ class StreamingMetricsCollector:
                                     cache_write_tokens=self.metrics[
                                         "cache_write_tokens"
                                     ],
+                                    model=self.model,
                                     request_id=self.request_id,
                                 )
                                 return False  # Not final yet
@@ -164,11 +188,71 @@ class StreamingMetricsCollector:
                                 self.metrics["tokens_output"] = usage_data.get(
                                     "output_tokens"
                                 )
+
+                                # Calculate cost synchronously when we have complete metrics
+                                if self.pricing_service:
+                                    if self.model:
+                                        try:
+                                            from decimal import Decimal
+
+                                            cost_decimal = self.pricing_service.calculate_cost_sync(
+                                                model_name=self.model,
+                                                input_tokens=self.metrics[
+                                                    "tokens_input"
+                                                ]
+                                                or 0,
+                                                output_tokens=self.metrics[
+                                                    "tokens_output"
+                                                ]
+                                                or 0,
+                                                cache_read_tokens=self.metrics[
+                                                    "cache_read_tokens"
+                                                ]
+                                                or 0,
+                                                cache_write_tokens=self.metrics[
+                                                    "cache_write_tokens"
+                                                ]
+                                                or 0,
+                                            )
+                                            if cost_decimal is not None:
+                                                self.metrics["cost_usd"] = float(
+                                                    cost_decimal
+                                                )
+                                                logger.debug(
+                                                    "streaming_cost_calculated",
+                                                    model=self.model,
+                                                    cost_usd=self.metrics["cost_usd"],
+                                                    tokens_input=self.metrics[
+                                                        "tokens_input"
+                                                    ],
+                                                    tokens_output=self.metrics[
+                                                        "tokens_output"
+                                                    ],
+                                                    request_id=self.request_id,
+                                                )
+                                        except Exception as e:
+                                            logger.debug(
+                                                "streaming_cost_calculation_failed",
+                                                error=str(e),
+                                                model=self.model,
+                                                request_id=self.request_id,
+                                            )
+                                    else:
+                                        logger.warning(
+                                            "streaming_cost_calculation_skipped_no_model",
+                                            plugin="claude_api",
+                                            request_id=self.request_id,
+                                            tokens_input=self.metrics["tokens_input"],
+                                            tokens_output=self.metrics["tokens_output"],
+                                            message="Model not found in streaming response, cannot calculate cost",
+                                        )
+
                                 logger.debug(
                                     "token_metrics_extracted",
                                     plugin="claude_api",
                                     event_type="message_delta",
                                     tokens_output=self.metrics["tokens_output"],
+                                    cost_usd=self.metrics.get("cost_usd"),
                                     request_id=self.request_id,
                                 )
                                 return True  # This is the final event
