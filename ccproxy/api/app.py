@@ -420,7 +420,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     if not structlog.is_configured():
         # Only setup logging if structlog is not configured at all
-        json_logs = False
+        # Use JSON logs based on the logging format setting
+        json_logs = settings.logging.format == "json"
         setup_logging(
             json_logs=json_logs,
             log_level_name=settings.logging.level,

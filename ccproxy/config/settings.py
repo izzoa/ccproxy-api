@@ -285,8 +285,29 @@ class Settings(BaseSettings):
         # Merge config with kwargs (kwargs take precedence)
         merged_config = {**config_data, **kwargs}
 
-        # Create Settings instance with merged config
-        settings = cls(**merged_config)
+        # Create Settings instance WITHOUT passing the merged config directly
+        # This allows Pydantic to load environment variables first, then apply defaults
+        # We'll update the instance with the config file data after creation
+        settings = cls()
+        
+        # Now update with config file data, but only for fields not already set by env vars
+        for key, value in merged_config.items():
+            # Check if the value was already set by environment variable
+            # by comparing with a fresh instance that has env vars applied
+            if hasattr(settings, key):
+                # For nested models like logging, we need to handle them specially
+                if key in ['logging', 'server', 'security'] and isinstance(value, dict):
+                    nested_obj = getattr(settings, key)
+                    for nested_key, nested_value in value.items():
+                        # Only set if not already set by environment variable
+                        env_key = f"{key.upper()}__{nested_key.upper()}"
+                        if os.getenv(env_key) is None:
+                            setattr(nested_obj, nested_key, nested_value)
+                else:
+                    # For top-level fields, check if env var exists
+                    env_key = key.upper()
+                    if os.getenv(env_key) is None:
+                        setattr(settings, key, value)
 
         return settings
 
