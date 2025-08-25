@@ -447,40 +447,20 @@ class TestFlushStreamingBatchesShutdown:
         return FastAPI()
 
     async def test_flush_streaming_batches_success(self, mock_app: FastAPI) -> None:
-        """Test successful streaming batches flushing."""
-        with patch(
-            "ccproxy.utils.simple_request_logger.flush_all_streaming_batches"
-        ) as mock_flush:
-            mock_flush.return_value = None  # Async function returns None
+        """Test successful streaming batches flushing - now just logs skip."""
+        with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
+            await flush_streaming_batches_shutdown(mock_app)
 
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await flush_streaming_batches_shutdown(mock_app)
-
-                # Verify flush function was called
-                mock_flush.assert_called_once()
-
-                # Verify debug log was called
-                mock_logger.debug.assert_called_once_with("streaming_batches_flushed")
+            # Verify skip log was called
+            mock_logger.debug.assert_called_once_with("streaming_batches_flush_skipped")
 
     async def test_flush_streaming_batches_error(self, mock_app: FastAPI) -> None:
-        """Test error handling during streaming batches flushing."""
-        with patch(
-            "ccproxy.utils.simple_request_logger.flush_all_streaming_batches"
-        ) as mock_flush:
-            mock_flush.side_effect = Exception("Flush failed")
+        """Test error handling during streaming batches flushing - now just logs skip."""
+        with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
+            await flush_streaming_batches_shutdown(mock_app)
 
-            with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
-                await flush_streaming_batches_shutdown(mock_app)
-
-                # Verify error was logged
-                mock_logger.error.assert_called_once()
-                call_args = mock_logger.error.call_args[1]
-                assert (
-                    "streaming_batches_flush_unexpected_error"
-                    in mock_logger.error.call_args[0]
-                )
-                assert call_args["error"] == "Flush failed"
-                assert call_args["exc_info"] is not None
+            # Verify skip log was called
+            mock_logger.debug.assert_called_once_with("streaming_batches_flush_skipped")
 
 
 class TestClaudeDetectionStartup:

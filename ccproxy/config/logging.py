@@ -59,11 +59,6 @@ class LoggingSettings(BaseModel):
         description="Enable access logging for middleware",
     )
 
-    enable_content_logging: bool = Field(
-        default=True,
-        description="Enable logging of request/response content",
-    )
-
     enable_streaming_logging: bool = Field(
         default=True,
         description="Enable logging for streaming events",

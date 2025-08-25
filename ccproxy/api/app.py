@@ -39,7 +39,6 @@ from ccproxy.services.factories import ConcreteServiceFactory
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
     check_version_updates_startup,
-    flush_streaming_batches_shutdown,
     initialize_log_storage_shutdown,
     initialize_log_storage_startup,
     initialize_permission_service_startup,
@@ -281,10 +280,6 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
 ]
 
 SHUTDOWN_ONLY_COMPONENTS: list[ShutdownComponent] = [
-    {
-        "name": "Streaming Batches",
-        "shutdown": flush_streaming_batches_shutdown,
-    },
     {
         "name": "Shared HTTP Client",
         "shutdown": setup_http_client_shutdown,

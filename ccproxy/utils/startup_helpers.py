@@ -313,19 +313,12 @@ async def setup_permission_service_shutdown(app: FastAPI, settings: Settings) ->
 
 
 async def flush_streaming_batches_shutdown(app: FastAPI) -> None:
-    """Flush any remaining streaming log batches.
+    """Flush pending streaming batches on shutdown.
+
+    Note: This is now a no-op as simple_request_logger has been removed.
 
     Args:
         app: FastAPI application instance
     """
-    try:
-        from ccproxy.utils.simple_request_logger import flush_all_streaming_batches
-
-        await flush_all_streaming_batches()
-        logger.debug("streaming_batches_flushed")
-    except (ImportError, ModuleNotFoundError) as e:
-        logger.error("streaming_batches_flush_import_error", error=str(e), exc_info=e)
-    except Exception as e:
-        logger.error(
-            "streaming_batches_flush_unexpected_error", error=str(e), exc_info=e
-        )
+    # Removed simple_request_logger flushing (simple_request_logger removed)
+    logger.debug("streaming_batches_flush_skipped")

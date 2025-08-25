@@ -17,7 +17,6 @@ from ccproxy.models.messages import TextContentBlock
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.utils.model_mapping import map_model_to_claude
-from ccproxy.utils.simple_request_logger import append_streaming_log, write_request_log
 from plugins.claude_sdk.exceptions import StreamTimeoutError
 from plugins.claude_sdk.manager import SessionManager
 from plugins.claude_sdk.options import OptionsHandler
@@ -206,11 +205,8 @@ class ClaudeSDKHandler:
         request_id = ctx.request_id
 
         try:
-            # Log SDK request parameters
+            # Removed SDK request logging (simple_request_logger removed)
             timestamp = ctx.get_log_timestamp_prefix() if ctx else None
-            await self._log_sdk_request(
-                request_id, messages, options, model, stream, session_id, timestamp
-            )
 
             if stream:
                 return self._stream_completion(
@@ -365,10 +361,6 @@ class ClaudeSDKHandler:
             num_turns=result_message.num_turns,
         )
 
-        # Log SDK response
-        if request_id:
-            await self._log_sdk_response(request_id, response, timestamp)
-
         return response
 
     async def _stream_completion(
@@ -434,9 +426,6 @@ class ClaudeSDKHandler:
                 sdk_message_mode=sdk_message_mode,
                 pretty_format=pretty_format,
             ):
-                # Log streaming chunk
-                if request_id:
-                    await self._log_sdk_streaming_chunk(request_id, chunk, timestamp)
                 yield chunk
         except GeneratorExit:
             logger.debug(
@@ -501,70 +490,6 @@ class ClaudeSDKHandler:
                 error_type="stream_timeout",
                 session_id=e.session_id,
             )
-
-    async def _log_sdk_request(
-        self,
-        request_id: str,
-        messages: list[dict[str, Any]],
-        options: ClaudeCodeOptions,
-        model: str,
-        stream: bool,
-        session_id: str | None = None,
-        timestamp: str | None = None,
-    ) -> None:
-        """Log SDK input parameters as JSON dump."""
-        sdk_request_data = {
-            "messages": messages,
-            "options": options,
-            "stream": stream,
-            "request_id": request_id,
-        }
-        if session_id:
-            sdk_request_data["session_id"] = session_id
-
-        await write_request_log(
-            request_id=request_id,
-            log_type="sdk_request",
-            data=sdk_request_data,
-            timestamp=timestamp,
-        )
-
-    async def _log_sdk_response(
-        self,
-        request_id: str,
-        result: Any,
-        timestamp: str | None = None,
-    ) -> None:
-        """Log SDK response result as JSON dump."""
-        sdk_response_data = {
-            "result": result.model_dump()
-            if hasattr(result, "model_dump")
-            else str(result),
-        }
-
-        await write_request_log(
-            request_id=request_id,
-            log_type="sdk_response",
-            data=sdk_response_data,
-            timestamp=timestamp,
-        )
-
-    async def _log_sdk_streaming_chunk(
-        self,
-        request_id: str,
-        chunk: dict[str, Any],
-        timestamp: str | None = None,
-    ) -> None:
-        """Log streaming chunk as JSON dump."""
-        import json
-
-        chunk_data = json.dumps(chunk, default=str) + "\n"
-        await append_streaming_log(
-            request_id=request_id,
-            log_type="sdk_streaming",
-            data=chunk_data.encode("utf-8"),
-            timestamp=timestamp,
-        )
 
     async def validate_health(self) -> bool:
         """Validate that the handler is healthy."""
