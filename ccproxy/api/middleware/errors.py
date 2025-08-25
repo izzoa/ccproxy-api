@@ -104,6 +104,11 @@ def setup_error_handlers(app: FastAPI) -> None:
         if error_type is None:
             error_type = getattr(exc, "error_type", "unknown_error")
 
+        # Get request ID from request state or headers
+        request_id = getattr(request.state, "request_id", None) or request.headers.get(
+            "x-request-id"
+        )
+
         # Store status code in request state for access logging
         if hasattr(request.state, "context") and hasattr(
             request.state.context, "metadata"
@@ -141,6 +146,11 @@ def setup_error_handlers(app: FastAPI) -> None:
                 service_type="middleware",
             )
 
+        # Prepare headers with x-request-id if available
+        headers = {}
+        if request_id:
+            headers["x-request-id"] = request_id
+
         # Return JSON response
         return JSONResponse(
             status_code=status_code,
@@ -150,6 +160,7 @@ def setup_error_handlers(app: FastAPI) -> None:
                     "message": str(exc),
                 }
             },
+            headers=headers,
         )
 
     # Register specific error handlers using the unified handler
@@ -182,6 +193,11 @@ def setup_error_handlers(app: FastAPI) -> None:
         request: Request, exc: HTTPException
     ) -> JSONResponse:
         """Handle HTTP exceptions."""
+        # Get request ID from request state or headers
+        request_id = getattr(request.state, "request_id", None) or request.headers.get(
+            "x-request-id"
+        )
+
         # Store status code in request state for access logging
         if hasattr(request.state, "context") and hasattr(
             request.state.context, "metadata"
@@ -234,6 +250,11 @@ def setup_error_handlers(app: FastAPI) -> None:
                 service_type="middleware",
             )
 
+        # Prepare headers with x-request-id if available
+        headers = {}
+        if request_id:
+            headers["x-request-id"] = request_id
+
         # TODO: Add when in prod hide details in response
         return JSONResponse(
             status_code=exc.status_code,
@@ -243,6 +264,7 @@ def setup_error_handlers(app: FastAPI) -> None:
                     "message": exc.detail,
                 }
             },
+            headers=headers,
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -250,6 +272,11 @@ def setup_error_handlers(app: FastAPI) -> None:
         request: Request, exc: StarletteHTTPException
     ) -> JSONResponse:
         """Handle Starlette HTTP exceptions."""
+        # Get request ID from request state or headers
+        request_id = getattr(request.state, "request_id", None) or request.headers.get(
+            "x-request-id"
+        )
+
         # Don't log stack trace for 404 errors as they're expected
         if exc.status_code == 404:
             logger.debug(
@@ -285,6 +312,12 @@ def setup_error_handlers(app: FastAPI) -> None:
                 model=None,
                 service_type="middleware",
             )
+
+        # Prepare headers with x-request-id if available
+        headers = {}
+        if request_id:
+            headers["x-request-id"] = request_id
+
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -293,6 +326,7 @@ def setup_error_handlers(app: FastAPI) -> None:
                     "message": exc.detail,
                 }
             },
+            headers=headers,
         )
 
     # Global exception handler
@@ -301,6 +335,11 @@ def setup_error_handlers(app: FastAPI) -> None:
         request: Request, exc: Exception
     ) -> JSONResponse:
         """Handle all other unhandled exceptions."""
+        # Get request ID from request state or headers
+        request_id = getattr(request.state, "request_id", None) or request.headers.get(
+            "x-request-id"
+        )
+
         # Store status code in request state for access logging
         if hasattr(request.state, "context") and hasattr(
             request.state.context, "metadata"
@@ -326,6 +365,12 @@ def setup_error_handlers(app: FastAPI) -> None:
                 model=None,
                 service_type="middleware",
             )
+
+        # Prepare headers with x-request-id if available
+        headers = {}
+        if request_id:
+            headers["x-request-id"] = request_id
+
         return JSONResponse(
             status_code=500,
             content={
@@ -334,6 +379,7 @@ def setup_error_handlers(app: FastAPI) -> None:
                     "message": "An internal server error occurred",
                 }
             },
+            headers=headers,
         )
 
     logger.debug("error_handlers_setup_completed", category="lifecycle")

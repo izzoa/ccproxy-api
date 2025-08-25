@@ -47,8 +47,8 @@ class ConcreteServiceFactory:
             Configured request tracer instance
         """
         tracer = CoreRequestTracer(
-            verbose_api=settings.server.verbose_api,
-            request_log_dir=settings.server.request_log_dir,
+            verbose_api=settings.logging.verbose_api,
+            request_log_dir=settings.logging.request_log_dir,
         )
         return tracer
 
@@ -92,7 +92,7 @@ class ConcreteServiceFactory:
         """
         handler = StreamingHandler(
             metrics=metrics,
-            verbose_streaming=settings.server.verbose_api,
+            verbose_streaming=settings.logging.verbose_api,
             request_tracer=request_tracer,
             pricing_service=pricing_service,
         )

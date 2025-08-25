@@ -428,8 +428,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         json_logs = False
         setup_logging(
             json_logs=json_logs,
-            log_level_name=settings.server.log_level,
-            log_file=settings.server.log_file,
+            log_level_name=settings.logging.level,
+            log_file=settings.logging.file,
         )
 
     app = FastAPI(

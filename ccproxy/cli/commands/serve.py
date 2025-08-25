@@ -157,7 +157,7 @@ def _run_docker_server(
         toolkit.print(f"  {env_var}", tag="env")
 
     # Show debug environment information if log level is DEBUG
-    if settings.server.log_level == "DEBUG":
+    if settings.logging.level == "DEBUG":
         toolkit.print_line()
         toolkit.print_title("Debug: All Environment Variables", tag="debug")
         all_env = {**docker_env_dict}
@@ -548,9 +548,9 @@ def api(
         # Always reconfigure logging to ensure log level changes are picked up
         # Use JSON logs if explicitly requested via env var
         setup_logging(
-            json_logs=settings.server.log_format == "json",
-            log_level_name=settings.server.log_level,
-            log_file=settings.server.log_file,
+            json_logs=settings.logging.format == "json",
+            log_level_name=settings.logging.level,
+            log_file=settings.logging.file,
         )
 
         # Re-get logger after logging is configured
@@ -559,7 +559,7 @@ def api(
         # Test debug logging
         logger.debug(
             "Debug logging is enabled",
-            effective_log_level=server_options.log_level or settings.server.log_level,
+            effective_log_level=server_options.log_level or settings.logging.level,
         )
 
         # Log CLI command that was deferred
@@ -578,8 +578,8 @@ def api(
             "configuration_loaded",
             host=settings.server.host,
             port=settings.server.port,
-            log_level=settings.server.log_level,
-            log_file=settings.server.log_file,
+            log_level=settings.logging.level,
+            log_file=settings.logging.file,
             docker_mode=docker,
             docker_image=settings.docker.docker_image if docker else None,
             auth_enabled=bool(settings.security.auth_token),

@@ -66,17 +66,6 @@ class ObservabilitySettings(BaseModel):
         description="Format for stats output: 'console', 'rich', 'log', 'json'",
     )
 
-    # Enhanced logging integration
-    logging_pipeline_enabled: bool = Field(
-        default=True,
-        description="Enable structlog pipeline integration for observability",
-    )
-
-    logging_format: str = Field(
-        default="auto",
-        description="Logging format for observability: 'rich', 'json', 'auto' (auto-detects based on environment)",
-    )
-
     @model_validator(mode="after")
     def check_feature_dependencies(self) -> ObservabilitySettings:
         """Validate feature dependencies to prevent invalid configurations."""
@@ -115,18 +104,6 @@ class ObservabilitySettings(BaseModel):
             )
         return lower_v
 
-    @field_validator("logging_format")
-    @classmethod
-    def validate_logging_format(cls, v: str) -> str:
-        """Validate and normalize logging format."""
-        lower_v = v.lower()
-        valid_formats = ["auto", "rich", "json", "plain"]
-        if lower_v not in valid_formats:
-            raise ValueError(
-                f"Invalid logging format: {v}. Must be one of {valid_formats}"
-            )
-        return lower_v
-
     @property
     def needs_storage_backend(self) -> bool:
         """Check if any feature requires storage backend initialization."""
@@ -155,4 +132,4 @@ class ObservabilitySettings(BaseModel):
     @property
     def enabled(self) -> bool:
         """Check if observability is enabled."""
-        return self.any_endpoint_enabled or self.logging_pipeline_enabled
+        return self.any_endpoint_enabled

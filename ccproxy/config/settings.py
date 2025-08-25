@@ -18,6 +18,7 @@ from .binary import BinarySettings
 from .cors import CORSSettings
 from .docker_settings import DockerSettings
 from .http import HTTPSettings
+from .logging import LoggingSettings
 from .observability import ObservabilitySettings
 from .reverse_proxy import ReverseProxySettings
 from .scheduler import SchedulerSettings
@@ -40,17 +41,6 @@ class ConfigurationError(Exception):
     pass
 
 
-class LoggingHooksSettings(BaseModel):
-    """Settings for logging hooks migration."""
-
-    use_hook_logging: bool = True
-    enable_access_logging: bool = True
-    enable_content_logging: bool = True
-    enable_streaming_logging: bool = True
-    parallel_run_mode: bool = False
-    disable_middleware_during_parallel: bool = False
-
-
 class HooksSettings(BaseModel):
     """Hook system configuration."""
 
@@ -60,7 +50,6 @@ class HooksSettings(BaseModel):
     analytics_enabled: bool = False
     analytics_batch_size: int = 100
     enable_chunk_events: bool = False  # For streaming chunk events
-    logging: LoggingHooksSettings = Field(default_factory=LoggingHooksSettings)
 
 
 # PoolSettings class removed - connection pooling functionality has been removed
@@ -90,6 +79,11 @@ class Settings(BaseSettings):
     server: ServerSettings = Field(
         default_factory=ServerSettings,
         description="Server configuration settings",
+    )
+
+    logging: LoggingSettings = Field(
+        default_factory=LoggingSettings,
+        description="Centralized logging configuration",
     )
 
     security: SecuritySettings = Field(
@@ -175,7 +169,7 @@ class Settings(BaseSettings):
     @property
     def is_development(self) -> bool:
         """Check if running in development mode."""
-        return self.server.reload or self.server.log_level == "DEBUG"
+        return self.server.reload or self.logging.level == "DEBUG"
 
     def model_dump_safe(self) -> dict[str, Any]:
         """
