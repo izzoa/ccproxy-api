@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 import structlog
 
+
 logger = structlog.get_logger(__name__)
 
 # Import TRACE_LEVEL
@@ -18,10 +19,10 @@ except ImportError:
 
 class JSONFormatter:
     """Formats requests/responses as structured JSON for observability."""
-    
+
     def __init__(self, config: Any) -> None:
         """Initialize with configuration.
-        
+
         Args:
             config: RequestTracerConfig instance
         """
@@ -30,7 +31,7 @@ class JSONFormatter:
         self.json_logs_enabled = config.json_logs_enabled
         self.redact_sensitive = config.redact_sensitive
         self.truncate_body_preview = config.truncate_body_preview
-        
+
         # Check if TRACE level is enabled
         current_level = (
             logger._context.get("_level", logging.INFO)
@@ -38,17 +39,17 @@ class JSONFormatter:
             else logging.INFO
         )
         self.trace_enabled = self.verbose_api or current_level <= TRACE_LEVEL
-        
+
         # Setup log directory if file logging is enabled
         self.request_log_dir = None
         if self.json_logs_enabled:
             self.request_log_dir = Path(config.get_json_log_dir())
             self.request_log_dir.mkdir(parents=True, exist_ok=True)
-    
+
     @staticmethod
     def redact_headers(headers: dict[str, str]) -> dict[str, str]:
         """Redact sensitive headers for safe logging.
-        
+
         - Replaces authorization, x-api-key, cookie values with [REDACTED]
         - Preserves header names for debugging
         - Returns new dict without modifying original
@@ -62,7 +63,7 @@ class JSONFormatter:
             "x-access-token",
             "x-secret-key",
         }
-        
+
         redacted = {}
         for key, value in headers.items():
             if key.lower() in sensitive_headers:
@@ -70,7 +71,7 @@ class JSONFormatter:
             else:
                 redacted[key] = value
         return redacted
-    
+
     async def log_request(
         self,
         request_id: str,
@@ -80,16 +81,16 @@ class JSONFormatter:
         body: bytes | None,
     ) -> None:
         """Log structured request data.
-        
+
         - Logs at TRACE level with redacted headers
         - Writes to request log file with complete data (if configured)
         """
         if not self.trace_enabled:
             return
-        
+
         # Log at TRACE level with redacted headers
         log_headers = self.redact_headers(headers) if self.redact_sensitive else headers
-        
+
         if hasattr(logger, "trace"):
             logger.trace(
                 "api_request",
@@ -111,7 +112,7 @@ class JSONFormatter:
                 headers=log_headers,
                 body_size=len(body) if body else 0,
             )
-        
+
         # Write to file if configured
         if self.request_log_dir and self.json_logs_enabled:
             request_file = self.request_log_dir / f"{request_id}_request.json"
@@ -123,7 +124,7 @@ class JSONFormatter:
                 "body": body.decode("utf-8", errors="replace") if body else None,
             }
             request_file.write_text(json.dumps(request_data, indent=2))
-    
+
     async def log_response(
         self,
         request_id: str,
@@ -132,16 +133,16 @@ class JSONFormatter:
         body: bytes,
     ) -> None:
         """Log structured response data.
-        
+
         - Logs at TRACE level
         - Truncates body preview for console
         - Handles binary data gracefully
         """
         if not self.trace_enabled:
             return
-        
+
         body_preview = self._get_body_preview(body)
-        
+
         # Log at TRACE level
         if hasattr(logger, "trace"):
             logger.trace(
@@ -164,7 +165,7 @@ class JSONFormatter:
                 body_preview=body_preview,
                 body_size=len(body),
             )
-        
+
         # Write to file if configured
         if self.request_log_dir and self.json_logs_enabled:
             response_file = self.request_log_dir / f"{request_id}_response.json"
@@ -175,19 +176,19 @@ class JSONFormatter:
                 "body": body.decode("utf-8", errors="replace"),
             }
             response_file.write_text(json.dumps(response_data, indent=2))
-    
+
     def _get_body_preview(self, body: bytes) -> str:
         """Extract readable preview from body bytes.
-        
+
         - Decodes UTF-8 with error replacement
         - Truncates to max_length
         - Returns '<binary data>' for non-text content
         """
         max_length = self.truncate_body_preview
-        
+
         try:
             text = body.decode("utf-8", errors="replace")
-            
+
             # Try to parse as JSON for better formatting
             try:
                 json_data = json.loads(text)
@@ -205,7 +206,7 @@ class JSONFormatter:
         except Exception as e:
             logger.debug("text_formatting_unexpected_error", error=str(e))
             return "<binary data>"
-    
+
     # Streaming methods
     async def log_stream_start(
         self, request_id: str, headers: dict[str, str]
@@ -213,21 +214,21 @@ class JSONFormatter:
         """Mark beginning of stream with initial headers."""
         if not self.verbose_api:
             return
-        
+
         logger.info(
             "stream_start",
             category="streaming",
-            request_id=request_id, 
+            request_id=request_id,
             headers=dict(headers)
         )
-    
+
     async def log_stream_chunk(
         self, request_id: str, chunk: bytes, chunk_number: int
     ) -> None:
         """Record individual stream chunk (optional, for deep debugging)."""
         if not self.config.log_streaming_chunks:
             return
-            
+
         logger.debug(
             "stream_chunk",
             category="streaming",
@@ -235,14 +236,14 @@ class JSONFormatter:
             chunk_number=chunk_number,
             chunk_size=len(chunk),
         )
-    
+
     async def log_stream_complete(
         self, request_id: str, total_chunks: int, total_bytes: int
     ) -> None:
         """Mark stream completion with statistics."""
         if not self.verbose_api:
             return
-        
+
         logger.info(
             "stream_complete",
             category="streaming",

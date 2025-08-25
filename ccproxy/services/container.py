@@ -147,10 +147,10 @@ class ServiceContainer:
             self._request_tracer = NullRequestTracer()
             logger.debug("using_null_request_tracer", category="lifecycle")
         return self._request_tracer
-    
+
     def set_request_tracer(self, tracer: RequestTracer) -> None:
         """Set the request tracer (called by plugin).
-        
+
         Args:
             tracer: The request tracer implementation
         """

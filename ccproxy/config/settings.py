@@ -289,7 +289,7 @@ class Settings(BaseSettings):
         # This allows Pydantic to load environment variables first, then apply defaults
         # We'll update the instance with the config file data after creation
         settings = cls()
-        
+
         # Now update with config file data, but only for fields not already set by env vars
         for key, value in merged_config.items():
             # Check if the value was already set by environment variable

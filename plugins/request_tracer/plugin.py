@@ -17,6 +17,7 @@ from .middleware import RequestTracingMiddleware
 from .tracer import RequestTracerImpl
 from .transport import TracingHTTPTransport
 
+
 logger = get_plugin_logger()
 
 

@@ -132,7 +132,7 @@ class TracingHTTPTransport(httpx.AsyncHTTPTransport):
         """Build raw HTTP/1.1 request format."""
         if not self.tracer:
             return b""
-            
+
         # Convert httpx headers to list of tuples
         headers = [(k.encode(), v.encode()) for k, v in request.headers.items()]
 

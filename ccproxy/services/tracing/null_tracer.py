@@ -5,10 +5,10 @@ from .interfaces import RequestTracer, StreamingTracer
 
 class NullRequestTracer(RequestTracer, StreamingTracer):
     """No-op implementation of request tracer.
-    
+
     Used as a fallback when the request_tracer plugin is disabled.
     """
-    
+
     async def trace_request(
         self,
         request_id: str,
@@ -19,7 +19,7 @@ class NullRequestTracer(RequestTracer, StreamingTracer):
     ) -> None:
         """No-op request tracing."""
         pass
-    
+
     async def trace_response(
         self,
         request_id: str,
@@ -29,7 +29,7 @@ class NullRequestTracer(RequestTracer, StreamingTracer):
     ) -> None:
         """No-op response tracing."""
         pass
-    
+
     async def trace_stream_start(
         self,
         request_id: str,
@@ -37,7 +37,7 @@ class NullRequestTracer(RequestTracer, StreamingTracer):
     ) -> None:
         """No-op stream start tracing."""
         pass
-    
+
     async def trace_stream_chunk(
         self,
         request_id: str,
@@ -46,7 +46,7 @@ class NullRequestTracer(RequestTracer, StreamingTracer):
     ) -> None:
         """No-op stream chunk tracing."""
         pass
-    
+
     async def trace_stream_complete(
         self,
         request_id: str,
