@@ -9,7 +9,8 @@ class RawHTTPLoggerConfig(BaseModel):
     enabled: bool = Field(default=True, description="Enable raw HTTP logging")
 
     log_dir: str = Field(
-        default="/tmp/ccproxy/raw", description="Directory to store raw HTTP logs"
+        default="/tmp/ccproxy/raw",
+        description="Directory to store raw HTTP logs. When not explicitly configured, defaults to {settings.logging.plugin_log_base_dir}/raw.",
     )
 
     log_client_request: bool = Field(

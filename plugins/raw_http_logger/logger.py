@@ -44,7 +44,17 @@ class RawHTTPLogger:
 
         if self.enabled:
             # Create log directory if it doesn't exist
-            self.log_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                self.log_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                logger.error(
+                    "failed_to_create_log_directory",
+                    log_dir=str(self.log_dir),
+                    error=str(e),
+                    exc_info=e,
+                )
+                # Disable logging if we can't create the directory
+                self.enabled = False
 
         # Track which files we've already logged to (to only log once)
         self._logged_files: set[str] = set()
