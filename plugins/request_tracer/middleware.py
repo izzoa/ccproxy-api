@@ -1,19 +1,19 @@
-"""ASGI middleware for logging raw HTTP data from client requests."""
+"""ASGI middleware for request tracing."""
 
 from collections.abc import Callable
 from typing import Any
 
-from .logger import RawHTTPLogger
+from .tracer import RequestTracerImpl
 
 
-class RawHTTPLoggingMiddleware:
-    """ASGI middleware to log raw HTTP data without buffering."""
+class RequestTracingMiddleware:
+    """ASGI middleware for tracing HTTP requests and responses."""
 
     def __init__(
-        self, app: Callable[..., Any], logger: RawHTTPLogger | None = None
+        self, app: Callable[..., Any], tracer: RequestTracerImpl | None = None
     ) -> None:
         self.app = app
-        self.logger = logger or RawHTTPLogger()
+        self.tracer = tracer
 
     async def __call__(
         self,
@@ -27,27 +27,16 @@ class RawHTTPLoggingMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Skip if logging is disabled
-        if not self.logger.should_log():
+        # Skip if tracing is disabled or tracer not set
+        if not self.tracer or not self.tracer.should_log_raw():
             await self.app(scope, receive, send)
             return
 
-        # Check if path should be logged based on include/exclude rules
+        # Check if path should be traced based on include/exclude rules
         path = scope.get("path", "/")
-        if hasattr(self.logger, "config") and self.logger.config:
-            # First check exclude_paths (takes precedence)
-            if any(
-                path.startswith(exclude) for exclude in self.logger.config.exclude_paths
-            ):
-                await self.app(scope, receive, send)
-                return
-
-            # Then check include_paths (if specified, only log included paths)
-            if self.logger.config.include_paths and not any(
-                path.startswith(include) for include in self.logger.config.include_paths
-            ):
-                await self.app(scope, receive, send)
-                return
+        if not self.tracer.should_trace_path(path):
+            await self.app(scope, receive, send)
+            return
 
         # Extract request ID from headers or generate one
         request_id = self._get_request_id(scope)
@@ -100,9 +89,9 @@ class RawHTTPLoggingMiddleware:
 
         # Add headers (with optional filtering)
         exclude_headers = []
-        if hasattr(self.logger, "config") and self.logger.config:
+        if self.tracer and hasattr(self.tracer.config, "exclude_headers"):
             exclude_headers = [
-                h.lower().encode() for h in self.logger.config.exclude_headers
+                h.lower().encode() for h in self.tracer.config.exclude_headers
             ]
 
         for name, value in scope.get("headers", []):
@@ -117,7 +106,7 @@ class RawHTTPLoggingMiddleware:
         raw = "\r\n".join(lines).encode("utf-8")
         raw += b"\r\n\r\n"
 
-        await self.logger.log_client_request(request_id, raw)
+        await self.tracer.log_raw_client_request(request_id, raw)
 
     def _wrap_receive(
         self, receive: Callable[[], Any], request_id: str
@@ -131,7 +120,7 @@ class RawHTTPLoggingMiddleware:
             if message["type"] == "http.request":
                 body = message.get("body", b"")
                 if body:
-                    await self.logger.log_client_request(request_id, body)
+                    await self.tracer.log_raw_client_request(request_id, body)
 
             return message
 
@@ -156,9 +145,9 @@ class RawHTTPLoggingMiddleware:
 
                 # Add headers (with optional filtering)
                 exclude_headers = []
-                if hasattr(self.logger, "config") and self.logger.config:
+                if self.tracer and hasattr(self.tracer.config, "exclude_headers"):
                     exclude_headers = [
-                        h.lower().encode() for h in self.logger.config.exclude_headers
+                        h.lower().encode() for h in self.tracer.config.exclude_headers
                     ]
 
                 for name, value in headers:
@@ -172,14 +161,14 @@ class RawHTTPLoggingMiddleware:
                 raw = "\r\n".join(lines).encode("utf-8")
                 raw += b"\r\n\r\n"
 
-                await self.logger.log_client_response(request_id, raw)
+                await self.tracer.log_raw_client_response(request_id, raw)
                 logged_headers = True
 
             elif message["type"] == "http.response.body":
                 # Log response body chunks
                 body = message.get("body", b"")
                 if body:
-                    await self.logger.log_client_response(request_id, body)
+                    await self.tracer.log_raw_client_response(request_id, body)
 
             # Forward message
             await send(message)

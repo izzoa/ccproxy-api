@@ -1,4 +1,4 @@
-"""Raw HTTP Logger plugin v2 implementation."""
+"""Request Tracer plugin implementation."""
 
 from typing import Any
 
@@ -11,49 +11,64 @@ from ccproxy.plugins import (
     SystemPluginFactory,
     SystemPluginRuntime,
 )
-from plugins.raw_http_logger.config import RawHTTPLoggerConfig
-from plugins.raw_http_logger.logger import RawHTTPLogger
-from plugins.raw_http_logger.middleware import RawHTTPLoggingMiddleware
-from plugins.raw_http_logger.transport import LoggingHTTPTransport
 
+from .config import RequestTracerConfig
+from .middleware import RequestTracingMiddleware
+from .tracer import RequestTracerImpl
+from .transport import TracingHTTPTransport
 
 logger = get_plugin_logger()
 
 
-class RawHTTPLoggerRuntime(SystemPluginRuntime):
-    """Runtime for raw HTTP logger plugin."""
+class RequestTracerRuntime(SystemPluginRuntime):
+    """Runtime for request tracer plugin."""
 
     def __init__(self, manifest: PluginManifest):
         """Initialize runtime."""
         super().__init__(manifest)
-        self.config: RawHTTPLoggerConfig | None = None
-        self.logger_instance: RawHTTPLogger | None = None
+        self.config: RequestTracerConfig | None = None
+        self.tracer_instance: RequestTracerImpl | None = None
         self.original_transport: Any | None = None
 
     async def _on_initialize(self) -> None:
-        """Initialize the raw HTTP logger."""
+        """Initialize the request tracer."""
         if not self.context:
             raise RuntimeError("Context not set")
 
         # Get configuration
         config = self.context.get("config")
-        if not isinstance(config, RawHTTPLoggerConfig):
+        if not isinstance(config, RequestTracerConfig):
             logger.warning("plugin_no_config")
             # Use default config if none provided
-            config = RawHTTPLoggerConfig()
+            config = RequestTracerConfig()
             logger.info("plugin_using_default_config")
         self.config = config
 
-        # Create logger instance
-        self.logger_instance = RawHTTPLogger(self.config)
+        # Create tracer instance
+        self.tracer_instance = RequestTracerImpl(self.config)
 
         if self.config.enabled:
-            # Wrap HTTP client transport for provider logging
-            await self._wrap_http_client_transport()
+            # Register tracer with service container
+            service_container = self.context.get("service_container")
+            if service_container:
+                # Use the public method to set the tracer
+                service_container.set_request_tracer(self.tracer_instance)
+                logger.info(
+                    "request_tracer_registered",
+                    verbose_api=self.config.verbose_api,
+                    raw_http=self.config.raw_http_enabled,
+                )
+
+            # Wrap HTTP client transport for provider logging if raw HTTP is enabled
+            if self.config.raw_http_enabled:
+                await self._wrap_http_client_transport()
 
             logger.info(
-                "raw_http_logger_enabled",
+                "request_tracer_enabled",
                 log_dir=self.config.log_dir,
+                verbose_api=self.config.verbose_api,
+                json_logs=self.config.json_logs_enabled,
+                raw_http=self.config.raw_http_enabled,
                 log_client_request=self.config.log_client_request,
                 log_client_response=self.config.log_client_response,
                 log_provider_request=self.config.log_provider_request,
@@ -63,10 +78,10 @@ class RawHTTPLoggerRuntime(SystemPluginRuntime):
                 exclude_headers=self.config.exclude_headers,
             )
         else:
-            logger.info("raw_http_logger_disabled")
+            logger.info("request_tracer_disabled")
 
     async def _wrap_http_client_transport(self) -> None:
-        """Wrap the shared HTTP client's transport with logging."""
+        """Wrap the shared HTTP client's transport with tracing."""
         if not self.context:
             return
 
@@ -79,12 +94,11 @@ class RawHTTPLoggerRuntime(SystemPluginRuntime):
         current_transport = http_client._transport
 
         # Only wrap if not already wrapped
-        if not isinstance(current_transport, LoggingHTTPTransport):
+        if not isinstance(current_transport, TracingHTTPTransport):
             # Store original for potential unwrapping
             self.original_transport = current_transport
 
-            # Create and set logging transport
-            # Cast to AsyncHTTPTransport if it's the expected type
+            # Create and set tracing transport
             from httpx import AsyncHTTPTransport
 
             wrapped = (
@@ -92,10 +106,10 @@ class RawHTTPLoggerRuntime(SystemPluginRuntime):
                 if isinstance(current_transport, AsyncHTTPTransport)
                 else None
             )
-            logging_transport = LoggingHTTPTransport(
-                wrapped_transport=wrapped, logger=self.logger_instance
+            tracing_transport = TracingHTTPTransport(
+                wrapped_transport=wrapped, tracer=self.tracer_instance
             )
-            http_client._transport = logging_transport
+            http_client._transport = tracing_transport
 
             logger.debug("http_client_transport_wrapped", category="middleware")
 
@@ -107,6 +121,14 @@ class RawHTTPLoggerRuntime(SystemPluginRuntime):
             if http_client:
                 http_client._transport = self.original_transport
                 logger.debug("http_client_transport_restored", category="middleware")
+
+        # Restore null tracer on shutdown
+        if self.context:
+            service_container = self.context.get("service_container")
+            if service_container:
+                from ccproxy.services.tracing import NullRequestTracer
+                service_container.set_request_tracer(NullRequestTracer())
+                logger.debug("restored_null_tracer", category="middleware")
 
     async def _get_health_details(self) -> dict[str, Any]:
         """Get health check details."""
@@ -124,46 +146,49 @@ class RawHTTPLoggerRuntime(SystemPluginRuntime):
                 {
                     "log_dir": str(log_dir),
                     "log_dir_exists": log_dir.exists(),
+                    "verbose_api": self.config.verbose_api,
+                    "json_logs": self.config.json_logs_enabled,
+                    "raw_http": self.config.raw_http_enabled,
                 }
             )
 
         return details
 
 
-class RawHTTPLoggerFactory(SystemPluginFactory):
-    """Factory for raw HTTP logger plugin."""
+class RequestTracerFactory(SystemPluginFactory):
+    """Factory for request tracer plugin."""
 
     def __init__(self) -> None:
         """Initialize factory with manifest."""
         # Create manifest with static declarations
         manifest = PluginManifest(
-            name="raw_http_logger",
-            version="1.0.0",
-            description="Raw HTTP Logger plugin for debugging HTTP requests and responses",
+            name="request_tracer",
+            version="2.0.0",
+            description="Unified request tracer with structured JSON and raw HTTP logging",
             is_provider=False,
-            config_class=RawHTTPLoggerConfig,
+            config_class=RequestTracerConfig,
         )
 
         # Initialize with manifest and runtime class
         super().__init__(manifest)
 
-        # Store reference to logger instance for middleware creation
-        self._logger_instance: RawHTTPLogger | None = None
+        # Store reference to tracer instance for middleware creation
+        self._tracer_instance: RequestTracerImpl | None = None
 
-    def create_runtime(self) -> RawHTTPLoggerRuntime:
+    def create_runtime(self) -> RequestTracerRuntime:
         """Create runtime instance."""
-        return RawHTTPLoggerRuntime(self.manifest)
+        return RequestTracerRuntime(self.manifest)
 
     def create_context(self, core_services: Any) -> PluginContext:
         """Create context and update manifest with middleware if enabled."""
         # Get base context
         context = super().create_context(core_services)
 
-        # Check if plugin is enabled
+        # Check if plugin is enabled and raw HTTP logging is enabled
         config = context.get("config")
-        if isinstance(config, RawHTTPLoggerConfig) and config.enabled:
-            # Create logger instance for middleware
-            self._logger_instance = RawHTTPLogger(config)
+        if isinstance(config, RequestTracerConfig) and config.enabled and config.raw_http_enabled:
+            # Create tracer instance for middleware
+            self._tracer_instance = RequestTracerImpl(config)
 
             # Add middleware to manifest
             # This is safe because it happens during app creation phase
@@ -172,10 +197,9 @@ class RawHTTPLoggerFactory(SystemPluginFactory):
 
             # Create middleware spec with proper configuration
             middleware_spec = MiddlewareSpec(
-                middleware_class=RawHTTPLoggingMiddleware,  # type: ignore[arg-type]
-                priority=MiddlewareLayer.OBSERVABILITY
-                - 10,  # Early in observability layer
-                kwargs={"logger": self._logger_instance},
+                middleware_class=RequestTracingMiddleware,  # type: ignore[arg-type]
+                priority=MiddlewareLayer.OBSERVABILITY - 10,  # Early in observability layer
+                kwargs={"tracer": self._tracer_instance},
             )
 
             self.manifest.middleware.append(middleware_spec)
@@ -184,4 +208,4 @@ class RawHTTPLoggerFactory(SystemPluginFactory):
 
 
 # Export the factory instance
-factory = RawHTTPLoggerFactory()
+factory = RequestTracerFactory()

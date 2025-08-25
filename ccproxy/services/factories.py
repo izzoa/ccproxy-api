@@ -16,7 +16,7 @@ from ccproxy.core.http_client import HTTPClientFactory
 from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler
-from ccproxy.services.tracing import CoreRequestTracer
+from ccproxy.services.tracing import RequestTracer
 from ccproxy.testing import RealisticMockResponseGenerator
 from plugins.pricing.service import PricingService
 
@@ -36,21 +36,6 @@ class ConcreteServiceFactory:
     according to their interfaces. It follows the factory pattern to
     centralize service creation logic and ensure consistent configuration.
     """
-
-    def create_request_tracer(self, settings: Settings) -> CoreRequestTracer:
-        """Create request tracer instance.
-
-        Args:
-            settings: Application settings
-
-        Returns:
-            Configured request tracer instance
-        """
-        tracer = CoreRequestTracer(
-            verbose_api=settings.logging.verbose_api,
-            request_log_dir=settings.logging.request_log_dir,
-        )
-        return tracer
 
     def create_mock_handler(self, settings: Settings) -> MockResponseHandler:
         """Create mock handler instance.
@@ -76,7 +61,7 @@ class ConcreteServiceFactory:
         self,
         settings: Settings,
         metrics: PrometheusMetrics | None = None,
-        request_tracer: CoreRequestTracer | None = None,
+        request_tracer: RequestTracer | None = None,
         pricing_service: PricingService | None = None,
     ) -> StreamingHandler:
         """Create streaming handler instance.

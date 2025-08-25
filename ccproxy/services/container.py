@@ -20,7 +20,7 @@ from ccproxy.services.http.connection_pool import ConnectionPoolManager
 from ccproxy.services.http_pool import HTTPPoolManager
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler
-from ccproxy.services.tracing import CoreRequestTracer
+from ccproxy.services.tracing import NullRequestTracer, RequestTracer
 from ccproxy.utils.binary_resolver import BinaryResolver
 from plugins.pricing.service import PricingService
 
@@ -61,6 +61,7 @@ class ServiceContainer:
         self._services: dict[str, object] = {}
         self._http_client: httpx.AsyncClient | None = None
         self._pool_manager: HTTPPoolManager | None = None
+        self._request_tracer: RequestTracer | None = None  # Set by plugin
 
         logger.debug(
             "service_container_initialized",
@@ -133,21 +134,28 @@ class ServiceContainer:
         )
         return proxy_service
 
-    def get_request_tracer(self) -> CoreRequestTracer:
+    def get_request_tracer(self) -> RequestTracer:
         """Get request tracer service instance.
 
-        Uses caching to ensure single instance per container lifetime,
-        but allows multiple containers for testing.
+        Returns the plugin-injected tracer or NullRequestTracer as fallback.
 
         Returns:
             Request tracer service instance
         """
-        service_key = "request_tracer"
-        if service_key not in self._services:
-            self._services[service_key] = self._factory.create_request_tracer(
-                self.settings
-            )
-        return self._services[service_key]  # type: ignore
+        if self._request_tracer is None:
+            # No plugin has registered a tracer, use null implementation
+            self._request_tracer = NullRequestTracer()
+            logger.debug("using_null_request_tracer", category="lifecycle")
+        return self._request_tracer
+    
+    def set_request_tracer(self, tracer: RequestTracer) -> None:
+        """Set the request tracer (called by plugin).
+        
+        Args:
+            tracer: The request tracer implementation
+        """
+        self._request_tracer = tracer
+        logger.info("request_tracer_set", tracer_type=type(tracer).__name__, category="lifecycle")
 
     def get_mock_handler(self) -> MockResponseHandler:
         """Get mock handler service instance.

@@ -19,7 +19,7 @@ from ccproxy.services.config import ProxyConfiguration
 from ccproxy.services.http.connection_pool import ConnectionPoolManager
 from ccproxy.services.mocking import MockResponseHandler
 from ccproxy.services.streaming import StreamingHandler
-from ccproxy.services.tracing import CoreRequestTracer
+from ccproxy.services.tracing import RequestTracer
 from ccproxy.streaming.deferred_streaming import DeferredStreaming
 
 
@@ -38,7 +38,7 @@ class ProxyService:
         proxy_client: BaseProxyClient,
         settings: Settings,
         # Injected services
-        request_tracer: CoreRequestTracer,
+        request_tracer: RequestTracer,
         mock_handler: MockResponseHandler,
         streaming_handler: StreamingHandler,
         config: ProxyConfiguration,

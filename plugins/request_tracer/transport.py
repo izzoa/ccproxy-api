@@ -1,4 +1,4 @@
-"""HTTPX transport wrapper for logging raw HTTP data."""
+"""HTTPX transport wrapper for tracing HTTP requests."""
 
 from collections.abc import AsyncIterator
 from types import TracebackType
@@ -8,25 +8,25 @@ import httpx
 
 from ccproxy.core.logging import get_plugin_logger
 
-from .logger import RawHTTPLogger
+from .tracer import RequestTracerImpl
 
 
 logger = get_plugin_logger()
 
 
-class LoggingResponseStream(httpx.AsyncByteStream):
+class TracingResponseStream(httpx.AsyncByteStream):
     """Wraps response stream to log chunks without buffering."""
 
     def __init__(
         self,
         stream: Any,  # The actual httpx stream object
-        logger: RawHTTPLogger,
+        tracer: RequestTracerImpl,
         request_id: str,
         status_code: int,
         headers: httpx.Headers,
     ):
         self.stream = stream
-        self.logger = logger
+        self.tracer = tracer
         self.request_id = request_id
         self.status_code = status_code
         self.headers = headers
@@ -37,15 +37,15 @@ class LoggingResponseStream(httpx.AsyncByteStream):
         # Build and log response headers first
         if not self._logged_headers:
             header_list = [(k.encode(), v.encode()) for k, v in self.headers.items()]
-            raw_headers = self.logger.build_raw_response(self.status_code, header_list)
-            await self.logger.log_provider_response(self.request_id, raw_headers)
+            raw_headers = self.tracer.build_raw_response(self.status_code, header_list)
+            await self.tracer.log_raw_provider_response(self.request_id, raw_headers)
             self._logged_headers = True
 
         # Stream and log chunks
         async for chunk in self.stream:
             # Log each chunk as it arrives
             if chunk:
-                await self.logger.log_provider_response(self.request_id, chunk)
+                await self.tracer.log_raw_provider_response(self.request_id, chunk)
 
             # Yield chunk unchanged (no buffering)
             yield chunk
@@ -56,16 +56,16 @@ class LoggingResponseStream(httpx.AsyncByteStream):
             await self.stream.aclose()
 
 
-class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
-    """Wraps HTTPX transport to log raw HTTP data without buffering."""
+class TracingHTTPTransport(httpx.AsyncHTTPTransport):
+    """Wraps HTTPX transport to trace HTTP requests without buffering."""
 
     def __init__(
         self,
         wrapped_transport: httpx.AsyncHTTPTransport | None = None,
-        logger: RawHTTPLogger | None = None,
+        tracer: RequestTracerImpl | None = None,
     ):
         self.wrapped = wrapped_transport or httpx.AsyncHTTPTransport()
-        self.logger = logger or RawHTTPLogger()
+        self.tracer = tracer
         # Delegate pool to wrapped transport for context manager support
         if hasattr(self.wrapped, "_pool"):
             self._pool = self.wrapped._pool
@@ -75,8 +75,8 @@ class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
 
         module_logger = get_plugin_logger(__name__)
         module_logger.info(
-            "LoggingHTTPTransport initialized",
-            enabled=self.logger.enabled,
+            "TracingHTTPTransport initialized",
+            enabled=self.tracer.enabled if self.tracer else False,
             category="middleware",
         )
 
@@ -85,10 +85,10 @@ class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
         # Extract request ID from extensions if available
         request_id = self._get_request_id(request)
 
-        # Only log if we have a request ID and logging is enabled
-        if request_id and self.logger.should_log():
+        # Only log if we have a request ID and tracing is enabled
+        if request_id and self.tracer and self.tracer.should_log_raw():
             raw_request = self._build_raw_request(request)
-            await self.logger.log_provider_request(request_id, raw_request)
+            await self.tracer.log_raw_provider_request(request_id, raw_request)
 
         # Forward request to wrapped transport
         response = await self.wrapped.handle_async_request(request)
@@ -97,13 +97,14 @@ class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
         # Check if stream has required methods (duck typing)
         if (
             request_id
-            and self.logger.should_log()
+            and self.tracer
+            and self.tracer.should_log_raw()
             and hasattr(response.stream, "__aiter__")
             and hasattr(response.stream, "aclose")
         ):
-            response.stream = LoggingResponseStream(
+            response.stream = TracingResponseStream(
                 response.stream,
-                self.logger,
+                self.tracer,
                 request_id,
                 response.status_code,
                 response.headers,
@@ -129,19 +130,11 @@ class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
 
     def _build_raw_request(self, request: httpx.Request) -> bytes:
         """Build raw HTTP/1.1 request format."""
+        if not self.tracer:
+            return b""
+            
         # Convert httpx headers to list of tuples
         headers = [(k.encode(), v.encode()) for k, v in request.headers.items()]
-
-        # Filter sensitive headers if configured
-        if hasattr(self.logger, "config") and self.logger.config:
-            exclude_headers = [h.lower() for h in self.logger.config.exclude_headers]
-            filtered_headers = []
-            for name, value in headers:
-                if name.decode().lower() in exclude_headers:
-                    filtered_headers.append((name, b"[REDACTED]"))
-                else:
-                    filtered_headers.append((name, value))
-            headers = filtered_headers
 
         # Get request body
         body = None
@@ -152,7 +145,7 @@ class LoggingHTTPTransport(httpx.AsyncHTTPTransport):
             # Log a placeholder for now
             body = b"[STREAMING BODY - NOT CAPTURED]"
 
-        return self.logger.build_raw_request(
+        return self.tracer.build_raw_request(
             method=request.method, url=str(request.url), headers=headers, body=body
         )
 

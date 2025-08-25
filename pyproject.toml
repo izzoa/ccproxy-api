@@ -76,7 +76,7 @@ claude_api = "plugins.claude_api.plugin:Plugin"
 claude_sdk = "plugins.claude_sdk.plugin:Plugin"
 codex = "plugins.codex.plugin:Plugin"
 permissions = "plugins.permissions.plugin:Plugin"
-raw_http_logger = "plugins.raw_http_logger.plugin:Plugin"
+request_tracer = "plugins.request_tracer.plugin:factory"
 
 [dependency-groups]
 dev = [
@@ -420,7 +420,7 @@ extraPaths = [
   "plugins/claude_sdk",
   "plugins/codex",
   "plugins/permissions",
-  "plugins/raw_http_logger",
+  "plugins/request_tracer",
 ]
 
 # Type checking settings

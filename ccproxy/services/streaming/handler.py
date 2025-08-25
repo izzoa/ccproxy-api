@@ -9,7 +9,7 @@ import structlog
 from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.services.handler_config import HandlerConfig
-from ccproxy.services.tracing import CoreRequestTracer
+from ccproxy.services.tracing import RequestTracer
 from ccproxy.streaming.deferred_streaming import DeferredStreaming
 from plugins.pricing.service import PricingService
 
@@ -24,7 +24,7 @@ class StreamingHandler:
         self,
         metrics: PrometheusMetrics | None = None,
         verbose_streaming: bool = False,
-        request_tracer: CoreRequestTracer | None = None,
+        request_tracer: RequestTracer | None = None,
         pricing_service: PricingService | None = None,
     ) -> None:
         """Initialize with metrics collector and debug settings.
