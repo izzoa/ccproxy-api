@@ -74,13 +74,14 @@ class CodexRuntime(ProviderPluginRuntime):
                 }
             )
 
-        logger.debug(
+        logger.info(
             "plugin_initialized",
+            plugin="codex",
+            version="1.0.0",
             status="initialized",
             has_credentials=self.auth_manager is not None,
             has_adapter=self.adapter is not None,
             has_detection=self.detection_service is not None,
-            category="plugin",
             **cli_info,
         )
 

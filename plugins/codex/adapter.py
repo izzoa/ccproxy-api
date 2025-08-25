@@ -204,12 +204,11 @@ class CodexAdapter(BaseAdapter):
             "plugin_request",
             plugin="codex",
             endpoint=endpoint,
-            target_url=target_url,
-            needs_conversion=needs_conversion,
-            is_streaming=is_streaming,
-            session_id=session_id,
             model=parsed_body.get("model") if isinstance(parsed_body, dict) else None,
-            category="http",
+            is_streaming=is_streaming,
+            needs_conversion=needs_conversion,
+            session_id=session_id,
+            target_url=target_url,
         )
 
         # Update context with codex specific metadata

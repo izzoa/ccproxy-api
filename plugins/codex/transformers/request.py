@@ -49,13 +49,13 @@ class CodexRequestTransformer:
         logger = get_plugin_logger()
 
         # Debug logging
-        logger.debug(
-            "transform_headers_called",
+        logger.trace(
+            "transform_headers",
             has_access_token=access_token is not None,
             access_token_length=len(access_token) if access_token else 0,
             header_count=len(headers),
             has_authorization="Authorization" in headers,
-            category="transform",
+            request_id=kwargs.get("request_id"),
         )
 
         transformed = headers.copy()
@@ -83,11 +83,11 @@ class CodexRequestTransformer:
             cached_data = self.detection_service.get_cached_data()
             if cached_data and cached_data.headers:
                 detected_headers = cached_data.headers.to_headers_dict()
-                logger.debug(
+                logger.trace(
                     "injecting_detected_headers",
                     version=cached_data.codex_version,
                     header_count=len(detected_headers),
-                    category="transform",
+                    request_id=kwargs.get("request_id"),
                 )
                 # Detected headers take precedence
                 transformed.update(detected_headers)
@@ -107,17 +107,17 @@ class CodexRequestTransformer:
         transformed["Authorization"] = f"Bearer {access_token}"
 
         # Debug logging - what headers are we returning?
-        logger.debug(
+        logger.trace(
             "transform_headers_result",
             has_authorization="Authorization" in transformed,
             header_count=len(transformed),
             detected_headers_used=has_detected_headers,
-            category="transform",
+            request_id=kwargs.get("request_id"),
         )
 
         return transformed
 
-    def transform_body(self, body: bytes | None) -> bytes | None:
+    def transform_body(self, body: bytes | None, **kwargs: Any) -> bytes | None:
         """Minimal body transformation - inject instructions if missing.
 
         Args:
@@ -128,12 +128,12 @@ class CodexRequestTransformer:
         """
         logger = get_plugin_logger()
 
-        logger.debug(
-            "transform_body_called",
+        logger.trace(
+            "transform_body",
             has_body=body is not None,
             body_length=len(body) if body else 0,
             has_detection_service=self.detection_service is not None,
-            category="transform",
+            request_id=kwargs.get("request_id"),
         )
 
         if not body:

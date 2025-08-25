@@ -64,17 +64,18 @@ class ClaudeSDKRuntime(ProviderPluginRuntime):
 
             if cli_path:
                 # Single consolidated log message with both CLI detection and plugin initialization status
-                logger.debug(
+                logger.info(
                     "plugin_initialized",
+                    plugin="claude_sdk",
+                    version="1.0.0",
                     status="initialized",
+                    has_credentials=True,  # SDK handles its own auth
                     cli_available=True,
                     cli_version=version,
                     cli_path=cli_path,
                     cli_source="package_manager",
-                    has_credentials=True,  # SDK handles its own auth
                     has_adapter=self.adapter is not None,
                     has_session_manager=self.session_manager is not None,
-                    category="plugin",
                 )
             else:
                 error_msg = "Claude CLI not found in PATH or common locations - SDK plugin requires installed CLI"

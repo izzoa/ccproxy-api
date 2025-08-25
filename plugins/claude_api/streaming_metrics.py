@@ -115,8 +115,8 @@ class StreamingMetricsCollector:
         if "usage" not in chunk_str:
             return False
 
-        logger.debug(
-            "Processing chunk with usage",
+        logger.trace(
+            "processing_chunk",
             chunk_preview=chunk_str[:300],
             request_id=self.request_id,
         )
@@ -147,7 +147,9 @@ class StreamingMetricsCollector:
                                     or self.metrics["cache_write_tokens"]
                                 )
                                 logger.debug(
-                                    "Extracted input tokens from message_start",
+                                    "token_metrics_extracted",
+                                    plugin="claude_api",
+                                    event_type="message_start",
                                     tokens_input=self.metrics["tokens_input"],
                                     cache_read_tokens=self.metrics["cache_read_tokens"],
                                     cache_write_tokens=self.metrics[
@@ -163,7 +165,9 @@ class StreamingMetricsCollector:
                                     "output_tokens"
                                 )
                                 logger.debug(
-                                    "Extracted output tokens from message_delta",
+                                    "token_metrics_extracted",
+                                    plugin="claude_api",
+                                    event_type="message_delta",
                                     tokens_output=self.metrics["tokens_output"],
                                     request_id=self.request_id,
                                 )
@@ -173,7 +177,8 @@ class StreamingMetricsCollector:
 
         except (json.JSONDecodeError, KeyError) as e:
             logger.debug(
-                "Failed to parse streaming token metrics",
+                "metrics_parse_failed",
+                plugin="claude_api",
                 error=str(e),
                 request_id=self.request_id,
             )

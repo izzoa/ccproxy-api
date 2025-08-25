@@ -200,7 +200,7 @@ class StreamWorker:
                     delivered_count = await self._message_queue.broadcast(message)
                     self._messages_delivered += delivered_count
 
-                    logger.debug(
+                    logger.trace(
                         "stream_worker_message_delivered",
                         worker_id=self.worker_id,
                         message_type=type(message).__name__,
@@ -211,7 +211,7 @@ class StreamWorker:
                     # No listeners - discard message
                     self._messages_discarded += 1
 
-                    logger.debug(
+                    logger.trace(
                         "stream_worker_message_discarded",
                         worker_id=self.worker_id,
                         message_type=type(message).__name__,

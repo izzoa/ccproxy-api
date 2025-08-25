@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 from pathlib import Path
 
 import structlog
@@ -25,16 +24,13 @@ class CoreRequestTracer(RequestTracer, StreamingTracer):
     def __init__(
         self, verbose_api: bool = False, request_log_dir: str | None = None
     ) -> None:
-        """Initialize with verbosity settings from environment.
+        """Initialize with verbosity settings.
 
-        - Reads CCPROXY_VERBOSE_API environment variable (for backward compatibility)
         - Maps verbose_api to TRACE level logging
         - Sets up file logging directory if needed
         """
-        # Keep verbose_api for backward compatibility
-        self.verbose_api = (
-            verbose_api or os.getenv("CCPROXY_VERBOSE_API", "").lower() == "true"
-        )
+        # Use the verbose_api setting directly from settings
+        self.verbose_api = verbose_api
 
         # Check if TRACE level is enabled
         current_level = (
@@ -44,7 +40,7 @@ class CoreRequestTracer(RequestTracer, StreamingTracer):
         )
         self.trace_enabled = self.verbose_api or current_level <= TRACE_LEVEL
 
-        self.request_log_dir = request_log_dir or os.getenv("CCPROXY_REQUEST_LOG_DIR")
+        self.request_log_dir = request_log_dir
 
         if self.trace_enabled and self.request_log_dir:
             Path(self.request_log_dir).mkdir(parents=True, exist_ok=True)
@@ -218,14 +214,14 @@ class CoreRequestTracer(RequestTracer, StreamingTracer):
         self, request_id: str, chunk: bytes, chunk_number: int
     ) -> None:
         """Record individual stream chunk (optional, for deep debugging)."""
-        # Only log if extremely verbose debugging is needed
-        if os.getenv("CCPROXY_TRACE_CHUNKS", "").lower() == "true":
-            logger.debug(
-                "Stream chunk",
-                request_id=request_id,
-                chunk_number=chunk_number,
-                chunk_size=len(chunk),
-            )
+        # Disabled by default - uncomment for deep debugging
+        # logger.debug(
+        #     "Stream chunk",
+        #     request_id=request_id,
+        #     chunk_number=chunk_number,
+        #     chunk_size=len(chunk),
+        # )
+        pass
 
     async def trace_stream_complete(
         self, request_id: str, total_chunks: int, total_bytes: int

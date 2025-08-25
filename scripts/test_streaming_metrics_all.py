@@ -312,7 +312,7 @@ async def main() -> None:
     print("\nStarting server...")
     server_process = subprocess.Popen(
         ["ccproxy", "serve"],
-        env={**os.environ, "CCPROXY_VERBOSE_API": "true"},
+        env={**os.environ, "LOGGING__VERBOSE_API": "true"},
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )

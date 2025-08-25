@@ -2,13 +2,13 @@
 
 import asyncio
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import structlog
 
+from ccproxy.config import get_settings
 from ccproxy.core.async_task_manager import create_managed_task
 
 
@@ -21,21 +21,23 @@ _streaming_batches: dict[str, dict[str, Any]] = {}  # request_id -> batch info
 
 
 def should_log_requests() -> bool:
-    """Check if request logging is enabled via environment variable.
+    """Check if request logging is enabled via settings.
 
     Returns:
-        True if CCPROXY_LOG_REQUESTS is set to 'true' (case-insensitive)
+        True if content logging is enabled in settings
     """
-    return os.environ.get("CCPROXY_LOG_REQUESTS", "false").lower() == "true"
+    settings = get_settings()
+    return settings.logging.enable_content_logging
 
 
 def get_request_log_dir() -> Path | None:
-    """Get the request log directory from environment variable.
+    """Get the request log directory from settings.
 
     Returns:
-        Path object if CCPROXY_REQUEST_LOG_DIR is set and valid, None otherwise
+        Path object if request_log_dir is set and valid, None otherwise
     """
-    log_dir = os.environ.get("CCPROXY_REQUEST_LOG_DIR")
+    settings = get_settings()
+    log_dir = settings.logging.request_log_dir
     if not log_dir:
         return None
 

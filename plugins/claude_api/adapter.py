@@ -297,11 +297,10 @@ class ClaudeAPIAdapter(BaseAdapter):
             "plugin_request",
             plugin="claude_api",
             endpoint=endpoint,
-            target_url=target_url,
-            needs_conversion=needs_conversion,
-            is_streaming=is_streaming,
             model=request_context.metadata.get("model"),
-            category="http",
+            is_streaming=is_streaming,
+            needs_conversion=needs_conversion,
+            target_url=target_url,
         )
 
         # Get streaming handler if needed

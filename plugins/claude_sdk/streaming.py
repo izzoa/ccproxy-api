@@ -72,7 +72,7 @@ class ClaudeStreamProcessor:
             yield chunk
 
         async for message in sdk_stream:
-            logger.debug(
+            logger.trace(
                 "sdk_message_received",
                 message_type=type(message).__name__,
                 request_id=request_id,
@@ -82,7 +82,7 @@ class ClaudeStreamProcessor:
             )
 
             if isinstance(message, sdk_models.SystemMessage):
-                logger.debug(
+                logger.trace(
                     "sdk_system_message_processing",
                     mode=sdk_message_mode.value,
                     subtype=message.subtype,
@@ -109,7 +109,7 @@ class ClaudeStreamProcessor:
                 )
                 for block in message.content:
                     if isinstance(block, sdk_models.TextBlock):
-                        logger.debug(
+                        logger.trace(
                             "sdk_text_block_processing",
                             text_length=len(block.text),
                             text_preview=block.text[:50],
@@ -325,9 +325,8 @@ class ClaudeStreamProcessor:
         # NOTE: Access logging is now handled by StreamingResponseWithLogging
         # No need for manual access logging here anymore
 
-        logger.debug(
+        logger.info(
             "streaming_complete",
-            request_id=request_id,
             plugin="claude_sdk",
-            category="streaming",
+            request_id=request_id,
         )

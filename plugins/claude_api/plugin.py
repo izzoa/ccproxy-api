@@ -95,14 +95,15 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
                 }
             )
 
-        logger.debug(
+        logger.info(
             "plugin_initialized",
+            plugin="claude_api",
+            version="1.0.0",
             status="initialized",
+            has_credentials=self.credentials_manager is not None,
             base_url=self.config.base_url,
             models_count=len(self.config.models) if self.config.models else 0,
-            has_credentials=self.credentials_manager is not None,
             has_adapter=self.adapter is not None,
-            category="plugin",
             **cli_info,
         )
 

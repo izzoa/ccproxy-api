@@ -114,8 +114,8 @@ class CodexStreamingMetricsCollector:
         if "usage" not in chunk_str:
             return False
 
-        logger.debug(
-            "codex_processing_chunk_with_usage",
+        logger.trace(
+            "processing_chunk",
             chunk_preview=chunk_str[:300],
             request_id=self.request_id,
         )
@@ -132,8 +132,8 @@ class CodexStreamingMetricsCollector:
                         # Log event type for debugging
                         event_type = event_data.get("type", "")
                         if event_type == "response.completed":
-                            logger.debug(
-                                "codex_found_completed_event",
+                            logger.trace(
+                                "completed_event_found",
                                 has_response=("response" in event_data),
                                 has_usage=("usage" in event_data.get("response", {}))
                                 if "response" in event_data
@@ -153,7 +153,8 @@ class CodexStreamingMetricsCollector:
                             )
 
                             logger.debug(
-                                "codex_extracted_tokens",
+                                "token_metrics_extracted",
+                                plugin="codex",
                                 tokens_input=self.metrics["tokens_input"],
                                 tokens_output=self.metrics["tokens_output"],
                                 total_tokens=usage_data.get("total_tokens"),
@@ -166,7 +167,8 @@ class CodexStreamingMetricsCollector:
 
         except (json.JSONDecodeError, KeyError) as e:
             logger.debug(
-                "codex_failed_to_parse_metrics",
+                "metrics_parse_failed",
+                plugin="codex",
                 error=str(e),
                 request_id=self.request_id,
             )

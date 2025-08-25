@@ -207,18 +207,17 @@ class ClaudeSDKAdapter(BaseAdapter):
             }
         )
 
-        self.logger.debug(
+        self.logger.info(
             "plugin_request",
             plugin="claude_sdk",
             endpoint=endpoint,
-            target_url=f"claude-sdk://{session_id}"
-            if session_id
-            else "claude-sdk://direct",
             model=model,
             is_streaming=stream,
             needs_conversion=needs_conversion,
             session_id=session_id,
-            category="http",
+            target_url=f"claude-sdk://{session_id}"
+            if session_id
+            else "claude-sdk://direct",
         )
 
         try:

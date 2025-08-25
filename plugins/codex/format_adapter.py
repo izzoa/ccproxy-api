@@ -107,9 +107,9 @@ class CodexFormatAdapter(APIAdapter):
         start_time = time.time()
 
         logger.info(
-            "codex_stream_processing_started",
+            "streaming_started",
+            plugin="codex",
             message_id=message_id,
-            category="streaming",
         )
 
         async for event in stream:
@@ -117,13 +117,11 @@ class CodexFormatAdapter(APIAdapter):
             event_counts[event_type] += 1
 
             # Log at TRACE level for each event
-            if hasattr(logger, "trace"):
-                logger.trace(
-                    "stream_event",
-                    event_type=event_type,
-                    message_id=message_id,
-                    category="streaming",
-                )
+            logger.trace(
+                "stream_event",
+                event_type=event_type,
+                message_id=message_id,
+            )
 
             # Send initial role chunk if not sent yet
             if not role_sent:
@@ -147,12 +145,10 @@ class CodexFormatAdapter(APIAdapter):
                 event, message_id, created
             )
             if chunk:
-                if hasattr(logger, "trace"):
-                    logger.trace(
-                        "yielding_chat_chunk",
-                        message_id=message_id,
-                        category="streaming",
-                    )
+                logger.trace(
+                    "yielding_chat_chunk",
+                    message_id=message_id,
+                )
                 yield chunk
 
         # Log streaming summary
@@ -161,8 +157,7 @@ class CodexFormatAdapter(APIAdapter):
             "streaming_complete",
             plugin="codex",
             message_id=message_id,
-            category="streaming",
-            duration_seconds=round(duration, 2),
+            duration_ms=round(duration * 1000, 2),
             event_summary=dict(event_counts),
             total_events=sum(event_counts.values()),
         )

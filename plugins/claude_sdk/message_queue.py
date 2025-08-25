@@ -150,7 +150,7 @@ class MessageQueue:
             listener = QueueListener(listener_id)
             self._listeners[listener.listener_id] = listener
 
-            logger.debug(
+            logger.trace(
                 "message_queue_listener_added",
                 listener_id=listener.listener_id,
                 active_listeners=len(self._listeners),
@@ -169,7 +169,7 @@ class MessageQueue:
                 listener = self._listeners.pop(listener_id)
                 listener.close()
 
-                logger.debug(
+                logger.trace(
                     "message_queue_listener_removed",
                     listener_id=listener_id,
                     active_listeners=len(self._listeners),
@@ -242,7 +242,7 @@ class MessageQueue:
             if delivered_count == 0:
                 self._total_messages_discarded += 1
 
-            logger.debug(
+            logger.trace(
                 "message_queue_broadcast",
                 listeners_count=len(self._listeners),
                 delivered_count=delivered_count,
@@ -265,7 +265,7 @@ class MessageQueue:
                     with contextlib.suppress(asyncio.QueueFull):
                         listener._queue.put_nowait(queue_msg)
 
-            logger.debug(
+            logger.trace(
                 "message_queue_broadcast_error",
                 error_type=type(error).__name__,
                 listeners_count=len(self._listeners),
@@ -281,7 +281,7 @@ class MessageQueue:
                     with contextlib.suppress(asyncio.QueueFull):
                         listener._queue.put_nowait(queue_msg)
 
-            logger.debug(
+            logger.trace(
                 "message_queue_broadcast_complete",
                 listeners_count=len(self._listeners),
             )
@@ -296,7 +296,7 @@ class MessageQueue:
                     with contextlib.suppress(asyncio.QueueFull):
                         listener._queue.put_nowait(queue_msg)
 
-            logger.debug(
+            logger.trace(
                 "message_queue_broadcast_shutdown",
                 listeners_count=len(self._listeners),
                 message="Shutdown signal sent to all listeners due to interrupt",
