@@ -1,3 +1,18 @@
+# Logging configuration (centralized)
+[logging]
+level = "INFO"
+format = "auto"
+file = "/tmp/ccproxy/ccproxy.log"
+verbose_api = false
+enable_plugin_logging = true
+plugin_log_base_dir = "/tmp/ccproxy"
+
+# Per-plugin logging overrides
+[logging.plugin_overrides]
+raw_http_logger = true
+pricing = true
+permissions = true
+
 # Raw HTTP Logger plugin configuration
 [plugins.raw_http_logger]
 enabled = true

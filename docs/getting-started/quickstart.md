@@ -94,7 +94,7 @@ ccproxy serve --reload
 ccproxy serve --log-level debug
 
 # With verbose API logging
-CCPROXY_VERBOSE_API=true ccproxy serve
+LOGGING__VERBOSE_API=true ccproxy serve
 ```
 
 The server will start at `http://127.0.0.1:8000`
@@ -204,8 +204,8 @@ curl http://localhost:8000/metrics
 ### Enable Debug Logging
 ```bash
 # Verbose API request/response logging
-CCPROXY_VERBOSE_API=true \
-CCPROXY_REQUEST_LOG_DIR=/tmp/ccproxy/request \
+LOGGING__VERBOSE_API=true \
+LOGGING__REQUEST_LOG_DIR=/tmp/ccproxy/request \
 ccproxy serve --log-level debug
 
 # View last request

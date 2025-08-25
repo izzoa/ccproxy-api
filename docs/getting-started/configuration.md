@@ -83,9 +83,9 @@ All formats use the same configured `SECURITY__AUTH_TOKEN` value.
 |----------|-------------|---------|
 | `CONFIG_FILE` | Path to custom TOML config | `CONFIG_FILE=/etc/ccproxy/config.toml` |
 | `CCPROXY_CONFIG_OVERRIDES` | JSON config overrides | `CCPROXY_CONFIG_OVERRIDES='{"server":{"port":9000}}'` |
-| `CCPROXY_VERBOSE_API` | Verbose API logging | `CCPROXY_VERBOSE_API=true` |
+| `LOGGING__VERBOSE_API` | Verbose API logging | `LOGGING__VERBOSE_API=true` |
 | `CCPROXY_VERBOSE_STREAMING` | Verbose streaming logs | `CCPROXY_VERBOSE_STREAMING=true` |
-| `CCPROXY_REQUEST_LOG_DIR` | Request/response log directory | `CCPROXY_REQUEST_LOG_DIR=/tmp/logs` |
+| `LOGGING__REQUEST_LOG_DIR` | Request/response log directory | `LOGGING__REQUEST_LOG_DIR=/tmp/logs` |
 | `CCPROXY_JSON_LOGS` | Force JSON logging | `CCPROXY_JSON_LOGS=true` |
 | `CCPROXY_TEST_MODE` | Enable test mode | `CCPROXY_TEST_MODE=true` |
 
@@ -611,7 +611,7 @@ LOGGING__PIPELINE_ENABLED=false
 
 # Special environment variables
 CONFIG_FILE=/etc/ccproxy/config.toml
-CCPROXY_VERBOSE_API=false
+LOGGING__VERBOSE_API=false
 CCPROXY_JSON_LOGS=true
 ```
 

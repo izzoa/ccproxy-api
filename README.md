@@ -216,10 +216,10 @@ CCProxy can be configured through:
 
 ```bash
 # Enable verbose API logging
-CCPROXY_VERBOSE_API=true
+LOGGING__VERBOSE_API=true
 
 # Set request logging directory
-CCPROXY_REQUEST_LOG_DIR=/tmp/ccproxy/request
+LOGGING__REQUEST_LOG_DIR=/tmp/ccproxy/request
 
 # Enable raw HTTP logging
 PLUGINS__RAWHTTPLOGGERCONFIG__ENABLED=true

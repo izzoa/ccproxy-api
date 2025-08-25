@@ -190,5 +190,5 @@ class RequestTransformer:
 
 ### Environment Variables
 * Config: `LOGGING__LEVEL=debug`
-* Features: `CCPROXY_VERBOSE_API=true`
-* Logging: `CCPROXY_REQUEST_LOG_DIR=/tmp/ccproxy/request`
+* Logging: `LOGGING__VERBOSE_API=true`
+* Request logging: `LOGGING__REQUEST_LOG_DIR=/tmp/ccproxy/request`

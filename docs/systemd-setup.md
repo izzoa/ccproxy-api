@@ -108,7 +108,7 @@ Environment="SECURITY__AUTH_TOKEN=your-secure-token"
 
 # Special environment variables
 Environment="CONFIG_FILE=/etc/ccproxy/config.toml"
-Environment="CCPROXY_VERBOSE_API=true"
+Environment="LOGGING__VERBOSE_API=true"
 Environment="CCPROXY_JSON_LOGS=true"
 
 # Scheduler and pricing
