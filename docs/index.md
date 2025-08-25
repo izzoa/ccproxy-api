@@ -152,7 +152,7 @@ Logs raw HTTP requests and responses for debugging (configurable via environment
 
 CCProxy can be configured through:
 1. Command-line arguments
-2. Environment variables (use `__` for nesting, e.g., `SERVER__LOG_LEVEL=debug`)
+2. Environment variables (use `__` for nesting, e.g., `LOGGING__LEVEL=debug`)
 3. TOML configuration files (`.ccproxy.toml`, `ccproxy.toml`)
 
 ## Next Steps

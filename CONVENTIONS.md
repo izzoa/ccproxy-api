@@ -109,7 +109,7 @@ class ProviderAdapter(BaseAdapter):
 ## 10. Configuration
 
 * **Pydantic Settings:** All config in `config/settings.py`
-* **Environment Variables:** Use `__` for nesting (e.g., `SERVER__LOG_LEVEL`)
+* **Environment Variables:** Use `__` for nesting (e.g., `LOGGING__LEVEL`)
 * **Priority:** CLI args → Environment → TOML files → Defaults
 
 ## 11. Security
@@ -189,6 +189,6 @@ class RequestTransformer:
 ```
 
 ### Environment Variables
-* Config: `SERVER__LOG_LEVEL=debug`
+* Config: `LOGGING__LEVEL=debug`
 * Features: `CCPROXY_VERBOSE_API=true`
 * Logging: `CCPROXY_REQUEST_LOG_DIR=/tmp/ccproxy/request`
