@@ -1,6 +1,5 @@
 """Shared cost calculation helper for pricing service integration."""
 
-
 from typing import Any
 
 
