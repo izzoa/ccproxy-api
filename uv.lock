@@ -4,11 +4,14 @@ requires-python = ">=3.11"
 
 [manifest]
 members = [
+    "ccproxy-access-log",
     "ccproxy-api",
     "ccproxy-claude-api",
     "ccproxy-claude-sdk",
     "ccproxy-codex",
     "ccproxy-permissions",
+    "ccproxy-pricing",
+    "ccproxy-request-tracer",
 ]
 
 [[package]]
@@ -249,12 +252,23 @@ wheels = [
 ]
 
 [[package]]
+name = "ccproxy-access-log"
+version = "1.0.0"
+source = { editable = "plugins/access_log" }
+
+[[package]]
 name = "ccproxy-api"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "aiosqlite" },
+    { name = "ccproxy-access-log" },
+    { name = "ccproxy-claude-api" },
+    { name = "ccproxy-claude-sdk" },
+    { name = "ccproxy-codex" },
+    { name = "ccproxy-pricing" },
+    { name = "ccproxy-request-tracer" },
     { name = "duckdb" },
     { name = "duckdb-engine" },
     { name = "fastapi", extra = ["standard"] },
@@ -326,6 +340,12 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0" },
     { name = "aiohttp", specifier = ">=3.12.15" },
     { name = "aiosqlite", specifier = ">=0.21.0" },
+    { name = "ccproxy-access-log", editable = "plugins/access_log" },
+    { name = "ccproxy-claude-api", editable = "plugins/claude_api" },
+    { name = "ccproxy-claude-sdk", editable = "plugins/claude_sdk" },
+    { name = "ccproxy-codex", editable = "plugins/codex" },
+    { name = "ccproxy-pricing", editable = "plugins/pricing" },
+    { name = "ccproxy-request-tracer", editable = "plugins/request_tracer" },
     { name = "duckdb", specifier = ">=1.1.0" },
     { name = "duckdb-engine", specifier = ">=0.17.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.14" },
@@ -437,6 +457,42 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "fastapi-mcp", specifier = ">=0.3.7" }]
+
+[[package]]
+name = "ccproxy-pricing"
+version = "1.0.0"
+source = { editable = "plugins/pricing" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.25.0" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "structlog", specifier = ">=23.0" },
+]
+
+[[package]]
+name = "ccproxy-request-tracer"
+version = "2.0.0"
+source = { editable = "plugins/request_tracer" }
+dependencies = [
+    { name = "aiofiles" },
+    { name = "httpx" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiofiles" },
+    { name = "httpx" },
+    { name = "structlog" },
+]
 
 [[package]]
 name = "certifi"

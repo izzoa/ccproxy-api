@@ -1,14 +1,22 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
-name = "ccproxy-pricing-plugin"
+name = "ccproxy-pricing"
 version = "1.0.0"
 description = "Dynamic pricing plugin for CCProxy"
+readme = "README.md"
+requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "structlog>=23.0",
     "httpx>=0.25.0",
 ]
+
+[project.entry-points."ccproxy.plugins"]
+pricing = "plugins.pricing.plugin:factory"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
