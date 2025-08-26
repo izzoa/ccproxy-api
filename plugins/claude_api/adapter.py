@@ -347,6 +347,10 @@ class ClaudeAPIAdapter(BaseAdapter):
             request_context=request_context,  # Pass the actual RequestContext object
         )
 
+        # For non-streaming responses, calculate cost based on usage already extracted in processor
+        if not is_streaming and request_context:
+            await self._calculate_cost_for_usage(request_context)
+
         # For deferred streaming responses, return directly (metrics collector already has cost calculation)
         if isinstance(response, DeferredStreaming):
             return response
@@ -355,131 +359,89 @@ class ClaudeAPIAdapter(BaseAdapter):
         if is_streaming and isinstance(response, StreamingResponse):
             return await self._wrap_streaming_response(response, request_context)
 
-        # For non-streaming responses, extract usage data if available
-        if not is_streaming and hasattr(response, "body"):
-            # Get response body (might be bytes or memoryview)
-            response_body = response.body
-            if isinstance(response_body, memoryview):
-                response_body = bytes(response_body)
-            await self._extract_usage_from_response(response_body, request_context)
-
         return response
 
-    async def _extract_usage_from_response(
-        self, body: bytes | str, request_context: "RequestContext"
+    async def _calculate_cost_for_usage(
+        self, request_context: "RequestContext"
     ) -> None:
-        """Extract usage data from response body and update context.
-
-        Common function used by both streaming and non-streaming responses.
+        """Calculate cost for usage data already extracted in processor.
 
         Args:
-            body: Response body (bytes or string)
-            request_context: Request context to update with usage data
+            request_context: Request context with usage data from processor
         """
+        # Check if we have usage data from the processor
+        metadata = request_context.metadata
+        tokens_input = metadata.get("tokens_input", 0)
+        tokens_output = metadata.get("tokens_output", 0)
+
+        # Skip if no usage data available
+        if not (tokens_input or tokens_output):
+            return
+
+        # Get pricing service and calculate cost
+        pricing_service = self._get_pricing_service()
+        if not pricing_service:
+            return
+
         try:
-            import json
+            model = metadata.get("model", "claude-3-5-sonnet-20241022")
+            cache_read_tokens = metadata.get("cache_read_tokens", 0)
+            cache_write_tokens = metadata.get("cache_write_tokens", 0)
 
-            # Convert body to string if needed
-            body_str = body
-            if isinstance(body_str, bytes):
-                body_str = body_str.decode("utf-8")
-
-            # Parse response to extract usage
-            response_data = json.loads(body_str)
-            usage = response_data.get("usage", {})
-
-            if not usage:
-                return
-
-            # Extract Claude-specific usage fields
-            tokens_input = usage.get("input_tokens", 0)
-            tokens_output = usage.get("output_tokens", 0)
-            cache_read_tokens = usage.get("cache_read_input_tokens", 0)
-            cache_write_tokens = usage.get("cache_creation_input_tokens", 0)
-
-            # Calculate cost using pricing service if available
-            cost_usd = None
-            pricing_service = self._get_pricing_service()
-            self.logger.debug(
-                "pricing_service_check",
-                has_pricing_service=pricing_service is not None,
-                source="non_streaming",
-            )
-            if pricing_service:
-                try:
-                    model = request_context.metadata.get(
-                        "model", "claude-3-5-sonnet-20241022"
-                    )
-                    # Import pricing exceptions
-                    from plugins.pricing.exceptions import (
-                        ModelPricingNotFoundError,
-                        PricingDataNotLoadedError,
-                        PricingServiceDisabledError,
-                    )
-
-                    cost_decimal = await pricing_service.calculate_cost(
-                        model_name=model,
-                        input_tokens=tokens_input,
-                        output_tokens=tokens_output,
-                        cache_read_tokens=cache_read_tokens,
-                        cache_write_tokens=cache_write_tokens,
-                    )
-                    cost_usd = float(cost_decimal)
-                    self.logger.debug(
-                        "cost_calculated",
-                        model=model,
-                        cost_usd=cost_usd,
-                        tokens_input=tokens_input,
-                        tokens_output=tokens_output,
-                    )
-                except ModelPricingNotFoundError as e:
-                    self.logger.warning(
-                        "model_pricing_not_found",
-                        model=model,
-                        message=str(e),
-                        tokens_input=tokens_input,
-                        tokens_output=tokens_output,
-                    )
-                except PricingDataNotLoadedError as e:
-                    self.logger.warning(
-                        "pricing_data_not_loaded",
-                        model=model,
-                        message=str(e),
-                    )
-                except PricingServiceDisabledError as e:
-                    self.logger.debug(
-                        "pricing_service_disabled",
-                        message=str(e),
-                    )
-                except Exception as e:
-                    self.logger.debug(
-                        "cost_calculation_failed", error=str(e), model=model
-                    )
-
-            # Update request context with usage data
-            request_context.metadata.update(
-                {
-                    "tokens_input": tokens_input,
-                    "tokens_output": tokens_output,
-                    "tokens_total": tokens_input + tokens_output,
-                    "cache_read_tokens": cache_read_tokens,
-                    "cache_write_tokens": cache_write_tokens,
-                    "cost_usd": cost_usd or 0.0,
-                }
+            # Import pricing exceptions
+            from plugins.pricing.exceptions import (
+                ModelPricingNotFoundError,
+                PricingDataNotLoadedError,
+                PricingServiceDisabledError,
             )
 
+            cost_decimal = await pricing_service.calculate_cost(
+                model_name=model,
+                input_tokens=tokens_input,
+                output_tokens=tokens_output,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+            )
+            cost_usd = float(cost_decimal)
+
+            # Update context with calculated cost
+            metadata["cost_usd"] = cost_usd
+
             self.logger.debug(
-                "usage_extracted",
+                "cost_calculated",
+                model=model,
+                cost_usd=cost_usd,
                 tokens_input=tokens_input,
                 tokens_output=tokens_output,
                 cache_read_tokens=cache_read_tokens,
                 cache_write_tokens=cache_write_tokens,
-                cost_usd=cost_usd,
-                source="response_body",
+                source="non_streaming",
             )
-
+        except ModelPricingNotFoundError as e:
+            self.logger.warning(
+                "model_pricing_not_found",
+                model=model,
+                message=str(e),
+                tokens_input=tokens_input,
+                tokens_output=tokens_output,
+            )
+        except PricingDataNotLoadedError as e:
+            self.logger.warning(
+                "pricing_data_not_loaded",
+                model=model,
+                message=str(e),
+            )
+        except PricingServiceDisabledError as e:
+            self.logger.debug(
+                "pricing_service_disabled",
+                message=str(e),
+            )
         except Exception as e:
-            self.logger.debug("usage_extraction_failed", error=str(e))
+            self.logger.debug(
+                "cost_calculation_failed",
+                error=str(e),
+                model=metadata.get("model"),
+            )
 
     async def _wrap_streaming_response(
         self, response: StreamingResponse, request_context: "RequestContext"
@@ -638,7 +600,9 @@ class ClaudeAPIAdapter(BaseAdapter):
                                         model=model,
                                         message=str(e),
                                         tokens_input=usage_metrics.get("tokens_input"),
-                                        tokens_output=usage_metrics.get("tokens_output"),
+                                        tokens_output=usage_metrics.get(
+                                            "tokens_output"
+                                        ),
                                         category="pricing",
                                     )
                                 except PricingDataNotLoadedError as e:
