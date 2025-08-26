@@ -260,6 +260,7 @@ class CodexFactory(ProviderPluginFactory):
             detection_service=detection_service,
             http_client=http_client,
             logger=logger_instance,
+            context=context,  # Pass the context for plugin_registry access
         )
 
     def create_detection_service(self, context: PluginContext) -> CodexDetectionService:
