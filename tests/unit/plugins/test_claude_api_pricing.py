@@ -15,6 +15,7 @@ def mock_pricing_service():
     """Create a mock pricing service."""
     service = AsyncMock(spec=PricingService)
     service.calculate_cost = AsyncMock(return_value=0.0105)
+    service.calculate_cost_sync = Mock(return_value=0.0105)
     return service
 
 
@@ -126,8 +127,8 @@ class TestClaudeAPIPricingIntegration:
         # Calculate cost with pricing service
         await adapter_with_pricing._calculate_cost_for_usage(request_context)
 
-        # Verify pricing service was called
-        mock_pricing_service.calculate_cost.assert_called_once_with(
+        # Verify pricing service was called with calculate_cost_sync
+        mock_pricing_service.calculate_cost_sync.assert_called_once_with(
             model_name="claude-3-5-sonnet-20241022",
             input_tokens=1000,
             output_tokens=500,

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ccproxy.adapters.base import APIAdapter
+from ccproxy.services.http.interfaces import UpstreamResponseExtractor
 
 
 if TYPE_CHECKING:
@@ -50,3 +51,6 @@ class HandlerConfig:
 
     # Streaming metrics collection (provider-specific)
     metrics_collector: "IStreamingMetricsCollector | None" = None
+
+    # Upstream response extraction (provider-specific)
+    upstream_response_extractor: UpstreamResponseExtractor | None = None

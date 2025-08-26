@@ -24,6 +24,7 @@ from ccproxy.services.http.plugin_handler import PluginHTTPHandler
 from ccproxy.streaming.deferred_streaming import DeferredStreaming
 
 from .transformers import ClaudeAPIRequestTransformer, ClaudeAPIResponseTransformer
+from .upstream_extractor import ClaudeUpstreamExtractor
 
 
 logger = get_plugin_logger()
@@ -111,6 +112,9 @@ class ClaudeAPIAdapter(BaseAdapter):
         self._response_transformer: ClaudeAPIResponseTransformer | None = (
             ClaudeAPIResponseTransformer(cors_settings)
         )
+
+        # Initialize upstream extractor
+        self.upstream_extractor = ClaudeUpstreamExtractor()
 
     def _get_pricing_service(self) -> Any | None:
         """Get pricing service from plugin registry if available."""
@@ -252,6 +256,7 @@ class ClaudeAPIAdapter(BaseAdapter):
             response_transformer=self._response_transformer,
             supports_streaming=True,
             metrics_collector=metrics_collector,
+            upstream_response_extractor=self.upstream_extractor,
         )
 
     async def _execute_request(
@@ -383,27 +388,25 @@ class ClaudeAPIAdapter(BaseAdapter):
         if not pricing_service:
             return
 
-        try:
-            model = metadata.get("model", "claude-3-5-sonnet-20241022")
-            cache_read_tokens = metadata.get("cache_read_tokens", 0)
-            cache_write_tokens = metadata.get("cache_write_tokens", 0)
+        model = metadata.get("model", "claude-3-5-sonnet-20241022")
+        cache_read_tokens = metadata.get("cache_read_tokens", 0)
+        cache_write_tokens = metadata.get("cache_write_tokens", 0)
 
-            # Import pricing exceptions
-            from plugins.pricing.exceptions import (
-                ModelPricingNotFoundError,
-                PricingDataNotLoadedError,
-                PricingServiceDisabledError,
-            )
+        from plugins.pricing.helper import safe_calculate_cost
 
-            cost_decimal = await pricing_service.calculate_cost(
-                model_name=model,
-                input_tokens=tokens_input,
-                output_tokens=tokens_output,
-                cache_read_tokens=cache_read_tokens,
-                cache_write_tokens=cache_write_tokens,
-            )
-            cost_usd = float(cost_decimal)
+        # Use sync version since we're in async method but helper uses sync internally
+        cost_usd = safe_calculate_cost(
+            pricing_service=pricing_service,
+            model=model,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            logger=self.logger,
+            log_ctx={"plugin": "claude_api", "source": "non_streaming"},
+        )
 
+        if cost_usd is not None:
             # Update context with calculated cost
             metadata["cost_usd"] = cost_usd
 
@@ -416,31 +419,6 @@ class ClaudeAPIAdapter(BaseAdapter):
                 cache_read_tokens=cache_read_tokens,
                 cache_write_tokens=cache_write_tokens,
                 source="non_streaming",
-            )
-        except ModelPricingNotFoundError as e:
-            self.logger.warning(
-                "model_pricing_not_found",
-                model=model,
-                message=str(e),
-                tokens_input=tokens_input,
-                tokens_output=tokens_output,
-            )
-        except PricingDataNotLoadedError as e:
-            self.logger.warning(
-                "pricing_data_not_loaded",
-                model=model,
-                message=str(e),
-            )
-        except PricingServiceDisabledError as e:
-            self.logger.debug(
-                "pricing_service_disabled",
-                message=str(e),
-            )
-        except Exception as e:
-            self.logger.debug(
-                "cost_calculation_failed",
-                error=str(e),
-                model=metadata.get("model"),
             )
 
     async def _wrap_streaming_response(

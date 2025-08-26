@@ -9,7 +9,7 @@ from typing import Any
 
 import structlog
 
-from ccproxy.streaming.interfaces import StreamingMetrics
+from plugins.common.streaming_base import BaseStreamingMetricsCollector
 
 
 logger = structlog.get_logger(__name__)
@@ -96,7 +96,7 @@ def extract_usage_from_codex_chunk(chunk_data: Any) -> dict[str, Any] | None:
     return None
 
 
-class CodexStreamingMetricsCollector:
+class CodexStreamingMetricsCollector(BaseStreamingMetricsCollector):
     """Collects and manages token metrics during Codex streaming responses.
 
     Implements IStreamingMetricsCollector interface for Codex/OpenAI.
@@ -115,17 +115,8 @@ class CodexStreamingMetricsCollector:
             pricing_service: Optional pricing service for cost calculation
             model: Optional model name for cost calculation (can also be extracted from chunks)
         """
-        self.request_id = request_id
-        self.pricing_service = pricing_service
-        self.model = model
+        super().__init__(request_id, pricing_service, model)
         self.reasoning_tokens: int | None = None  # Store reasoning tokens separately
-        self.metrics: StreamingMetrics = {
-            "tokens_input": None,
-            "tokens_output": None,
-            "cache_read_tokens": None,  # OpenAI might support in the future
-            "cache_write_tokens": None,
-            "cost_usd": None,
-        }
 
     def process_raw_chunk(self, chunk_str: str) -> bool:
         """Process raw Codex format chunk before any conversion.
@@ -144,14 +135,11 @@ class CodexStreamingMetricsCollector:
         # For now, delegate to main process_chunk which handles both
         return self.process_chunk(chunk_str)
 
-    def process_chunk(self, chunk_str: str) -> bool:
-        """Process a streaming chunk to extract OpenAI/Codex token metrics.
-
-        Args:
-            chunk_str: Raw chunk string from streaming response
+    def _extract_tokens_from_chunk(self, chunk_str: str) -> bool:
+        """Codex-specific chunk parsing logic.
 
         Returns:
-            True if this was the final chunk with complete metrics, False otherwise
+            True if this was the final chunk with complete metrics
         """
         # Check if this chunk contains usage information
         if "usage" not in chunk_str:
@@ -211,77 +199,6 @@ class CodexStreamingMetricsCollector:
                                     request_id=self.request_id,
                                 )
 
-                            # Calculate cost synchronously when we have complete metrics
-                            if self.pricing_service:
-                                if self.model:
-                                    try:
-                                        # Import pricing exceptions
-                                        from plugins.pricing.exceptions import (
-                                            ModelPricingNotFoundError,
-                                            PricingDataNotLoadedError,
-                                            PricingServiceDisabledError,
-                                        )
-
-                                        cost_decimal = self.pricing_service.calculate_cost_sync(
-                                            model_name=self.model,
-                                            input_tokens=self.metrics["tokens_input"]
-                                            or 0,
-                                            output_tokens=self.metrics["tokens_output"]
-                                            or 0,
-                                            cache_read_tokens=self.metrics[
-                                                "cache_read_tokens"
-                                            ]
-                                            or 0,
-                                            cache_write_tokens=0,  # OpenAI doesn't have cache write
-                                        )
-                                        self.metrics["cost_usd"] = float(cost_decimal)
-                                        logger.debug(
-                                            "streaming_cost_calculated",
-                                            model=self.model,
-                                            cost_usd=self.metrics["cost_usd"],
-                                            tokens_input=self.metrics["tokens_input"],
-                                            tokens_output=self.metrics["tokens_output"],
-                                            request_id=self.request_id,
-                                        )
-                                    except ModelPricingNotFoundError as e:
-                                        logger.warning(
-                                            "model_pricing_not_found",
-                                            model=self.model,
-                                            message=str(e),
-                                            tokens_input=self.metrics["tokens_input"],
-                                            tokens_output=self.metrics["tokens_output"],
-                                            request_id=self.request_id,
-                                        )
-                                    except PricingDataNotLoadedError as e:
-                                        logger.warning(
-                                            "pricing_data_not_loaded",
-                                            model=self.model,
-                                            message=str(e),
-                                            request_id=self.request_id,
-                                        )
-                                    except PricingServiceDisabledError as e:
-                                        logger.debug(
-                                            "pricing_service_disabled",
-                                            message=str(e),
-                                            request_id=self.request_id,
-                                        )
-                                    except Exception as e:
-                                        logger.debug(
-                                            "streaming_cost_calculation_failed",
-                                            error=str(e),
-                                            model=self.model,
-                                            request_id=self.request_id,
-                                        )
-                                else:
-                                    logger.warning(
-                                        "streaming_cost_calculation_skipped_no_model",
-                                        plugin="codex",
-                                        request_id=self.request_id,
-                                        tokens_input=self.metrics["tokens_input"],
-                                        tokens_output=self.metrics["tokens_output"],
-                                        message="Model not found in streaming response, cannot calculate cost",
-                                    )
-
                             logger.debug(
                                 "token_metrics_extracted",
                                 plugin="codex",
@@ -291,7 +208,6 @@ class CodexStreamingMetricsCollector:
                                 reasoning_tokens=self.reasoning_tokens,
                                 total_tokens=usage_data.get("total_tokens"),
                                 event_type=usage_data.get("event_type"),
-                                cost_usd=self.metrics.get("cost_usd"),
                                 request_id=self.request_id,
                             )
                             return True  # This is the final event with complete metrics
@@ -307,14 +223,6 @@ class CodexStreamingMetricsCollector:
             )
 
         return False
-
-    def get_metrics(self) -> StreamingMetrics:
-        """Get the current collected metrics.
-
-        Returns:
-            Current token metrics
-        """
-        return self.metrics.copy()
 
     def get_reasoning_tokens(self) -> int | None:
         """Get reasoning tokens if available (for o1 models).

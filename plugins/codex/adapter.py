@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 from .format_adapter import CodexFormatAdapter
 from .transformers import CodexRequestTransformer, CodexResponseTransformer
+from .upstream_extractor import CodexUpstreamExtractor
 
 
 logger = get_plugin_logger()
@@ -67,6 +68,7 @@ class CodexAdapter(BaseAdapter):
 
         # Initialize components
         self.format_adapter = CodexFormatAdapter()
+        self.upstream_extractor = CodexUpstreamExtractor()
 
         # Initialize HTTP handler and transformers
         self._http_handler: PluginHTTPHandler | None = None
@@ -202,6 +204,7 @@ class CodexAdapter(BaseAdapter):
             response_transformer=self.response_transformer,
             supports_streaming=True,
             metrics_collector=metrics_collector,
+            upstream_response_extractor=self.upstream_extractor,
         )
 
         # Prepare request using HTTP handler
@@ -297,7 +300,7 @@ class CodexAdapter(BaseAdapter):
             response_body = response.body
             if isinstance(response_body, memoryview):
                 response_body = bytes(response_body)
-            await self._extract_usage_from_response(response_body, request_context)
+            await self._calculate_cost_for_usage(request_context)
 
         return response
 
@@ -352,137 +355,57 @@ class CodexAdapter(BaseAdapter):
 
         return result
 
-    async def _extract_usage_from_response(
-        self, body: bytes | str, request_context: "RequestContext"
+    async def _calculate_cost_for_usage(
+        self, request_context: "RequestContext"
     ) -> None:
-        """Extract usage data from response body and update context.
-
-        Common function used by both streaming and non-streaming responses.
+        """Calculate cost for usage data already extracted by upstream extractor.
 
         Args:
-            body: Response body (bytes or string)
-            request_context: Request context to update with usage data
+            request_context: Request context with usage data from upstream extractor
         """
-        try:
-            import json
+        # Check if we have usage data from the upstream extractor
+        metadata = request_context.metadata
+        tokens_input = metadata.get("tokens_input", 0)
+        tokens_output = metadata.get("tokens_output", 0)
 
-            # Convert body to string if needed
-            body_str = body
-            if isinstance(body_str, bytes):
-                body_str = body_str.decode("utf-8")
+        # Skip if no usage data available
+        if not (tokens_input or tokens_output):
+            return
 
-            # Parse response to extract usage
-            response_data = json.loads(body_str)
-            usage = response_data.get("usage", {})
+        # Get pricing service and calculate cost
+        pricing_service = self._get_pricing_service()
+        if not pricing_service:
+            return
 
-            if not usage:
-                return
+        model = metadata.get("model", "gpt-3.5-turbo")
+        cache_read_tokens = metadata.get("cache_read_tokens", 0)
 
-            # Extract OpenAI-specific usage fields
-            # OpenAI uses prompt_tokens and completion_tokens
-            tokens_input = usage.get("prompt_tokens", 0) or usage.get("input_tokens", 0)
-            tokens_output = usage.get("completion_tokens", 0) or usage.get(
-                "output_tokens", 0
-            )
+        from plugins.pricing.helper import safe_calculate_cost
 
-            # Check for cached tokens in input_tokens_details
-            cache_read_tokens = 0
-            if "input_tokens_details" in usage:
-                cache_read_tokens = usage["input_tokens_details"].get(
-                    "cached_tokens", 0
-                )
+        cost_usd = safe_calculate_cost(
+            pricing_service=pricing_service,
+            model=model,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=0,  # OpenAI doesn't have cache write
+            logger=self.logger,
+            log_ctx={"plugin": "codex", "source": "non_streaming"},
+        )
 
-            # Check for reasoning tokens in output_tokens_details
-            reasoning_tokens = 0
-            if "output_tokens_details" in usage:
-                reasoning_tokens = usage["output_tokens_details"].get(
-                    "reasoning_tokens", 0
-                )
-
-            # Calculate cost using pricing service if available
-            cost_usd = None
-            pricing_service = self._get_pricing_service()
-            self.logger.debug(
-                "pricing_service_check",
-                has_pricing_service=pricing_service is not None,
-                source="non_streaming",
-            )
-            if pricing_service:
-                try:
-                    model = request_context.metadata.get(
-                        "model", response_data.get("model", "gpt-3.5-turbo")
-                    )
-                    # Import pricing exceptions
-                    from plugins.pricing.exceptions import (
-                        ModelPricingNotFoundError,
-                        PricingDataNotLoadedError,
-                        PricingServiceDisabledError,
-                    )
-
-                    cost_decimal = await pricing_service.calculate_cost(
-                        model_name=model,
-                        input_tokens=tokens_input,
-                        output_tokens=tokens_output,
-                        cache_read_tokens=cache_read_tokens,
-                        cache_write_tokens=0,  # OpenAI doesn't have cache write tokens
-                    )
-                    cost_usd = float(cost_decimal)
-                    self.logger.debug(
-                        "cost_calculated",
-                        model=model,
-                        cost_usd=cost_usd,
-                        tokens_input=tokens_input,
-                        tokens_output=tokens_output,
-                    )
-                except ModelPricingNotFoundError as e:
-                    self.logger.warning(
-                        "model_pricing_not_found",
-                        model=model,
-                        message=str(e),
-                        tokens_input=tokens_input,
-                        tokens_output=tokens_output,
-                    )
-                except PricingDataNotLoadedError as e:
-                    self.logger.warning(
-                        "pricing_data_not_loaded",
-                        model=model,
-                        message=str(e),
-                    )
-                except PricingServiceDisabledError as e:
-                    self.logger.debug(
-                        "pricing_service_disabled",
-                        message=str(e),
-                    )
-                except Exception as e:
-                    self.logger.debug(
-                        "cost_calculation_failed", error=str(e), model=model
-                    )
-
-            # Update request context with usage data
-            request_context.metadata.update(
-                {
-                    "tokens_input": tokens_input,
-                    "tokens_output": tokens_output,
-                    "tokens_total": tokens_input + tokens_output,
-                    "cache_read_tokens": cache_read_tokens,
-                    "cache_write_tokens": 0,  # OpenAI doesn't have cache write tokens
-                    "reasoning_tokens": reasoning_tokens,
-                    "cost_usd": cost_usd or 0.0,
-                }
-            )
+        if cost_usd is not None:
+            # Update context with calculated cost
+            metadata["cost_usd"] = cost_usd
 
             self.logger.debug(
-                "usage_extracted",
+                "cost_calculated",
+                model=model,
+                cost_usd=cost_usd,
                 tokens_input=tokens_input,
                 tokens_output=tokens_output,
                 cache_read_tokens=cache_read_tokens,
-                reasoning_tokens=reasoning_tokens,
-                cost_usd=cost_usd,
-                source="response_body",
+                source="non_streaming",
             )
-
-        except Exception as e:
-            self.logger.debug("usage_extraction_failed", error=str(e))
 
     async def _wrap_streaming_response(
         self, response: StreamingResponse, request_context: "RequestContext"
