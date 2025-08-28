@@ -1,27 +1,26 @@
-"""Stream handle for managing worker lifecycle and providing listeners."""
+"""Simplified stream handle for managing streaming without complex worker architecture."""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Set
 
-from ccproxy.core.async_task_manager import create_managed_task
 from ccproxy.core.logging import get_plugin_logger
 
 from .config import SessionPoolSettings
-from .message_queue import QueueListener
 from .session_client import SessionClient
-from .stream_worker import StreamWorker, WorkerStatus
 
 
 logger = get_plugin_logger()
 
 
 class StreamHandle:
-    """Handle for a streaming response that manages worker and listeners."""
+    """Simplified streaming handle with direct queue management."""
 
     def __init__(
         self,
@@ -31,45 +30,33 @@ class StreamHandle:
         session_client: SessionClient | None = None,
         session_config: SessionPoolSettings | None = None,
     ):
-        """Initialize the stream handle.
+        """Initialize stream handle.
 
         Args:
-            message_iterator: The SDK message iterator
+            message_iterator: Iterator from Claude SDK
             session_id: Optional session ID
             request_id: Optional request ID
             session_client: Optional session client
             session_config: Optional session pool configuration
         """
         self.handle_id = str(uuid.uuid4())
-        self._message_iterator = message_iterator
+        self.sdk_iterator = message_iterator
         self.session_id = session_id
         self.request_id = request_id
         self._session_client = session_client
+        self._session_config = session_config
 
         # Timeout configuration
-        self._session_config = session_config
-        self._first_chunk_timeout = (
-            session_config.stream_first_chunk_timeout if session_config else 3.0
-        )
-        self._ongoing_timeout = (
-            session_config.stream_ongoing_timeout if session_config else 60.0
-        )
         self._interrupt_timeout = (
             session_config.stream_interrupt_timeout if session_config else 10.0
         )
 
-        # Worker management
-        self._worker: StreamWorker | None = None
-        self._worker_lock = asyncio.Lock()
-        self._listeners: dict[str, QueueListener] = {}
+        # Direct queue management
+        self.listeners: set[asyncio.Queue] = set()
+        self._broadcast_task: asyncio.Task | None = None
+        self._completed = False
+        self._error: Exception | None = None
         self._created_at = time.time()
-        self._first_listener_at: float | None = None
-
-        # Message lifecycle tracking for stale detection
-        self._first_chunk_received_at: float | None = None
-        self._completed_at: float | None = None
-        self._has_result_message = False
-        self._last_activity_at = time.time()
 
     async def create_listener(self) -> AsyncIterator[Any]:
         """Create a new listener for this stream.
@@ -80,32 +67,24 @@ class StreamHandle:
         Yields:
             Messages from the stream
         """
-        # Start worker if needed
-        await self._ensure_worker_started()
+        # Start broadcast task if not already running
+        await self.start()
 
-        if not self._worker:
-            raise RuntimeError("Failed to start stream worker")
-
-        # Create listener
-        queue = self._worker.get_message_queue()
-        listener = await queue.create_listener()
-        self._listeners[listener.listener_id] = listener
-
-        if self._first_listener_at is None:
-            self._first_listener_at = time.time()
+        # Create listener queue
+        queue = self.add_listener()
 
         logger.debug(
             "stream_handle_listener_created",
             handle_id=self.handle_id,
-            listener_id=listener.listener_id,
-            total_listeners=len(self._listeners),
-            worker_status=self._worker.status.value,
+            listener_id=id(queue),
+            total_listeners=len(self.listeners),
+            session_id=self.session_id,
             category="streaming",
         )
 
         try:
             # Yield messages from listener
-            async for message in listener:
+            async for message in self.create_iterator(queue):
                 yield message
 
         except GeneratorExit:
@@ -113,260 +92,185 @@ class StreamHandle:
             logger.debug(
                 "stream_handle_listener_disconnected",
                 handle_id=self.handle_id,
-                listener_id=listener.listener_id,
+                listener_id=id(queue),
+                remaining_listeners=len(self.listeners) - 1,
             )
 
             # Check if this will be the last listener after removal
-            remaining_listeners = len(self._listeners) - 1
+            remaining_listeners = len(self.listeners) - 1
             if remaining_listeners == 0 and self._session_client:
                 logger.debug(
                     "stream_handle_last_listener_disconnected",
                     handle_id=self.handle_id,
-                    listener_id=listener.listener_id,
+                    listener_id=id(queue),
                     message="Last listener disconnected, will trigger SDK interrupt in cleanup",
                 )
-
             raise
 
         finally:
             # Remove listener
-            await self._remove_listener(listener.listener_id)
+            self.remove_listener(queue)
 
             # Check if we should trigger cleanup
             await self._check_cleanup()
 
-    async def _ensure_worker_started(self) -> None:
-        """Ensure the worker is started, creating it if needed."""
-        async with self._worker_lock:
-            if self._worker is None:
-                # Create worker
-                worker_id = f"{self.handle_id}-worker"
-                self._worker = StreamWorker(
-                    worker_id=worker_id,
-                    message_iterator=self._message_iterator,
-                    session_id=self.session_id,
-                    request_id=self.request_id,
-                    session_client=self._session_client,
-                    stream_handle=self,  # Pass self for message tracking
-                )
+    async def start(self) -> None:
+        """Start the broadcast task."""
+        if self._broadcast_task is None:
+            self._broadcast_task = asyncio.create_task(
+                self._run_and_broadcast()
+            )
 
-                # Start worker
-                await self._worker.start()
+    async def stop(self) -> None:
+        """Stop the broadcast task."""
+        if self._broadcast_task:
+            self._broadcast_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._broadcast_task
+            self._broadcast_task = None
 
-                logger.debug(
-                    "stream_handle_worker_created",
-                    handle_id=self.handle_id,
-                    worker_id=worker_id,
-                    session_id=self.session_id,
-                    category="streaming",
-                )
+    def add_listener(self) -> asyncio.Queue:
+        """Add a new listener queue.
 
-    async def _remove_listener(self, listener_id: str) -> None:
-        """Remove a listener and clean it up.
+        Returns:
+            Queue for receiving messages
+        """
+        queue = asyncio.Queue()
+        self.listeners.add(queue)
+        return queue
+
+    def remove_listener(self, queue: asyncio.Queue) -> None:
+        """Remove a listener queue.
 
         Args:
-            listener_id: ID of the listener to remove
+            queue: Queue to remove
         """
-        if listener_id in self._listeners:
-            listener = self._listeners.pop(listener_id)
-            listener.close()
+        self.listeners.discard(queue)
 
-            if self._worker:
-                queue = self._worker.get_message_queue()
-                await queue.remove_listener(listener_id)
-
-            logger.debug(
-                "stream_handle_listener_removed",
-                handle_id=self.handle_id,
-                listener_id=listener_id,
-                remaining_listeners=len(self._listeners),
-                category="streaming",
-            )
-
-    async def _check_cleanup(self) -> None:
-        """Check if cleanup is needed when no listeners remain."""
-        async with self._worker_lock:
-            if len(self._listeners) == 0 and self._worker:
-                worker_status = self._worker.status.value
-
-                # Check if worker has already completed naturally
-                if worker_status in ("completed", "error"):
-                    logger.debug(
-                        "stream_handle_worker_already_finished",
-                        handle_id=self.handle_id,
-                        worker_status=worker_status,
-                        message="Worker already finished, no interrupt needed",
-                    )
-                    return
-
-                # Send shutdown signal to any remaining queue listeners before interrupt
-                logger.debug(
-                    "stream_handle_shutting_down_queue_before_interrupt",
-                    handle_id=self.handle_id,
-                    message="Sending shutdown signal to queue listeners before interrupt",
-                )
-                queue = self._worker.get_message_queue()
-                await queue.broadcast_shutdown()
-
-                # No more listeners - trigger interrupt if session client available and worker is still running
-                if self._session_client:
-                    # Check if worker is already stopped/interrupted - no need to interrupt SDK
-                    if self._worker and self._worker.status.value in (
-                        "interrupted",
-                        "completed",
-                        "error",
-                    ):
-                        logger.debug(
-                            "stream_handle_worker_already_stopped",
-                            handle_id=self.handle_id,
-                            worker_status=worker_status,
-                            message="Worker already stopped, skipping SDK interrupt entirely",
-                        )
-                        # Still stop the worker to ensure cleanup
-                        if self._worker:
-                            logger.trace(
-                                "stream_handle_stopping_worker_direct",
-                                handle_id=self.handle_id,
-                                message="Stopping worker directly since SDK interrupt not needed",
-                            )
-                            try:
-                                await self._worker.stop(timeout=self._interrupt_timeout)
-                            except Exception as worker_error:
-                                logger.warning(
-                                    "stream_handle_worker_stop_error",
-                                    handle_id=self.handle_id,
-                                    error=str(worker_error),
-                                    message="Worker stop failed but continuing",
-                                )
-                    else:
-                        logger.debug(
-                            "stream_handle_all_listeners_disconnected",
-                            handle_id=self.handle_id,
-                            worker_status=worker_status,
-                            message="All listeners disconnected, triggering SDK interrupt",
-                        )
-
-                        # Schedule interrupt using a background task with timeout control
-                        try:
-                            # Create a background task with proper timeout and error handling
-                            await create_managed_task(
-                                self._safe_interrupt_with_timeout(),
-                                name=f"stream_interrupt_{self.handle_id}",
-                                creator="StreamHandle",
-                            )
-                            logger.debug(
-                                "stream_handle_interrupt_scheduled",
-                                handle_id=self.handle_id,
-                                message="SDK interrupt scheduled with timeout control",
-                            )
-                        except Exception as e:
-                            logger.error(
-                                "stream_handle_interrupt_schedule_error",
-                                handle_id=self.handle_id,
-                                error=str(e),
-                                message="Failed to schedule SDK interrupt",
-                            )
-                else:
-                    # No more listeners - worker continues but messages are discarded
-                    logger.debug(
-                        "stream_handle_no_listeners",
-                        handle_id=self.handle_id,
-                        worker_status=worker_status,
-                        message="Worker continues without listeners",
-                    )
-
-                # Don't stop the worker - let it complete naturally
-                # This ensures proper stream completion and interrupt capability
-
-    async def _safe_interrupt_with_timeout(self) -> None:
-        """Safely trigger session client interrupt with proper timeout and error handling."""
-        if not self._session_client:
-            return
-
+    async def _run_and_broadcast(self) -> None:
+        """Consume SDK iterator and broadcast to all listeners."""
         try:
-            # Call SDK interrupt first - let it handle stream cleanup gracefully
-            logger.debug(
-                "stream_handle_calling_sdk_interrupt",
-                handle_id=self.handle_id,
-                message="Calling SDK interrupt to gracefully stop stream",
-            )
+            async for chunk in self.sdk_iterator:
+                # Serialize chunk for transmission if needed
+                if isinstance(chunk, str):
+                    message = chunk
+                else:
+                    # For complex objects, pass them directly for compatibility
+                    message = chunk
 
-            await asyncio.wait_for(
-                self._session_client.interrupt(),
-                timeout=self._interrupt_timeout,  # Configurable timeout for stream handle initiated interrupts
-            )
-            logger.debug(
-                "stream_handle_interrupt_completed",
-                handle_id=self.handle_id,
-                message="SDK interrupt completed successfully",
-            )
+                # Broadcast to all active listeners
+                await self._broadcast_message(message)
 
-            # Stop our worker after SDK interrupt to ensure it's not blocking the session
-            if self._worker:
-                logger.trace(
-                    "stream_handle_stopping_worker_after_interrupt",
-                    handle_id=self.handle_id,
-                    message="Stopping worker to free up session for reuse",
-                )
-                try:
-                    await self._worker.stop(timeout=self._interrupt_timeout)
-                except Exception as worker_error:
-                    logger.warning(
-                        "stream_handle_worker_stop_error",
-                        handle_id=self.handle_id,
-                        error=str(worker_error),
-                        message="Worker stop failed but continuing",
-                    )
-
-        except TimeoutError:
-            logger.warning(
-                "stream_handle_interrupt_timeout",
-                handle_id=self.handle_id,
-                message=f"SDK interrupt timed out after {self._interrupt_timeout} seconds, falling back to worker stop",
-            )
-
-            # Fallback: Stop our worker manually if SDK interrupt timed out
-            if self._worker:
-                logger.trace(
-                    "stream_handle_fallback_worker_stop",
-                    handle_id=self.handle_id,
-                    message="SDK interrupt timed out, stopping worker as fallback",
-                )
-                try:
-                    await self._worker.stop(timeout=self._interrupt_timeout)
-                except Exception as worker_error:
-                    logger.warning(
-                        "stream_handle_fallback_worker_stop_error",
-                        handle_id=self.handle_id,
-                        error=str(worker_error),
-                        message="Fallback worker stop also failed",
-                    )
+            # Send completion signal
+            await self._broadcast_message(None)
+            self._completed = True
 
         except Exception as e:
             logger.error(
-                "stream_handle_interrupt_failed",
+                "stream_broadcast_error",
+                session_id=self.session_id,
                 handle_id=self.handle_id,
-                error=str(e),
-                error_type=type(e).__name__,
-                message="SDK interrupt failed with error",
+                error=str(e)
+            )
+            self._error = e
+            # Send error signal
+            await self._broadcast_message(None)
+
+    async def _broadcast_message(self, message: Any) -> None:
+        """Broadcast message to all listeners.
+
+        Args:
+            message: Message to broadcast, None signals completion
+        """
+        # Use asyncio.gather for concurrent broadcast
+        if self.listeners:
+            await asyncio.gather(
+                *[self._send_to_queue(q, message) for q in self.listeners],
+                return_exceptions=True
             )
 
-            # Fallback: Stop our worker manually if SDK interrupt failed
-            if self._worker:
-                logger.trace(
-                    "stream_handle_fallback_worker_stop_after_error",
+    async def _send_to_queue(
+        self,
+        queue: asyncio.Queue,
+        message: Any
+    ) -> None:
+        """Send message to a single queue.
+
+        Args:
+            queue: Target queue
+            message: Message to send
+        """
+        try:
+            await queue.put(message)
+        except Exception as e:
+            logger.debug(
+                "queue_send_error",
+                error=str(e)
+            )
+
+    async def create_iterator(self, queue: asyncio.Queue | None = None) -> AsyncIterator[Any]:
+        """Create an iterator for a listener.
+
+        Args:
+            queue: Optional existing queue, creates new one if None
+
+        Yields:
+            Messages from the stream
+        """
+        if queue is None:
+            queue = self.add_listener()
+
+        try:
+            while True:
+                message = await queue.get()
+                if message is None:
+                    # Stream completed or error occurred
+                    if self._error:
+                        raise self._error
+                    break
+                yield message
+        finally:
+            if queue in self.listeners:
+                self.remove_listener(queue)
+
+    async def _check_cleanup(self) -> None:
+        """Check if cleanup is needed when no listeners remain."""
+        if len(self.listeners) == 0:
+            # No more listeners - trigger interrupt if session client available
+            if self._session_client:
+                logger.debug(
+                    "stream_handle_all_listeners_disconnected",
                     handle_id=self.handle_id,
-                    message="SDK interrupt failed, stopping worker as fallback",
+                    message="All listeners disconnected, triggering SDK interrupt",
                 )
+
+                # Trigger interrupt
                 try:
-                    await self._worker.stop(timeout=self._interrupt_timeout)
-                except Exception as worker_error:
-                    logger.warning(
-                        "stream_handle_fallback_worker_stop_error",
-                        handle_id=self.handle_id,
-                        error=str(worker_error),
-                        message="Fallback worker stop also failed",
+                    await asyncio.wait_for(
+                        self._session_client.interrupt(),
+                        timeout=self._interrupt_timeout,
                     )
+                    logger.debug(
+                        "stream_handle_interrupt_completed",
+                        handle_id=self.handle_id,
+                        message="SDK interrupt completed successfully",
+                    )
+                except TimeoutError:
+                    logger.warning(
+                        "stream_handle_interrupt_timeout",
+                        handle_id=self.handle_id,
+                        message=f"SDK interrupt timed out after {self._interrupt_timeout} seconds",
+                    )
+                except Exception as e:
+                    logger.error(
+                        "stream_handle_interrupt_failed",
+                        handle_id=self.handle_id,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+
+            # Stop the broadcast task
+            await self.stop()
 
     async def interrupt(self) -> bool:
         """Interrupt the stream.
@@ -374,30 +278,20 @@ class StreamHandle:
         Returns:
             True if interrupted successfully
         """
-        if not self._worker:
-            logger.warning(
-                "stream_handle_interrupt_no_worker",
-                handle_id=self.handle_id,
-            )
-            return False
-
         logger.debug(
             "stream_handle_interrupting",
             handle_id=self.handle_id,
-            worker_status=self._worker.status.value,
-            active_listeners=len(self._listeners),
+            active_listeners=len(self.listeners),
         )
 
         try:
-            # Stop the worker
-            await self._worker.stop(timeout=self._interrupt_timeout)
+            # Stop the broadcast task
+            await self.stop()
 
-            # Close all listeners
-            for listener in self._listeners.values():
-                listener.close()
-            self._listeners.clear()
+            # Clear all listeners
+            self.listeners.clear()
 
-            logger.trace(
+            logger.debug(
                 "stream_handle_interrupted",
                 handle_id=self.handle_id,
             )
@@ -420,10 +314,17 @@ class StreamHandle:
         Returns:
             True if completed, False if timed out
         """
-        if not self._worker:
+        if not self._broadcast_task:
             return True
 
-        return await self._worker.wait_for_completion(timeout)
+        try:
+            if timeout:
+                await asyncio.wait_for(self._broadcast_task, timeout=timeout)
+            else:
+                await self._broadcast_task
+            return True
+        except TimeoutError:
+            return False
 
     def get_stats(self) -> dict[str, Any]:
         """Get stream handle statistics.
@@ -431,116 +332,17 @@ class StreamHandle:
         Returns:
             Dictionary of statistics
         """
-        stats = {
+        return {
             "handle_id": self.handle_id,
             "session_id": self.session_id,
             "request_id": self.request_id,
-            "active_listeners": len(self._listeners),
+            "active_listeners": len(self.listeners),
             "lifetime_seconds": time.time() - self._created_at,
-            "time_to_first_listener": (
-                self._first_listener_at - self._created_at
-                if self._first_listener_at
-                else None
-            ),
+            "completed": self._completed,
+            "has_error": self._error is not None,
         }
-
-        if self._worker:
-            worker_stats = self._worker.get_stats()
-            stats["worker_stats"] = worker_stats  # type: ignore[assignment]
-        else:
-            stats["worker_stats"] = None
-
-        return stats
 
     @property
     def has_active_listeners(self) -> bool:
         """Check if there are any active listeners."""
-        return len(self._listeners) > 0
-
-    @property
-    def worker_status(self) -> WorkerStatus | None:
-        """Get the worker status if worker exists."""
-        return self._worker.status if self._worker else None
-
-    # Message lifecycle tracking methods for stale detection
-
-    def on_first_chunk_received(self) -> None:
-        """Called when SystemMessage(init) is received - first chunk."""
-        if self._first_chunk_received_at is None:
-            self._first_chunk_received_at = time.time()
-            self._last_activity_at = self._first_chunk_received_at
-            logger.debug(
-                "stream_handle_first_chunk_received",
-                handle_id=self.handle_id,
-                session_id=self.session_id,
-            )
-
-    def on_message_received(self, message: Any) -> None:
-        """Called when any message is received to update activity."""
-        self._last_activity_at = time.time()
-
-    def on_completion(self) -> None:
-        """Called when ResultMessage is received - stream completed."""
-        if not self._has_result_message:
-            self._has_result_message = True
-            self._completed_at = time.time()
-            self._last_activity_at = self._completed_at
-            logger.debug(
-                "stream_handle_completed",
-                handle_id=self.handle_id,
-                session_id=self.session_id,
-            )
-
-    @property
-    def is_completed(self) -> bool:
-        """Check if stream has completed (received ResultMessage)."""
-        return self._has_result_message
-
-    @property
-    def has_first_chunk(self) -> bool:
-        """Check if stream has received first chunk (SystemMessage init)."""
-        return self._first_chunk_received_at is not None
-
-    @property
-    def idle_seconds(self) -> float:
-        """Get seconds since last activity."""
-        return time.time() - self._last_activity_at
-
-    def is_stale(self) -> bool:
-        """Check if stream is stale based on configurable timeout logic.
-
-        Returns:
-            True if stream should be considered stale
-        """
-        if self.is_completed:
-            # Completed streams are never stale
-            return False
-
-        if not self.has_first_chunk:
-            # No first chunk received - configurable timeout
-            return self.idle_seconds > self._first_chunk_timeout
-        else:
-            # First chunk received but not completed - configurable timeout
-            return self.idle_seconds > self._ongoing_timeout
-
-    def is_first_chunk_timeout(self) -> bool:
-        """Check if this is specifically a first chunk timeout.
-
-        Returns:
-            True if no first chunk received and timeout exceeded
-        """
-        return (
-            not self.has_first_chunk and self.idle_seconds > self._first_chunk_timeout
-        )
-
-    def is_ongoing_timeout(self) -> bool:
-        """Check if this is an ongoing stream timeout.
-
-        Returns:
-            True if first chunk received but ongoing timeout exceeded
-        """
-        return (
-            self.has_first_chunk
-            and not self.is_completed
-            and self.idle_seconds > self._ongoing_timeout
-        )
+        return len(self.listeners) > 0

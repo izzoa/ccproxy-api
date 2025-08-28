@@ -25,7 +25,7 @@ from ccproxy.utils.binary_resolver import BinaryResolver
 
 
 if TYPE_CHECKING:
-    from ccproxy.services.proxy_service import ProxyService
+    pass
 
 
 logger = structlog.get_logger(__name__)
@@ -67,71 +67,6 @@ class ServiceContainer:
             has_factory=service_factory is not None,
             category="lifecycle",
         )
-
-    def create_proxy_service(
-        self,
-        proxy_client: BaseProxyClient,
-        metrics: PrometheusMetrics | None = None,
-    ) -> "ProxyService":
-        """Factory method to create fully configured ProxyService.
-
-        Creates ProxyService with all required dependencies.
-        V2 plugins are managed separately via the FastAPI app lifecycle.
-
-        Args:
-            proxy_client: HTTP proxy client
-            metrics: Optional metrics service
-
-        Returns:
-            Ready-to-use ProxyService instance with clean dependencies
-        """
-        # Import here to avoid circular dependency
-        from ccproxy.services.proxy_service import ProxyService
-
-        # Create ProxyService without old plugin system
-        # Track components being initialized
-        components = []
-
-        request_tracer = self.get_request_tracer()
-        components.append("request_tracer")
-
-        mock_handler = self.get_mock_handler()
-        components.append("mock_handler")
-
-        streaming_handler = self.get_streaming_handler(metrics)
-        components.append("streaming_handler")
-
-        config = self.get_proxy_config()
-        components.append("proxy_config")
-
-        http_client = self.get_http_client()
-        components.append("http_client")
-
-        response_cache = self.get_response_cache()
-        components.append("response_cache")
-
-        connection_pool_manager = self.get_connection_pool_manager()
-        components.append("connection_pool")
-
-        proxy_service = ProxyService(
-            proxy_client=proxy_client,
-            settings=self.settings,
-            request_tracer=request_tracer,
-            mock_handler=mock_handler,
-            streaming_handler=streaming_handler,
-            config=config,
-            http_client=http_client,
-            metrics=metrics,
-            response_cache=response_cache,
-            connection_pool_manager=connection_pool_manager,
-        )
-
-        logger.info(
-            "services_initialized",
-            components=components,
-            category="lifecycle",
-        )
-        return proxy_service
 
     def get_request_tracer(self) -> RequestTracer:
         """Get request tracer service instance.

@@ -12,6 +12,7 @@ from .fastapi_factory import (
     create_mock_claude_app,
     create_unavailable_claude_app,
 )
+from .provider_factory import ProviderAdapterFactory
 
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "create_auth_app",
     "create_mock_claude_app",
     "create_unavailable_claude_app",
+    "ProviderAdapterFactory",
 ]

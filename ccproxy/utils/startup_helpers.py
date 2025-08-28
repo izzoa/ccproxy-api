@@ -261,14 +261,10 @@ async def initialize_proxy_service_startup(app: FastAPI, settings: Settings) -> 
             container = ServiceContainer(settings, factory)
             app.state.service_container = container
 
-        proxy_service = container.create_proxy_service(
-            proxy_client=proxy_client,
-            metrics=metrics,
-        )
-
-        # Store in app state for reuse in dependencies
-        app.state.proxy_service = proxy_service
-        logger.debug("proxy_service_initialized")
+        # ProxyService removed in Stage 3 of refactoring
+        # Adapters now handle requests directly
+        logger.debug("service_container_ready", 
+                    message="ProxyService removed, adapters handle requests directly")
     except (ImportError, ModuleNotFoundError) as e:
         logger.error(
             "proxy_service_initialization_import_error", error=str(e), exc_info=e

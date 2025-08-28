@@ -173,6 +173,17 @@ class ClaudeApiTokenManager(BaseTokenManager[ClaudeCredentials]):
         wrapper = ClaudeTokenWrapper(credentials=credentials)
         return wrapper.access_token_value
 
+    async def get_auth_headers(self) -> dict[str, str]:
+        """Get authentication headers for Claude API requests.
+
+        Returns:
+            Dict with Authorization Bearer header if token is available, empty dict otherwise
+        """
+        token = await self.get_access_token()
+        if token:
+            return {"Authorization": f"Bearer {token}"}
+        return {}
+
     async def get_profile(self) -> ClaudeProfileInfo | None:
         """Get user profile from cache or API.
 

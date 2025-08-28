@@ -4,13 +4,13 @@ from typing import Any
 
 from ccproxy.core.logging import get_plugin_logger
 from ccproxy.plugins import (
-    PluginContext,
     PluginManifest,
-    ProviderPluginFactory,
     ProviderPluginRuntime,
     RouteSpec,
 )
+from ccproxy.plugins.base_factory import BaseProviderPluginFactory
 from plugins.codex.adapter import CodexAdapter
+from plugins.codex.auth.manager import CodexTokenManager
 from plugins.codex.config import CodexSettings
 from plugins.codex.detection_service import CodexDetectionService
 from plugins.codex.routes import router as codex_router
@@ -207,8 +207,20 @@ class CodexRuntime(ProviderPluginRuntime):
         return details
 
 
-class CodexFactory(ProviderPluginFactory):
+class CodexFactory(
+    BaseProviderPluginFactory[
+        CodexAdapter, CodexSettings, CodexDetectionService, CodexTokenManager
+    ]
+):
     """Factory for Codex provider plugin."""
+
+    # Required class attributes
+    adapter_class = CodexAdapter
+    config_class = CodexSettings
+    detection_service_class = CodexDetectionService
+    runtime_class = CodexRuntime
+
+    credentials_manager_class = CodexTokenManager
 
     def __init__(self) -> None:
         """Initialize factory with manifest."""
@@ -234,53 +246,6 @@ class CodexFactory(ProviderPluginFactory):
 
         # Initialize with manifest
         super().__init__(manifest)
-
-    def create_runtime(self) -> CodexRuntime:
-        """Create runtime instance."""
-        return CodexRuntime(self.manifest)
-
-    def create_adapter(self, context: PluginContext) -> CodexAdapter:
-        """Create the Codex adapter."""
-        proxy_service = context.get("proxy_service")
-        auth_manager = context.get("credentials_manager")
-        detection_service = context.get("detection_service")
-        http_client = context.get("http_client")
-        logger_instance = context.get("logger")
-
-        if not proxy_service:
-            raise RuntimeError("ProxyService is required for Codex adapter")
-        if not auth_manager:
-            raise RuntimeError("Auth manager is required for Codex adapter")
-        if not detection_service:
-            raise RuntimeError("Detection service is required for Codex adapter")
-
-        return CodexAdapter(
-            proxy_service=proxy_service,
-            auth_manager=auth_manager,
-            detection_service=detection_service,
-            http_client=http_client,
-            logger=logger_instance,
-            context=context,  # Pass the context for plugin_registry access
-        )
-
-    def create_detection_service(self, context: PluginContext) -> CodexDetectionService:
-        """Create the Codex detection service."""
-        settings = context.get("settings")
-        if not settings:
-            raise RuntimeError("Settings are required for Codex detection service")
-
-        cli_service = context.get("cli_detection_service")
-        return CodexDetectionService(settings, cli_service)
-
-    def create_credentials_manager(self, context: PluginContext) -> Any:
-        """Create the Codex credentials manager.
-
-        Note: OAuth functionality is now provided by the oauth_codex plugin.
-        The token manager will look up OAuth providers from the registry as needed.
-        """
-        from plugins.codex.auth.manager import CodexTokenManager
-
-        return CodexTokenManager()
 
 
 # Export the factory instance

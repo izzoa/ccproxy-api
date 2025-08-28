@@ -535,6 +535,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     setup_cors_middleware(app, settings)
     setup_error_handlers(app)
 
+    # Add hooks middleware if enabled
+    if settings.hooks.enabled and hasattr(app.state, "hook_manager"):
+        from ccproxy.api.middleware.hooks import HooksMiddleware
+
+        app.add_middleware(HooksMiddleware, hook_manager=app.state.hook_manager)
+
     # Setup default core middleware
     setup_default_middleware(middleware_manager)
 

@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from ccproxy.scheduler.tasks import BaseScheduledTask
     from ccproxy.services.adapters.base import BaseAdapter
     from ccproxy.services.cli_detection import CLIDetectionService
-    from ccproxy.services.proxy_service import ProxyService
 else:
     # Runtime import - mypy doesn't have stubs for fastapi.middleware
     from starlette.middleware.base import BaseHTTPMiddleware

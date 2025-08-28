@@ -43,7 +43,6 @@ class CodexAdapter(BaseAdapter):
 
     def __init__(
         self,
-        proxy_service: IRequestHandler | None,
         auth_manager: AuthManager,
         detection_service: Any,
         http_client: Any | None = None,
@@ -53,15 +52,13 @@ class CodexAdapter(BaseAdapter):
         """Initialize the Codex adapter.
 
         Args:
-            proxy_service: Request handler for processing requests (can be None, will be set later)
             auth_manager: Authentication manager for credentials
             detection_service: Detection service for Codex CLI detection
-            http_client: Not used directly (for interface compatibility)
+            http_client: HTTP client for making requests
             logger: Structured logger instance
             context: Optional plugin context containing plugin_registry and other services
         """
         self.logger = logger or get_plugin_logger()
-        self.proxy_service = proxy_service
         self._auth_manager = auth_manager
         self._detection_service = detection_service
         self.context = context or {}
@@ -75,41 +72,27 @@ class CodexAdapter(BaseAdapter):
         self.request_transformer: CodexRequestTransformer | None = None
         self.response_transformer: CodexResponseTransformer | None = None
 
-        # Complete initialization if proxy_service is available
-        if proxy_service:
-            self._complete_initialization()
-
-    def _complete_initialization(self) -> None:
-        """Complete initialization with proxy_service dependencies."""
-        if not self.proxy_service:
-            return
-
-        # Type check for ProxyService specific attributes
-        from ccproxy.services.proxy_service import ProxyService
-
-        if isinstance(self.proxy_service, ProxyService):
-            # Initialize HTTP handler with shared HTTP client from proxy service
-            shared_client = getattr(self.proxy_service, "http_client", None)
-            if not shared_client:
-                raise RuntimeError("ProxyService must have http_client attribute")
-            request_tracer = getattr(self.proxy_service, "request_tracer", None)
+        # Initialize HTTP handler with provided client
+        if http_client:
+            # Get request tracer from context if available
+            request_tracer = None
+            if context and "request_tracer" in context:
+                request_tracer = context["request_tracer"]
+            
             self._http_handler = PluginHTTPHandler(
-                http_client=shared_client, request_tracer=request_tracer
+                http_client=http_client,
+                request_tracer=request_tracer
             )
-
+            
             # Initialize transformers
             self.request_transformer = CodexRequestTransformer(self._detection_service)
-
-            # Initialize response transformer with CORS settings
-            cors_settings = (
-                getattr(self.proxy_service.config, "cors", None)
-                if self.proxy_service
-                else None
-            )
+            
+            # Initialize response transformer with CORS settings from context
+            cors_settings = None
+            if context and "cors_settings" in context:
+                cors_settings = context["cors_settings"]
             self.response_transformer = CodexResponseTransformer(cors_settings)
-        else:
-            # No ProxyService available
-            raise RuntimeError("CodexAdapter requires a ProxyService instance")
+
 
     def _get_pricing_service(self) -> Any | None:
         """Get pricing service from plugin registry if available."""
@@ -258,15 +241,11 @@ class CodexAdapter(BaseAdapter):
         )
 
         # Make the actual HTTP request using the shared handler
-        if not self.proxy_service:
-            raise HTTPException(status_code=503, detail="Proxy service not available")
+        if not self._http_handler:
+            raise HTTPException(status_code=503, detail="HTTP handler not initialized")
 
-        # Get streaming handler if available
-        from ccproxy.services.proxy_service import ProxyService
-
+        # Streaming handler not needed after ProxyService removal
         streaming_handler = None
-        if is_streaming and isinstance(self.proxy_service, ProxyService):
-            streaming_handler = self.proxy_service.streaming_handler
 
         response = await self._http_handler.handle_request(
             method=method,
@@ -564,7 +543,6 @@ class CodexAdapter(BaseAdapter):
                 self._http_handler = None
 
             # Clear references to prevent memory leaks
-            self.proxy_service = None
             self.request_transformer = None
             self.response_transformer = None
 

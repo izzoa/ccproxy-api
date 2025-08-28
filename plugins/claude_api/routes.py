@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response
 
-from ccproxy.api.dependencies import ProxyServiceDep, get_plugin_adapter
+from ccproxy.api.dependencies import get_plugin_adapter
 from ccproxy.auth.conditional import ConditionalAuthDep
 from ccproxy.config.settings import get_settings
 
@@ -34,13 +34,12 @@ def claude_api_path_transformer(path: str) -> str:
 
 
 # Note: The create_anthropic_context function has been removed as routes now use
-# the adapter pattern via ProxyService.handle_request which enables hook emissions.
+# the adapter pattern with direct adapter.handle_request calls.
 
 
 @router.post("/v1/messages", response_model=None)
 async def create_anthropic_message(
     request: Request,
-    proxy_service: ProxyServiceDep,
     auth: ConditionalAuthDep,
     adapter: ClaudeAPIAdapterDep,
 ) -> Response:
@@ -49,21 +48,16 @@ async def create_anthropic_message(
     This endpoint handles Anthropic API format requests and forwards them
     directly to the Claude API without format conversion.
     """
-    # Use ProxyService.handle_request to enable hook emissions
-    return await proxy_service.handle_request(
+    return await adapter.handle_request(
         request=request,
         endpoint="/v1/messages",
         method=request.method,
-        provider="claude_api",
-        plugin_name="claude_api",
-        adapter_handler=adapter.handle_request,
     )
 
 
 @router.post("/v1/chat/completions", response_model=None)
 async def create_openai_chat_completion(
     request: Request,
-    proxy_service: ProxyServiceDep,
     auth: ConditionalAuthDep,
     adapter: ClaudeAPIAdapterDep,
 ) -> Response:
@@ -72,14 +66,10 @@ async def create_openai_chat_completion(
     This endpoint handles OpenAI format requests and converts them
     to/from Anthropic format transparently.
     """
-    # Use ProxyService.handle_request to enable hook emissions
-    return await proxy_service.handle_request(
+    return await adapter.handle_request(
         request=request,
         endpoint="/v1/chat/completions",
         method=request.method,
-        provider="claude_api",
-        plugin_name="claude_api",
-        adapter_handler=adapter.handle_request,
     )
 
 
