@@ -495,6 +495,35 @@ SERVER__PORT=8080
 # etc.
 ```
 
+## Authentication & Security Architecture
+
+CCProxy uses a **three-layer authentication architecture** that serves different purposes:
+
+```
+Client Applications → [ANTHROPIC_API_KEY] → CCProxy → [Claude OAuth] → Anthropic API
+```
+
+### Understanding the Two Token Types
+
+**`ANTHROPIC_API_KEY`** (Client Configuration):
+- Used by **client applications** when connecting to your CCProxy instance
+- Set in client environment variables to point to your proxy
+- **Purpose**: Client identification and configuration
+- **Not used** by the proxy for upstream authentication
+
+**`SECURITY__AUTH_TOKEN`** (Proxy Security - Optional):
+- Used to **secure the CCProxy server itself** 
+- When set: ALL client requests must include valid authentication
+- When unset: Proxy runs in "open mode" (no client authentication required)
+- **Purpose**: Access control for your proxy instance
+
+### Proxy-to-Anthropic Authentication
+
+The proxy itself uses **Claude OAuth credentials** (not environment variables) for upstream API calls:
+- Credentials stored in `~/.config/claude/.credentials.json`
+- In Docker: mounted via volumes from host system
+- Managed by Claude CLI (`claude auth login`)
+
 ## Securing the Proxy (Optional)
 
 You can enable token authentication for the proxy. This supports multiple header formats (`x-api-key` for Anthropic, `Authorization: Bearer` for OpenAI) for compatibility with standard client libraries.
@@ -526,6 +555,40 @@ curl -H "x-api-key: your-token" ...
 # OpenAI/Bearer Format
 curl -H "Authorization: Bearer your-token" ...
 ```
+
+### Configuration Scenarios
+
+**Scenario A: Development (No Proxy Security)**
+```bash
+# .env file - no SECURITY__AUTH_TOKEN set
+ANTHROPIC_API_KEY=dummy-key
+
+# Client usage
+export ANTHROPIC_API_KEY=dummy-key
+export ANTHROPIC_BASE_URL=http://localhost:8000/api
+```
+*Clients can use any dummy API key. Proxy uses Claude OAuth for upstream.*
+
+**Scenario B: Secured Proxy**
+```bash
+# .env file - enable proxy authentication  
+ANTHROPIC_API_KEY=your-client-api-key
+SECURITY__AUTH_TOKEN=your-secure-proxy-token
+
+# Client usage
+export ANTHROPIC_API_KEY=your-secure-proxy-token  # Must match SECURITY__AUTH_TOKEN
+export ANTHROPIC_BASE_URL=http://localhost:8000/api
+```
+*Clients must use the proxy's security token. Recommended for production.*
+
+**Scenario C: Docker Deployment**
+```yaml
+# docker-compose.yml
+volumes:
+  - ~/.config/claude:/data/home/.config/claude:ro  # Claude OAuth credentials
+  - ~/.codex/auth.json:/data/home/.codex/auth.json:ro  # OpenAI credentials
+```
+*Proxy automatically uses mounted credentials for upstream authentication.*
 
 ## Observability
 

@@ -4,18 +4,20 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "${SERVER__PORT:-8000}:${SERVER__PORT:-8000}"
     environment:
-      - SERVER__HOST=0.0.0.0
-      - SERVER__PORT=8000
-      - SERVER__LOG_LEVEL=INFO
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-    # env_file:
-    #   - .env
+    env_file:
+      - .env
+    volumes:
+      # IMPORTANT: Ensure these credential files exist before running 'docker-compose up'
+      # Run 'claude auth login' to generate ~/.config/claude/.credentials.json
+      - ~/.config/claude:/data/home/.config/claude:ro
+      - ~/.codex/auth.json:/data/home/.codex/auth.json:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:$SERVER__PORT/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:${SERVER__PORT:-8000}/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -1,6 +1,6 @@
 .PHONY: help install dev-install clean test test-unit test-real-api test-watch test-fast test-file test-match test-coverage lint typecheck format check pre-commit ci build dashboard docker-build docker-run docs-install docs-build docs-serve docs-clean
 
-$(eval VERSION_DOCKER := $(shell uv run python3 scripts/format_version.py docker))
+$(eval VERSION_DOCKER := $(shell uv run python3 scripts/format_version.py docker 2>/dev/null || echo "latest"))
 
 # Common variables
 UV_RUN := uv run
