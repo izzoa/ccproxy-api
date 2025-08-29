@@ -149,7 +149,9 @@ fi
 
 # Create additional directories that Claude might need
 mkdir -p "$CLAUDE_HOME"/{.cache,.config,.local}
-chown -R claude:"$CLAUDE_GROUP_NAME" "$CLAUDE_HOME"
+chown claude:"$CLAUDE_GROUP_NAME" "$CLAUDE_HOME"
+chown -R claude:"$CLAUDE_GROUP_NAME" "$CLAUDE_HOME/.cache" "$CLAUDE_HOME/.local"
+chown claude:"$CLAUDE_GROUP_NAME" "$CLAUDE_HOME/.config"
 
 # Ensure workspace directory exists
 mkdir -p "$CLAUDE_WORKSPACE"
