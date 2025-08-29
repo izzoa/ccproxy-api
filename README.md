@@ -50,6 +50,195 @@ eval "$(ccproxy --show-completion bash)" # For bash
 
 For dev version replace `ccproxy-api` with `git+https://github.com/caddyglow/ccproxy-api.git@dev`
 
+## Docker Compose Setup
+
+CCProxy can be run using Docker Compose for containerized deployment. This approach provides isolation, easy management, and optional monitoring stack integration.
+
+### Prerequisites
+
+Before running with Docker Compose, ensure you have the required authentication credentials:
+
+1. **Claude Authentication**: Set up Claude CLI credentials on your host system:
+   ```bash
+   # Install Claude CLI (if not already installed)
+   npm install -g @anthropic-ai/claude-code
+   
+   # Authenticate with Claude
+   claude auth login
+   # OR for long-lived tokens:
+   claude setup-token
+   ```
+
+2. **OpenAI Codex Authentication** (Optional, for Codex provider):
+   ```bash
+   # Install Codex CLI (if not already installed)
+   npm install -g @anthropic-ai/codex
+   
+   # Authenticate with OpenAI
+   codex auth login
+   # OR use CCProxy's authentication:
+   ccproxy auth login-openai
+   ```
+
+### Basic Setup
+
+1. **Clone the repository and navigate to the project directory:**
+   ```bash
+   git clone https://github.com/CaddyGlow/ccproxy-api.git
+   cd ccproxy-api
+   ```
+
+2. **Create environment configuration:**
+   ```bash
+   # Copy example environment file
+   cp .env.example .env
+   
+   # Edit .env file with your preferred settings
+   # Key settings:
+   # SERVER__PORT=8000          # Port for the proxy server
+   # PUID=1000                  # User ID (matches your host user)
+   # PGID=1000                  # Group ID (matches your host group)
+   ```
+
+3. **Start the service:**
+   ```bash
+   # Start CCProxy
+   docker-compose up -d
+   
+   # View logs
+   docker-compose logs -f claude-code-proxy
+   
+   # Check service health
+   curl http://localhost:8000/health
+   ```
+
+### Environment Configuration
+
+The Docker Compose setup supports these key environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SERVER__PORT` | `8000` | Port for the proxy server |
+| `PUID` | `1000` | User ID for the claude user inside container |
+| `PGID` | `1000` | Group ID for the claude group inside container |
+| `CLAUDE_HOME` | `/data/home` | Claude user home directory in container |
+| `SECURITY__AUTH_TOKEN` | (unset) | Optional token for securing proxy access |
+
+### Volume Mounts
+
+The Docker Compose configuration automatically mounts essential credential files:
+
+```yaml
+volumes:
+  # Claude CLI credentials (required for Claude access)
+  - ~/.config/claude:/data/home/.config/claude:ro
+  
+  # OpenAI Codex credentials (required for Codex access)  
+  - ~/.codex/auth.json:/data/home/.codex/auth.json:ro
+```
+
+**Important**: These files must exist on your host system before starting the container. Run the authentication commands mentioned in Prerequisites to create them.
+
+### Monitoring Stack (Optional)
+
+CCProxy includes an optional monitoring stack with Grafana and Victoria Metrics:
+
+1. **Start monitoring services:**
+   ```bash
+   # Start monitoring stack
+   docker-compose -f docker-compose.monitoring.yml up -d
+   
+   # Start both main service and monitoring
+   docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+   ```
+
+2. **Access monitoring interfaces:**
+   - **Grafana Dashboard**: http://localhost:3000 (admin/admin)
+   - **Victoria Metrics**: http://localhost:8428
+   - **CCProxy Metrics**: http://localhost:8000/metrics (when observability enabled)
+
+3. **Enable observability in CCProxy:**
+   ```bash
+   # Add to .env file
+   echo "OBSERVABILITY__ENABLED=true" >> .env
+   echo "OBSERVABILITY__METRICS_ENABLED=true" >> .env
+   
+   # Restart CCProxy
+   docker-compose restart claude-code-proxy
+   ```
+
+### Docker Commands Reference
+
+```bash
+# Start services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f claude-code-proxy
+
+# Restart service
+docker-compose restart claude-code-proxy
+
+# Stop services
+docker-compose down
+
+# Rebuild and start (after code changes)
+docker-compose up -d --build
+
+# View service status
+docker-compose ps
+
+# Execute commands in running container
+docker-compose exec claude-code-proxy ccproxy auth status
+
+# Clean up everything (including volumes)
+docker-compose down -v
+```
+
+### Troubleshooting Docker Setup
+
+**1. Credential Mount Issues:**
+```bash
+# Check if credential files exist
+ls -la ~/.config/claude/.credentials.json
+ls -la ~/.codex/auth.json
+
+# If missing, authenticate first:
+claude auth login    # For Claude
+codex auth login     # For Codex (optional)
+```
+
+**2. Permission Issues:**
+```bash
+# Check PUID/PGID match your user
+id
+# Update .env file with correct values:
+# PUID=1001  # Your user ID
+# PGID=1001  # Your group ID
+```
+
+**3. Port Conflicts:**
+```bash
+# Change port in .env file
+echo "SERVER__PORT=8001" >> .env
+docker-compose up -d
+```
+
+**4. Container Build Issues:**
+```bash
+# Force rebuild
+docker-compose build --no-cache claude-code-proxy
+
+# Clean Docker system
+docker system prune -f
+```
+
+**5. Authentication Status Check:**
+```bash
+# Check authentication inside container
+docker-compose exec claude-code-proxy ccproxy auth status
+```
+
 ## Authentication
 
 The proxy uses different authentication mechanisms depending on the provider and mode.
