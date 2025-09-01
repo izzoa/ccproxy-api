@@ -16,6 +16,7 @@ from rich.console import Console
 from rich.table import Table
 from structlog import get_logger
 
+from ccproxy.auth.exceptions import CredentialsNotFoundError
 from ccproxy.cli.helpers import get_rich_toolkit
 from ccproxy.config.settings import get_settings
 from ccproxy.core.async_utils import get_claude_docker_home_dir
@@ -426,21 +427,25 @@ def login_command(
 
         # Check if already logged in
         manager = get_credentials_manager(custom_paths)
-        validation_result = asyncio.run(manager.validate())
-        if validation_result.valid and not validation_result.expired:
-            console.print(
-                "[yellow]You are already logged in with valid credentials.[/yellow]"
-            )
-            console.print(
-                "Use [cyan]ccproxy auth info[/cyan] to view current credentials."
-            )
+        try:
+            validation_result = asyncio.run(manager.validate())
+            if validation_result.valid and not validation_result.expired:
+                console.print(
+                    "[yellow]You are already logged in with valid credentials.[/yellow]"
+                )
+                console.print(
+                    "Use [cyan]ccproxy auth info[/cyan] to view current credentials."
+                )
 
-            overwrite = typer.confirm(
-                "Do you want to login again and overwrite existing credentials?"
-            )
-            if not overwrite:
-                console.print("Login cancelled.")
-                return
+                overwrite = typer.confirm(
+                    "Do you want to login again and overwrite existing credentials?"
+                )
+                if not overwrite:
+                    console.print("Login cancelled.")
+                    return
+        except CredentialsNotFoundError:
+            # No credentials found, proceed with login
+            pass
 
         # Perform OAuth login
         console.print("Starting OAuth login process...")
