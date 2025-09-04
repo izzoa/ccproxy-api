@@ -309,7 +309,7 @@ class CredentialsManager:
         """
         credentials = await self.load()
         if not credentials:
-            raise CredentialsNotFoundError()
+            raise CredentialsNotFoundError("No credentials found. Please login first.")
 
         return ValidationResult(
             valid=True,
