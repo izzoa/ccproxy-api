@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .claude_sdk import SDKContentBlock
 from .requests import Message, ToolDefinition, Usage
@@ -77,7 +77,7 @@ class MessageCreateParams(BaseModel):
         Field(
             description="Maximum number of tokens to generate",
             ge=1,
-            le=200000,
+            # Note: Upper limit is now validated dynamically per model
         ),
     ]
 
@@ -151,28 +151,19 @@ class MessageCreateParams(BaseModel):
     @field_validator("model")
     @classmethod
     def validate_model(cls, v: str) -> str:
-        """Validate that the model is a supported Claude model."""
-        supported_models = {
-            "claude-opus-4-20250514",
-            "claude-sonnet-4-20250514",
-            "claude-3-7-sonnet-20250219",
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-sonnet-20240620",
-            "claude-3-5-haiku-20241022",
-            "claude-3-opus-20240229",
-            "claude-3-sonnet-20240229",
-            "claude-3-haiku-20240307",
-            "claude-3-5-sonnet",
-            "claude-3-5-haiku",
-            "claude-3-opus",
-            "claude-3-sonnet",
-            "claude-3-haiku",
-        }
-
-        if v not in supported_models and not v.startswith("claude-"):
-            raise ValueError(f"Model {v} is not supported")
-
+        """Validate that the model is a supported Claude model.
+        
+        Note: Dynamic model validation should be done at runtime
+        using the ModelInfoService. This basic check ensures the
+        model name follows Claude naming conventions.
+        """
+        # Basic validation - ensure it's a Claude model
+        # Full validation happens at runtime with ModelInfoService
+        if not v.startswith("claude-"):
+            raise ValueError(f"Model {v} does not appear to be a valid Claude model")
+        
         return v
+    
 
     @field_validator("messages")
     @classmethod

@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from ccproxy.core.interfaces import APIAdapter
 from ccproxy.utils.model_mapping import map_model_to_claude
+from ccproxy.services.model_info_service import get_model_info_service
 
 from .models import (
     OpenAIChatCompletionRequest,
@@ -42,7 +43,48 @@ class OpenAIAdapter(APIAdapter):
         self.include_sdk_content_as_xml = include_sdk_content_as_xml
 
     def adapt_request(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Convert OpenAI request format to Anthropic format.
+        """Convert OpenAI request format to Anthropic format (sync version).
+        
+        This is the sync version for backward compatibility.
+        For dynamic model info, use adapt_request_async() instead.
+        """
+        # Parse OpenAI request
+        try:
+            openai_req = OpenAIChatCompletionRequest(**request)
+        except ValidationError as e:
+            raise ValueError(f"Invalid OpenAI request format: {e}") from e
+
+        # Map OpenAI model to Claude model
+        model = map_model_to_claude(openai_req.model)
+
+        # Convert messages
+        messages, system_prompt = self._convert_messages_to_anthropic(
+            openai_req.messages
+        )
+
+        # Build base Anthropic request (fallback to 8192 for compatibility)
+        anthropic_request = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": openai_req.max_tokens or 8192,  # Sync fallback
+        }
+        
+        # Continue with existing logic...
+        if system_prompt:
+            anthropic_request["system"] = system_prompt
+
+        # Add optional parameters
+        self._handle_optional_parameters(openai_req, anthropic_request)
+        self._handle_metadata(openai_req, anthropic_request)
+        anthropic_request = self._handle_response_format(openai_req, anthropic_request)
+        anthropic_request = self._handle_thinking_parameters(openai_req, anthropic_request)
+        self._log_unsupported_parameters(openai_req)
+        self._handle_tools(openai_req, anthropic_request)
+        
+        return anthropic_request
+    
+    async def adapt_request_async(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Convert OpenAI request format to Anthropic format with dynamic model info.
 
         Args:
             request: OpenAI format request
@@ -66,12 +108,28 @@ class OpenAIAdapter(APIAdapter):
         messages, system_prompt = self._convert_messages_to_anthropic(
             openai_req.messages
         )
-
+        
+        # Get model-specific default for max_tokens if not provided
+        if openai_req.max_tokens is None:
+            try:
+                model_info_service = get_model_info_service()
+                default_max_tokens = await model_info_service.get_max_output_tokens(model)
+            except Exception as e:
+                logger.warning(
+                    "failed_to_get_dynamic_max_tokens",
+                    model=model,
+                    error=str(e),
+                    fallback=8192,
+                )
+                default_max_tokens = 8192  # Conservative fallback
+        else:
+            default_max_tokens = openai_req.max_tokens
+        
         # Build base Anthropic request
         anthropic_request = {
             "model": model,
             "messages": messages,
-            "max_tokens": openai_req.max_tokens or 4096,
+            "max_tokens": default_max_tokens,
         }
 
         # Add system prompt if present
@@ -107,7 +165,7 @@ class OpenAIAdapter(APIAdapter):
             has_tools=bool(anthropic_request.get("tools")),
             has_system=bool(anthropic_request.get("system")),
             message_count=len(cast(list[Any], anthropic_request["messages"])),
-            operation="adapt_request",
+            operation="adapt_request_async",
         )
         return anthropic_request
 
@@ -178,12 +236,15 @@ class OpenAIAdapter(APIAdapter):
     ) -> dict[str, Any]:
         """Handle reasoning_effort and thinking configuration for o1/o3 models."""
         # Automatically enable thinking for o1 models even without explicit reasoning_effort
+        # Note: Model capabilities should be fetched from ModelInfoService
+        # to determine if thinking is supported rather than hardcoded prefixes
         if (
             openai_req.reasoning_effort
             or openai_req.model.startswith("o1")
             or openai_req.model.startswith("o3")
         ):
             # Map reasoning effort to thinking tokens
+            # Note: These values should come from model-specific capabilities
             thinking_tokens_map = {
                 "low": 1000,
                 "medium": 5000,
@@ -211,11 +272,12 @@ class OpenAIAdapter(APIAdapter):
             }
 
             # Ensure max_tokens is greater than budget_tokens
-            current_max_tokens = cast(int, anthropic_request.get("max_tokens", 4096))
+            # Get current max_tokens (should be set by now)
+            current_max_tokens = cast(int, anthropic_request.get("max_tokens", 8192))
             if current_max_tokens <= thinking_tokens:
                 # Set max_tokens to be 2x thinking tokens + some buffer for response
                 anthropic_request["max_tokens"] = thinking_tokens + max(
-                    thinking_tokens, 4096
+                    thinking_tokens, 8192
                 )
                 logger.debug(
                     "max_tokens_adjusted_for_thinking",

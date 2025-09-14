@@ -26,6 +26,7 @@ from ccproxy.observability.context import RequestContext
 from ccproxy.observability.metrics import PrometheusMetrics
 from ccproxy.utils.model_mapping import map_model_to_claude
 from ccproxy.utils.simple_request_logger import write_request_log
+from ccproxy.services.model_info_service import get_model_info_service
 
 
 logger = structlog.get_logger(__name__)
@@ -213,6 +214,29 @@ class ClaudeSDKService:
 
         # Map model to Claude model
         model = map_model_to_claude(model)
+        
+        # Validate max_tokens against model capabilities
+        if max_tokens is not None:
+            try:
+                model_info_service = get_model_info_service()
+                model_max_output = await model_info_service.get_max_output_tokens(model)
+                if max_tokens > model_max_output:
+                    raise ClaudeProxyError(
+                        message=f"Requested max_tokens ({max_tokens}) exceeds the model's maximum of {model_max_output} for {model}.",
+                        error_type="invalid_request_error",
+                        status_code=400,
+                    )
+            except ClaudeProxyError:
+                # Re-raise validation errors
+                raise
+            except Exception as e:
+                # Log but don't fail on metadata service errors
+                logger.warning(
+                    "failed_to_validate_max_tokens",
+                    model=model,
+                    max_tokens=max_tokens,
+                    error=str(e),
+                )
 
         options = self.options_handler.create_options(
             model=model,

@@ -10,6 +10,7 @@ from ccproxy.config.pricing import PricingSettings
 from .cache import PricingCache
 from .loader import PricingLoader
 from .models import PricingData
+from .model_metadata import ModelsMetadata
 
 
 logger = get_logger(__name__)
@@ -32,9 +33,63 @@ class PricingUpdater:
         self.cache = cache
         self.settings = settings
         self._cached_pricing: PricingData | None = None
+        self._cached_metadata: ModelsMetadata | None = None
         self._last_load_time: float = 0
         self._last_file_check_time: float = 0
         self._cached_file_mtime: float = 0
+
+    async def get_current_metadata(
+        self, force_refresh: bool = False
+    ) -> ModelsMetadata | None:
+        """Get current model metadata with automatic updates.
+
+        Args:
+            force_refresh: Force refresh even if cache is valid
+
+        Returns:
+            Current model metadata
+        """
+        import time
+
+        current_time = time.time()
+
+        # Return cached metadata if recent and not forced
+        if (
+            not force_refresh
+            and self._cached_metadata is not None
+            and (current_time - self._last_load_time) < self.settings.memory_cache_ttl
+        ):
+            # Only check file changes every 30 seconds to reduce I/O
+            if (current_time - self._last_file_check_time) > 30:
+                if self._has_cache_file_changed():
+                    logger.info("cache_file_changed")
+                    # File changed, need to reload
+                    _, metadata = await self._load_pricing_and_metadata()
+                    self._cached_metadata = metadata
+                    self._last_load_time = current_time
+                    return metadata
+                self._last_file_check_time = current_time
+
+            return self._cached_metadata
+
+        # Check if we need to refresh
+        should_refresh = force_refresh or (
+            self.settings.auto_update and not self.cache.is_cache_valid()
+        )
+
+        if should_refresh:
+            logger.info("metadata_refresh_start")
+            await self._refresh_pricing()
+
+        # Load metadata
+        _, metadata = await self._load_pricing_and_metadata()
+
+        # Cache the result
+        self._cached_metadata = metadata
+        self._last_load_time = current_time
+        self._last_file_check_time = current_time
+
+        return metadata
 
     async def get_current_pricing(
         self, force_refresh: bool = False
@@ -62,8 +117,9 @@ class PricingUpdater:
                 if self._has_cache_file_changed():
                     logger.info("cache_file_changed")
                     # File changed, need to reload
-                    pricing_data = await self._load_pricing_data()
+                    pricing_data, metadata = await self._load_pricing_and_metadata()
                     self._cached_pricing = pricing_data
+                    self._cached_metadata = metadata
                     self._last_load_time = current_time
                     return pricing_data
                 self._last_file_check_time = current_time
@@ -80,7 +136,8 @@ class PricingUpdater:
             await self._refresh_pricing()
 
         # Load pricing data
-        pricing_data = await self._load_pricing_data()
+        pricing_data, metadata = await self._load_pricing_and_metadata()
+        self._cached_metadata = metadata
 
         # Cache the result
         self._cached_pricing = pricing_data
@@ -135,18 +192,20 @@ class PricingUpdater:
             logger.error("pricing_refresh_failed", error=str(e))
             return False
 
-    async def _load_pricing_data(self) -> PricingData | None:
-        """Load pricing data from available sources.
+    async def _load_pricing_and_metadata(self) -> tuple[PricingData | None, ModelsMetadata | None]:
+        """Load pricing and metadata from available sources.
 
         Returns:
-            Pricing data as PricingData model
+            Tuple of (pricing_data, model_metadata)
         """
         # Try to get data from cache or download
         raw_data = await self.cache.get_pricing_data()
 
         if raw_data is not None:
-            # Load and validate pricing data using Pydantic
-            pricing_data = PricingLoader.load_pricing_from_data(raw_data, verbose=False)
+            # Load and validate pricing and metadata using Pydantic
+            pricing_data, metadata = PricingLoader.load_pricing_and_metadata(
+                raw_data, verbose=False
+            )
 
             if pricing_data:
                 # Get cache info to display age
@@ -163,17 +222,26 @@ class PricingUpdater:
                     logger.info(
                         "pricing_loaded_from_external", model_count=len(pricing_data)
                     )
-                return pricing_data
+                return pricing_data, metadata
             else:
                 logger.warning("external_pricing_validation_failed")
 
         # Fallback to embedded pricing
         if self.settings.fallback_to_embedded:
             logger.info("using_embedded_pricing_fallback")
-            return self._get_embedded_pricing()
+            return self._get_embedded_pricing(), None
         else:
             logger.error("pricing_unavailable_no_fallback")
-            return None
+            return None, None
+
+    async def _load_pricing_data(self) -> PricingData | None:
+        """Load pricing data from available sources.
+
+        Returns:
+            Pricing data as PricingData model
+        """
+        pricing, _ = await self._load_pricing_and_metadata()
+        return pricing
 
     def _get_embedded_pricing(self) -> PricingData:
         """Get embedded (hardcoded) pricing as fallback.
@@ -226,8 +294,9 @@ class PricingUpdater:
         """
         logger.info("pricing_force_refresh_start")
 
-        # Clear cached pricing
+        # Clear cached pricing and metadata
         self._cached_pricing = None
+        self._cached_metadata = None
         self._last_load_time = 0
 
         # Refresh from external source
@@ -249,6 +318,7 @@ class PricingUpdater:
 
         # Clear in-memory cache
         self._cached_pricing = None
+        self._cached_metadata = None
         self._last_load_time = 0
 
         # Clear file cache

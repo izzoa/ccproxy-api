@@ -6,6 +6,7 @@ pricing information from external sources like LiteLLM.
 
 from .cache import PricingCache
 from .loader import PricingLoader
+from .model_metadata import ModelMetadata, ModelsMetadata
 from .models import ModelPricing, PricingData
 from .updater import PricingUpdater
 
@@ -16,4 +17,6 @@ __all__ = [
     "PricingUpdater",
     "ModelPricing",
     "PricingData",
+    "ModelMetadata",
+    "ModelsMetadata",
 ]

@@ -13,8 +13,6 @@ MESSAGES_ENDPOINT = "/messages"
 MODELS_ENDPOINT = "/models"
 
 # Default values
-DEFAULT_MODEL = "claude-3-5-sonnet-20241022"
-DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TEMPERATURE = 1.0
 DEFAULT_TOP_P = 1.0
 DEFAULT_STREAM = False
@@ -87,7 +85,6 @@ CONTENT_TYPE_STREAM = "text/event-stream"
 CONTENT_TYPE_TEXT = "text/plain"
 
 # Character limits
-MAX_PROMPT_LENGTH = 200_000  # Maximum prompt length in characters
 MAX_MESSAGE_LENGTH = 100_000  # Maximum message length
 MAX_TOOL_CALLS = 100  # Maximum number of tool calls per request
 

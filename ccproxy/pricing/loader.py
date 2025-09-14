@@ -9,6 +9,7 @@ from structlog import get_logger
 from ccproxy.utils.model_mapping import get_claude_aliases_mapping, map_model_to_claude
 
 from .models import PricingData
+from .model_metadata import ModelsMetadata
 
 
 logger = get_logger(__name__)
@@ -120,6 +121,29 @@ class PricingLoader:
         if verbose:
             logger.info("models_converted", model_count=len(internal_format))
         return internal_format
+
+    @staticmethod
+    def load_metadata_from_data(
+        litellm_data: dict[str, Any], verbose: bool = True
+    ) -> ModelsMetadata | None:
+        """Load model metadata from LiteLLM format.
+
+        Args:
+            litellm_data: Raw LiteLLM model data
+            verbose: Whether to enable verbose logging
+
+        Returns:
+            Model metadata or None if invalid
+        """
+        try:
+            metadata = ModelsMetadata.from_litellm_data(litellm_data)
+            if verbose:
+                logger.info("model_metadata_loaded", model_count=len(metadata.models))
+            return metadata
+        except Exception as e:
+            if verbose:
+                logger.error("metadata_load_failed", error=str(e))
+            return None
 
     @staticmethod
     def load_pricing_from_data(
@@ -249,3 +273,20 @@ class PricingLoader:
             Canonical model name
         """
         return map_model_to_claude(model_name)
+
+    @staticmethod
+    def load_pricing_and_metadata(
+        litellm_data: dict[str, Any], verbose: bool = True
+    ) -> tuple[PricingData | None, ModelsMetadata | None]:
+        """Load both pricing and metadata from LiteLLM format.
+
+        Args:
+            litellm_data: Raw LiteLLM data
+            verbose: Whether to enable verbose logging
+
+        Returns:
+            Tuple of (pricing_data, model_metadata)
+        """
+        pricing = PricingLoader.load_pricing_from_data(litellm_data, verbose)
+        metadata = PricingLoader.load_metadata_from_data(litellm_data, verbose)
+        return pricing, metadata
