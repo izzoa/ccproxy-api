@@ -15,6 +15,10 @@ from ccproxy.core.async_utils import get_package_dir, patched_typing
 # For further information visit https://errors.pydantic.dev/2.11/u/typed-dict-version
 with patched_typing():
     from claude_code_sdk import ClaudeCodeOptions  # noqa: E402
+    from claude_code_sdk.types import McpServerConfig
+
+# Define McpServer as an alias to resolve forward reference in claude_code_sdk
+McpServer = McpServerConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -346,3 +350,7 @@ class ClaudeSettings(BaseModel):
             paths.append(str(path))
 
         return paths
+
+
+# Rebuild ClaudeSettings model to resolve forward references from claude_code_sdk
+ClaudeSettings.model_rebuild()

@@ -25,6 +25,20 @@ from .scheduler import SchedulerSettings
 from .security import SecuritySettings
 from .server import ServerSettings
 
+from ccproxy.core.async_utils import patched_typing
+
+# Import MCP server types to resolve forward references in claude_code_sdk
+with patched_typing():
+    from claude_code_sdk.types import (
+        McpServerConfig,
+        McpStdioServerConfig,
+        McpSSEServerConfig,
+        McpHttpServerConfig,
+        McpSdkServerConfig,
+    )
+
+# Define McpServer as an alias to resolve forward reference in claude_code_sdk
+McpServer = McpServerConfig
 
 __all__ = [
     "Settings",
@@ -410,6 +424,10 @@ class Settings(BaseSettings):
 
         # Create Settings instance with merged config
         return cls(**merged_config)
+
+
+# Rebuild Settings model to resolve forward references from claude_code_sdk
+Settings.model_rebuild()
 
 
 class ConfigurationManager:
