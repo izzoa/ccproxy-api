@@ -10,6 +10,7 @@ in
 {
 
   packages = [
+    pkgs.pyright
     #   pkgs.pandoc
     #   gdk
     #   pkgs.tcl
@@ -108,6 +109,8 @@ in
       install.enable = false;
     };
   };
+
+  dotenv.disableHint = true;
   enterShell = '''';
 
   # git-hooks.hooks = {

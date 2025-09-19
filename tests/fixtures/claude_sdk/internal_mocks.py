@@ -1,7 +1,7 @@
-"""Internal mocks for ClaudeSDKService.
+"""Internal mocks for Claude SDK components.
 
 These fixtures provide AsyncMock objects for dependency injection testing.
-They mock the ClaudeSDKService class directly for use with app.dependency_overrides.
+They mock Claude SDK components for use with app.dependency_overrides.
 """
 
 from collections.abc import AsyncGenerator
@@ -12,14 +12,12 @@ import pytest
 from claude_code_sdk import (
     AssistantMessage,
     ResultMessage,
-    TextBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
 
 from ccproxy.core.errors import ClaudeProxyError
-from ccproxy.models.messages import MessageResponse, TextContentBlock
-from ccproxy.models.requests import Usage
+from ccproxy.llms.models.anthropic import MessageResponse, TextBlock, Usage
 
 
 @pytest.fixture
@@ -43,7 +41,7 @@ def mock_internal_claude_sdk_service() -> AsyncMock:
             )
 
         # Create content block
-        content_block = TextContentBlock(type="text", text="Hello! How can I help you?")
+        content_block = TextBlock(type="text", text="Hello! How can I help you?")
 
         # Create usage object
         usage = Usage(input_tokens=10, output_tokens=8)
@@ -159,9 +157,7 @@ def mock_internal_claude_sdk_service_streaming() -> AsyncMock:
             return mock_streaming_response()
         else:
             # Return proper MessageResponse object for non-streaming
-            content_block = TextContentBlock(
-                type="text", text="Hello! How can I help you?"
-            )
+            content_block = TextBlock(type="text", text="Hello! How can I help you?")
 
             usage = Usage(input_tokens=10, output_tokens=8)
 
