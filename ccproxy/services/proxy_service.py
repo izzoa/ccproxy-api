@@ -118,6 +118,35 @@ class ProxyService:
 
         self.openai_adapter = OpenAIAdapter()
 
+    def _extract_request_metadata(
+        self, body: bytes | None
+    ) -> tuple[str | None, bool]:
+        """Extract model identifier and streaming flag from request payload."""
+
+        model: str | None = None
+        streaming = False
+
+        if not body:
+            return model, streaming
+
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return model, streaming
+
+        if not isinstance(payload, dict):
+            return model, streaming
+
+        model_value = payload.get("model")
+        if isinstance(model_value, str) and model_value:
+            model = model_value
+
+        stream_value = payload.get("stream")
+        if isinstance(stream_value, bool):
+            streaming = stream_value
+
+        return model, streaming
+
         # Create mock response generator for bypass mode
         self.mock_generator = RealisticMockResponseGenerator()
 
