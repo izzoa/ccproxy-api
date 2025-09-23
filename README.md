@@ -2,6 +2,18 @@
 
 `ccproxy` is a local reverse proxy server that provides unified access to multiple AI providers through a single interface. It supports both Anthropic Claude and OpenAI Codex backends, allowing you to use your existing subscriptions without separate API key billing.
 
+> **About this fork**
+>
+> This README documents the Codex parity fork hosted at [https://github.com/izzoa/ccproxy-api](https://github.com/izzoa/ccproxy-api). The fork layers additional OpenAI Response API features, dynamic model discovery, richer observability, and CLI management tools on top of the upstream project.
+
+## Fork Highlights
+
+- **Codex Parity:** Tool/function calling, sampling parameters, reasoning deltas, and usage stats now round-trip between OpenAI Chat Completions clients and the ChatGPT Response API.
+- **Dynamic Model Intelligence:** Optional live discovery of model limits via the shared model-info service, plus conservative fallbacks when network data is unavailable.
+- **Configurable Instruction Modes:** `override`, `append`, and `disabled` modes let you balance Codex requirements with custom system prompts.
+- **Enhanced CLI:** `ccproxy codex info`, `ccproxy codex set`, and `ccproxy codex cache` expose Codex configuration, detection cache introspection, and quick toggles without manual TOML edits.
+- **Observability Alignment:** Codex traffic now emits the same request context, Prometheus metrics, and streaming logs as Claude traffic.
+
 ## Supported Providers
 
 ### Anthropic Claude
@@ -51,7 +63,11 @@ eval "$(ccproxy --show-completion zsh)"  # For zsh
 eval "$(ccproxy --show-completion bash)" # For bash
 ```
 
-For dev version replace `ccproxy-api` with `git+https://github.com/caddyglow/ccproxy-api.git@dev`
+For bleeding-edge changes install directly from this fork:
+
+```bash
+pipx install "git+https://github.com/izzoa/ccproxy-api.git@main"
+```
 
 ## Docker Compose Setup
 
@@ -87,7 +103,7 @@ Before running with Docker Compose, ensure you have the required authentication 
 
 1. **Clone the repository and navigate to the project directory:**
    ```bash
-   git clone https://github.com/CaddyGlow/ccproxy-api.git
+   git clone https://github.com/izzoa/ccproxy-api.git
    cd ccproxy-api
    ```
 
@@ -276,36 +292,32 @@ The proxy uses different authentication mechanisms depending on the provider and
 The Codex Response API requires ChatGPT Plus subscription and OAuth2 authentication:
 
 ```bash
-# Enable Codex provider and configure settings
-ccproxy config codex --enable
-
-# View Codex configuration
+# Inspect active Codex configuration and model capabilities
 ccproxy codex info
 
+# Update Codex toggles without editing the TOML config manually
+ccproxy codex set \
+  --enable-dynamic-model-info \
+  --max-output-tokens-fallback 8192 \
+  --system-prompt-injection-mode append
+
 # Manage Codex detection cache
-ccproxy codex cache --list
-ccproxy codex cache --clear
+ccproxy codex cache           # Show cached headers/instructions
+ccproxy codex cache --raw     # Raw JSON dump
+ccproxy codex cache --clear   # Remove cached data
 
-# Test Codex connectivity
+# Connectivity smoke test
 ccproxy codex test
-
-# Configure instruction injection mode
-export CODEX__SYSTEM_PROMPT_INJECTION_MODE=append  # or 'override' or 'disabled'
-
-# Enable dynamic model information
-export CODEX__ENABLE_DYNAMIC_MODEL_INFO=true
 
 # Authentication options:
 
-# Option 1: Use existing Codex CLI credentials (if available)
-# CCProxy will automatically detect and use valid credentials from:
-# - $HOME/.codex/auth.json (Codex CLI credentials)
-# - Automatically renews tokens if expired but refresh token is valid
+# Option 1: Reuse existing Codex CLI credentials (preferred)
+# CCProxy automatically reads $HOME/.codex/auth.json and refreshes tokens.
 
 # Option 2: Login via CCProxy CLI (opens browser)
 ccproxy auth login-openai
 
-# Option 3: Use the official Codex CLI
+# Option 3: Use the official Codex CLI and let CCProxy reuse the token
 codex auth login
 
 # Check authentication status for all providers
@@ -314,10 +326,10 @@ ccproxy auth status
 
 **Important Notes:**
 
-- Credentials are stored in `$HOME/.codex/auth.json`
-- CCProxy reuses existing Codex CLI credentials when available
-- If credentials are expired, CCProxy attempts automatic renewal
-- Without valid credentials, users must authenticate using either CCProxy or Codex CLI
+- Credentials are stored in `$HOME/.codex/auth.json`.
+- CCProxy reuses existing Codex CLI credentials when available and refreshes them automatically when possible.
+- If no valid credentials exist, authenticate with either `ccproxy auth login-openai` or the official Codex CLI.
+- Environment variables (e.g., `CODEX__SYSTEM_PROMPT_INJECTION_MODE`) remain supported for headless deployments, but `ccproxy codex set` is the recommended workflow.
 
 ### Authentication Status
 
@@ -422,7 +434,16 @@ aichat --model openai:gpt-5 "hello"
 - **Configurable System Prompts:** Control instruction injection (override, append, or disabled)
 - **Session Persistence:** Full support for maintaining conversation context across requests
 
-**Note:** The Codex instruction prompt injection is now configurable via `CODEX__SYSTEM_PROMPT_INJECTION_MODE` setting.
+**Note:** Adjust instruction injection with `ccproxy codex set --system-prompt-injection-mode {override|append|disabled}` (or the corresponding `CODEX__SYSTEM_PROMPT_INJECTION_MODE` environment variable for automation).
+
+**Codex CLI quick reference:**
+
+```bash
+ccproxy codex info            # Inspect current configuration, detection cache, and model limits
+ccproxy codex set ...         # Persist configuration changes to the active ccproxy TOML file
+ccproxy codex cache           # Display cached detection data (use --raw or --clear as needed)
+ccproxy codex test            # Run a connectivity smoke test against the ChatGPT backend
+```
 
 ### Codex Response API Details
 
@@ -436,21 +457,20 @@ The Codex Response API supports flexible session management for conversation con
 
 #### Instruction Prompt Injection
 
-**Important:** CCProxy automatically injects the Codex instruction prompt into every conversation. This is required for proper interaction with the ChatGPT backend but affects your token usage:
+**Important:** CCProxy automatically injects the Codex instruction prompt into conversations to match the ChatGPT backend expectations. You can tune this behaviour via `ccproxy codex set --system-prompt-injection-mode {override|append|disabled}`, but disabling injection may cause degraded or rejected responses:
 
-- The instruction prompt is prepended to your messages
-- This consumes additional tokens in each request
-- The prompt ensures compatibility with ChatGPT's response generation
-- You cannot disable this injection as it's required by the backend
+- The instruction prompt is prepended (or appended) to your messages by default.
+- This consumes additional tokens in each request—plan allowances accordingly.
+- Use the `append` mode to keep your own system prompt while preserving Codex requirements, or `disabled` only for advanced experiments.
 
 #### Model Differences
 
 The Response API models differ from standard OpenAI API models:
 
-- Uses ChatGPT Plus models (e.g., `gpt-4`, `gpt-4-turbo`)
-- Model behavior matches ChatGPT web interface
-- Token limits and pricing follow ChatGPT Plus subscription terms
-- See [OpenAI Response API Documentation](https://platform.openai.com/docs/api-reference/responses) for details
+- Uses the ChatGPT Response API catalog (e.g., `gpt-5`, `gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini`).
+- Model behavior matches the ChatGPT web interface, including reasoning trace formatting.
+- Token limits and pricing follow ChatGPT Plus subscription entitlements—consult `ccproxy codex info` for live limits.
+- See [OpenAI Response API Documentation](https://platform.openai.com/docs/api-reference/responses) for the authoritative specification.
 
 ## MCP Server Integration & Permission System
 
@@ -840,16 +860,11 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Documentation
+## Documentation & Support
 
-- **[Online Documentation](https://caddyglow.github.io/ccproxy-api)**
-- **[API Reference](https://caddyglow.github.io/ccproxy-api/api-reference/overview/)**
-- **[Developer Guide](https://caddyglow.github.io/ccproxy-api/developer-guide/architecture/)**
-
-## Support
-
-- Issues: [GitHub Issues](https://github.com/CaddyGlow/ccproxy-api/issues)
-- Documentation: [Project Documentation](https://caddyglow.github.io/ccproxy-api)
+- Issues & feature requests: [GitHub Issues](https://github.com/izzoa/ccproxy-api/issues)
+- Releases & discussions: [Project Home](https://github.com/izzoa/ccproxy-api)
+- Upstream reference docs: [Original Project Documentation](https://caddyglow.github.io/ccproxy-api) *(feature parity notes in this fork supersede upstream limitations)*
 
 ## Acknowledgments
 
