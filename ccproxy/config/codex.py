@@ -65,6 +65,38 @@ class CodexSettings(BaseModel):
         description="Enable verbose logging for Codex operations",
     )
 
+    system_prompt_injection_mode: str = Field(
+        default="override",
+        description=(
+            "How to handle system prompts for Codex: "
+            "'override' (always replace with Codex instructions), "
+            "'append' (append Codex instructions to user prompts), "
+            "'disabled' (don't inject Codex instructions)"
+        ),
+    )
+
+    enable_dynamic_model_info: bool = Field(
+        default=True,
+        description="Enable dynamic model info fetching for Codex requests",
+    )
+
+    max_output_tokens_fallback: int = Field(
+        default=8192,
+        ge=1,
+        le=32768,
+        description="Default max output tokens when dynamic info unavailable (1-32768)",
+    )
+
+    propagate_unsupported_params: bool = Field(
+        default=False,
+        description="Whether to pass through unsupported OpenAI parameters (may cause errors)",
+    )
+
+    header_override_enabled: bool = Field(
+        default=True,
+        description="Allow custom headers to override detected Codex headers",
+    )
+
     @field_validator("base_url")
     @classmethod
     def validate_base_url(cls, v: str) -> str:
@@ -87,6 +119,15 @@ class CodexSettings(BaseModel):
         """Validate callback port range."""
         if not (1024 <= v <= 65535):
             raise ValueError("Callback port must be between 1024 and 65535")
+        return v
+
+    @field_validator("system_prompt_injection_mode")
+    @classmethod
+    def validate_injection_mode(cls, v: str) -> str:
+        """Validate system prompt injection mode."""
+        valid_modes = {"override", "append", "disabled"}
+        if v not in valid_modes:
+            raise ValueError(f"Invalid injection mode. Must be one of: {valid_modes}")
         return v
 
     def get_redirect_uri(self) -> str:

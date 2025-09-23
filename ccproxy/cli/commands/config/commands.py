@@ -119,6 +119,8 @@ def _group_config_rows(
             group_name = "CORS Configuration"
         elif setting.startswith("claude"):
             group_name = "Claude CLI Configuration"
+        elif setting.startswith("codex"):
+            group_name = "Codex (OpenAI) Configuration"
         elif setting.startswith("reverse_proxy"):
             group_name = "Reverse Proxy Configuration"
         elif setting.startswith("auth"):

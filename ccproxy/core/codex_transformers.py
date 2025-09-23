@@ -3,6 +3,7 @@
 import json
 
 import structlog
+from typing import Any
 from typing_extensions import TypedDict
 
 from ccproxy.core.transformers import RequestTransformer
@@ -328,9 +329,21 @@ class CodexRequestTransformer(RequestTransformer):
             return False
 
     def transform_codex_body(
-        self, body: bytes, codex_detection_data: CodexCacheData | None = None
+        self,
+        body: bytes,
+        codex_detection_data: CodexCacheData | None = None,
+        settings: dict[str, Any] | None = None
     ) -> bytes:
-        """Transform request body to inject Codex CLI instructions."""
+        """Transform request body to inject Codex CLI instructions.
+        
+        Args:
+            body: Request body to transform
+            codex_detection_data: Optional detection data with instructions
+            settings: Optional settings dict with injection mode configuration
+            
+        Returns:
+            Transformed body with instructions according to configured mode
+        """
         if not body:
             return body
 
@@ -348,16 +361,33 @@ class CodexRequestTransformer(RequestTransformer):
             )
             return body
 
+        # Get injection mode from settings
+        injection_mode = "override"  # default
+        if settings:
+            injection_mode = settings.get("system_prompt_injection_mode", "override")
+
+        # If injection is disabled, return body as-is
+        if injection_mode == "disabled":
+            logger.debug("codex_transform_injection_disabled")
+            # Still ensure stream: true is set
+            if "stream" not in data:
+                data["stream"] = True
+            return json.dumps(data, separators=(",", ":")).encode("utf-8")
+
         # Check if this request already has the full Codex instructions
         # If instructions field exists and is longer than 1000 chars, it's already set
+        existing_instructions = data.get("instructions")
         if (
-            "instructions" in data
-            and data["instructions"]
-            and len(data["instructions"]) > 1000
+            existing_instructions
+            and len(existing_instructions) > 1000
+            and injection_mode != "append"
         ):
             # This already has full Codex instructions, don't replace them
             logger.debug("skipping_codex_transform_has_full_instructions")
-            return body
+            # Still ensure stream: true is set
+            if "stream" not in data:
+                data["stream"] = True
+            return json.dumps(data, separators=(",", ":")).encode("utf-8")
 
         # Get the instructions to inject
         detected_instructions = None
@@ -378,8 +408,20 @@ class CodexRequestTransformer(RequestTransformer):
                 "(not the old Codex language model built by OpenAI)."
             )
 
-        # Always inject/override the instructions field
-        data["instructions"] = detected_instructions
+        # Apply injection based on mode
+        if injection_mode == "override":
+            # Always inject/override the instructions field
+            data["instructions"] = detected_instructions
+            logger.debug("codex_transform_override_instructions")
+        elif injection_mode == "append":
+            # Append Codex instructions to existing ones
+            if existing_instructions:
+                data["instructions"] = f"{existing_instructions}\n\n{detected_instructions}"
+                logger.debug("codex_transform_append_instructions")
+            else:
+                data["instructions"] = detected_instructions
+                logger.debug("codex_transform_set_instructions")
+        # disabled mode already handled above
 
         # Only inject stream: true if user explicitly requested streaming or didn't specify
         # For now, we'll inject stream: true by default since Codex seems to expect it

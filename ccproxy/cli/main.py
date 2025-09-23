@@ -12,6 +12,7 @@ from ccproxy.cli.helpers import (
 )
 
 from .commands.auth import app as auth_app
+from .commands.codex import app as codex_app
 from .commands.config import app as config_app
 from .commands.permission_handler import app as permission_handler_app
 from .commands.serve import api

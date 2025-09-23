@@ -148,10 +148,10 @@ if [[ "$CLAUDE_USER_HOME" != "$CLAUDE_HOME" ]]; then
 fi
 
 # Create additional directories that Claude might need
-mkdir -p "$CLAUDE_HOME"/{.cache,.config,.local}
+mkdir -p "$CLAUDE_HOME"/{.cache,.config,.local,.codex}
 chown claude:"$CLAUDE_GROUP_NAME" "$CLAUDE_HOME"
 chown -R claude:"$CLAUDE_GROUP_NAME" "$CLAUDE_HOME/.cache" "$CLAUDE_HOME/.local"
-chown claude:"$CLAUDE_GROUP_NAME" "$CLAUDE_HOME/.config"
+chown claude:"$CLAUDE_GROUP_NAME" "$CLAUDE_HOME/.config" "$CLAUDE_HOME/.codex"
 
 # Ensure workspace directory exists
 mkdir -p "$CLAUDE_WORKSPACE"

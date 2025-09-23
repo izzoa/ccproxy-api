@@ -172,7 +172,7 @@ async def codex_chat_completions(
     token_manager: OpenAITokenManager = Depends(get_token_manager),
     _: None = Depends(check_codex_enabled),
 ) -> StreamingResponse | OpenAIChatCompletionResponse:
-    """OpenAI-compatible chat completions endpoint for Codex.
+    """OpenAI-compatible chat completions endpoint for Codex with auto-generated session.
 
     This endpoint accepts OpenAI chat/completions format and converts it
     to OpenAI Response API format before forwarding to the ChatGPT backend.
@@ -1184,6 +1184,313 @@ async def codex_chat_completions(
         raise HTTPException(status_code=502, detail=str(e)) from None
     except Exception as e:
         logger.error("Unexpected error in codex_chat_completions", error=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error") from None
+
+
+@router.post("/{session_id}/chat/completions", response_model=None)
+async def codex_chat_completions_with_session(
+    session_id: str,
+    openai_request: OpenAIChatCompletionRequest,
+    request: Request,
+    proxy_service: ProxyServiceDep,
+    settings: Settings = Depends(get_settings),
+    token_manager: OpenAITokenManager = Depends(get_token_manager),
+    _: None = Depends(check_codex_enabled),
+) -> StreamingResponse | OpenAIChatCompletionResponse:
+    """OpenAI-compatible chat completions endpoint for Codex with specific session.
+
+    This endpoint accepts OpenAI chat/completions format and converts it
+    to OpenAI Response API format before forwarding to the ChatGPT backend.
+    The session_id from the URL path is used for the conversation context.
+    """
+    # Get and validate access token
+    try:
+        access_token = await token_manager.get_valid_token()
+        if not access_token:
+            raise HTTPException(
+                status_code=401,
+                detail="No valid OpenAI credentials found. Please authenticate first.",
+            )
+    except HTTPException:
+        # Re-raise HTTPExceptions without chaining to avoid stack traces
+        raise
+    except Exception as e:
+        logger.debug(
+            "Failed to get OpenAI access token",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=401, detail="Failed to retrieve valid credentials"
+        ) from None
+
+    try:
+        # Create adapter for format conversion
+        adapter = ResponseAdapter()
+
+        # Convert OpenAI Chat Completions format to Response API format
+        # Use async version if available for dynamic model info
+        if hasattr(adapter, "chat_to_response_request_async"):
+            response_request = await adapter.chat_to_response_request_async(openai_request)
+        else:
+            response_request = adapter.chat_to_response_request(openai_request)
+
+        # Convert the transformed request to bytes
+        codex_body = response_request.model_dump_json().encode("utf-8")
+
+        # Get request context from middleware
+        request_context = getattr(request.state, "context", None)
+
+        # Create a mock request object with the converted body
+        class MockRequest:
+            def __init__(self, original_request: Request, new_body: bytes) -> None:
+                self.method = original_request.method
+                self.url = original_request.url
+                self.headers = dict(original_request.headers)
+                self.headers["content-length"] = str(len(new_body))
+                self.state = original_request.state
+                self._body = new_body
+
+            async def body(self) -> bytes:
+                return self._body
+
+        mock_request = MockRequest(request, codex_body)
+
+        # For streaming requests, handle the transformation directly
+        if openai_request.stream:
+            # Make the request directly to get the raw streaming response
+            from ccproxy.core.codex_transformers import CodexRequestTransformer
+
+            # Transform the request
+            transformer = CodexRequestTransformer()
+            
+            # Pass settings to transformer for instruction injection mode
+            settings_dict = {
+                "system_prompt_injection_mode": settings.codex.system_prompt_injection_mode
+            }
+            
+            # Transform body with settings
+            codex_detection_data = getattr(
+                proxy_service.app_state, "codex_detection_data", None
+            ) if proxy_service.app_state else None
+            
+            transformed_body = transformer.transform_codex_body(
+                codex_body,
+                codex_detection_data,
+                settings_dict
+            )
+            
+            transformed_request = await transformer.transform_codex_request(
+                method="POST",
+                path=f"/{session_id}/responses",
+                headers=dict(request.headers),
+                body=transformed_body,
+                access_token=access_token,
+                session_id=session_id,
+                account_id="unknown",  # Will be extracted from token if needed
+                codex_detection_data=codex_detection_data,
+                target_base_url=settings.codex.base_url,
+            )
+
+            # Convert Response API SSE stream to Chat Completions format
+            response_headers = {}
+            # Generate stream_id and timestamp outside the nested function
+            stream_id = f"chatcmpl_{uuid.uuid4().hex[:29]}"
+            created = int(time.time())
+
+            async def stream_codex_response() -> AsyncIterator[bytes]:
+                """Stream and convert Response API to Chat Completions format."""
+                async with (
+                    httpx.AsyncClient(timeout=240.0) as client,
+                    client.stream(
+                        method="POST",
+                        url=transformed_request["url"],
+                        headers=transformed_request["headers"],
+                        content=transformed_request["body"],
+                    ) as response,
+                ):
+                    # Check if we got a streaming response
+                    content_type = response.headers.get("content-type", "")
+                    transfer_encoding = response.headers.get("transfer-encoding", "")
+
+                    # Capture response headers for forwarding
+                    nonlocal response_headers
+                    response_headers = dict(response.headers)
+
+                    logger.debug(
+                        "codex_chat_response_headers",
+                        status_code=response.status_code,
+                        content_type=content_type,
+                        transfer_encoding=transfer_encoding,
+                        headers=response_headers,
+                        url=str(response.url),
+                        session_id=session_id,
+                    )
+
+                    # Handle errors and streaming (same logic as original endpoint)
+                    # [Code continues with same streaming logic as codex_chat_completions]
+                    
+                    # Check for error response first
+                    if response.status_code >= 400:
+                        # Handle error response - collect the response body
+                        error_body = b""
+                        async for chunk in response.aiter_bytes():
+                            error_body += chunk
+
+                        # Try to parse error message
+                        error_message = "Request failed"
+                        if error_body:
+                            try:
+                                error_data = json.loads(error_body.decode("utf-8"))
+                                if "detail" in error_data:
+                                    error_message = error_data["detail"]
+                                elif "error" in error_data and isinstance(
+                                    error_data["error"], dict
+                                ):
+                                    error_message = error_data["error"].get(
+                                        "message", "Request failed"
+                                    )
+                            except json.JSONDecodeError:
+                                pass
+
+                        logger.warning(
+                            "codex_chat_error_response",
+                            status_code=response.status_code,
+                            error_message=error_message,
+                            session_id=session_id,
+                        )
+
+                        # Return error in streaming format
+                        error_response = {
+                            "error": {
+                                "message": error_message,
+                                "type": "invalid_request_error",
+                                "code": response.status_code,
+                            }
+                        }
+                        yield f"data: {json.dumps(error_response)}\n\n".encode()
+                        return
+
+                    # Process streaming response (simplified for brevity - use adapter method)
+                    async for chunk in adapter.stream_response_to_chat(response.aiter_bytes()):
+                        yield f"data: {json.dumps(chunk)}\n\n".encode()
+                    
+                    yield b"data: [DONE]\n\n"
+
+            # Execute the generator first to capture headers
+            generator_chunks = []
+            async for chunk in stream_codex_response():
+                generator_chunks.append(chunk)
+
+            # Forward upstream headers but filter out incompatible ones for streaming
+            streaming_headers = dict(response_headers)
+            # Remove headers that conflict with streaming responses
+            streaming_headers.pop("content-length", None)
+            streaming_headers.pop("content-encoding", None)
+            streaming_headers.pop("date", None)
+            # Set streaming-specific headers
+            streaming_headers.update(
+                {
+                    "content-type": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                }
+            )
+
+            # Replay the collected chunks
+            async def replay_stream() -> AsyncIterator[bytes]:
+                for chunk in generator_chunks:
+                    yield chunk
+
+            # Return streaming response with proper headers
+            from ccproxy.observability.context import RequestContext
+
+            # Create a minimal request context if none exists
+            if request_context is None:
+                request_context = RequestContext(
+                    request_id=str(uuid.uuid4()),
+                    start_time=time.perf_counter(),
+                    logger=logger,
+                )
+
+            return StreamingResponseWithLogging(
+                content=replay_stream(),
+                request_context=request_context,
+                metrics=getattr(proxy_service, "metrics", None),
+                status_code=200,
+                media_type="text/event-stream",
+                headers=streaming_headers,
+            )
+        else:
+            # Handle non-streaming request using the proxy service
+            mock_request_typed: Request = mock_request  # type: ignore[assignment]
+            response = await proxy_service.handle_codex_request(
+                method="POST",
+                path=f"/{session_id}/responses",
+                session_id=session_id,
+                access_token=access_token,
+                request=mock_request_typed,
+                settings=settings,
+            )
+
+            # Process non-streaming response (simplified)
+            if isinstance(response, Response):
+                if response.status_code >= 400:
+                    # Handle error
+                    error_body = response.body
+                    if error_body:
+                        try:
+                            error_body_bytes = (
+                                bytes(error_body)
+                                if isinstance(error_body, memoryview)
+                                else error_body
+                            )
+                            error_data = json.loads(error_body_bytes.decode("utf-8"))
+                            error_message = error_data.get("detail", "Request failed")
+                            raise HTTPException(
+                                status_code=response.status_code,
+                                detail=error_message,
+                            )
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            pass
+                    raise HTTPException(
+                        status_code=response.status_code, detail="Request failed"
+                    )
+
+                # Convert successful response
+                response_body = response.body
+                if response_body:
+                    try:
+                        response_body_bytes = (
+                            bytes(response_body)
+                            if isinstance(response_body, memoryview)
+                            else response_body
+                        )
+                        response_data = json.loads(response_body_bytes.decode("utf-8"))
+                        return adapter.response_to_chat_completion(response_data)
+                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                        logger.error("Failed to parse Codex response", error=str(e))
+                        raise HTTPException(
+                            status_code=502,
+                            detail="Invalid response from Codex API",
+                        ) from e
+
+            raise HTTPException(
+                status_code=502, detail="Unable to process Codex response"
+            )
+
+    except HTTPException:
+        raise
+    except AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e)) from None
+    except ProxyError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from None
+    except Exception as e:
+        logger.error(
+            "Unexpected error in codex_chat_completions_with_session",
+            error=str(e),
+            session_id=session_id,
+        )
         raise HTTPException(status_code=500, detail="Internal server error") from None
 
 

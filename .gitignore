@@ -163,3 +163,5 @@ ccproxy/static/dashboard/
 
 *.wal
 *.duckdb
+
+.early.coverage

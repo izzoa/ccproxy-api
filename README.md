@@ -13,15 +13,18 @@ The server provides two primary modes of operation:
 - **SDK Mode (`/sdk`):** Routes requests through the local `claude-code-sdk`. This enables access to tools configured in your Claude environment and includes an integrated MCP (Model Context Protocol) server for permission management.
 - **API Mode (`/api`):** Acts as a direct reverse proxy, injecting the necessary authentication headers. This provides full access to the underlying API features and model settings.
 
-### OpenAI Codex Response API (Experimental)
+### OpenAI Codex Response API
 
 Access OpenAI's [Response API](https://platform.openai.com/docs/api-reference/responses) via your ChatGPT Plus subscription. This provides programmatic access to ChatGPT models through the `chatgpt.com/backend-api/codex` endpoint.
 
 - **Response API (`/codex/responses`):** Direct reverse proxy to ChatGPT backend for conversation responses
+- **Chat Completions (`/codex/chat/completions`):** OpenAI-compatible endpoint with tool calling and advanced features
 - **Session Management:** Supports both auto-generated and persistent session IDs for conversation continuity
 - **OpenAI OAuth:** Uses the same OAuth2 PKCE authentication flow as the official Codex CLI
 - **ChatGPT Plus Required:** Requires an active ChatGPT Plus subscription for API access
-- **Instruction Prompt:** Automatically injects the Codex instruction prompt into conversations
+- **Configurable Instruction Injection:** Control how system prompts are handled (override, append, or disabled)
+- **Dynamic Model Information:** Automatically fetches model capabilities and token limits
+- **Enhanced Observability:** Full metrics and logging support with Prometheus integration
 
 The server includes a translation layer to support both Anthropic and OpenAI-compatible API formats for requests and responses, including streaming.
 
@@ -273,8 +276,24 @@ The proxy uses different authentication mechanisms depending on the provider and
 The Codex Response API requires ChatGPT Plus subscription and OAuth2 authentication:
 
 ```bash
-# Enable Codex provider
+# Enable Codex provider and configure settings
 ccproxy config codex --enable
+
+# View Codex configuration
+ccproxy codex info
+
+# Manage Codex detection cache
+ccproxy codex cache --list
+ccproxy codex cache --clear
+
+# Test Codex connectivity
+ccproxy codex test
+
+# Configure instruction injection mode
+export CODEX__SYSTEM_PROMPT_INJECTION_MODE=append  # or 'override' or 'disabled'
+
+# Enable dynamic model information
+export CODEX__ENABLE_DYNAMIC_MODEL_INFO=true
 
 # Authentication options:
 
@@ -394,13 +413,16 @@ clients:
 aichat --model openai:gpt-5 "hello"
 ```
 
-**Important Codex Limitations:**
+**Codex Features & Capabilities:**
 
-- Limited model support (e.g., `gpt-5` works, others may not)
-- Many OpenAI parameters not supported (temperature, top_p, etc.)
-- Reasoning content appears in XML tags for capable models
+- **Tool/Function Calling:** Full support for OpenAI-style tool and function calling
+- **Parameter Support:** Propagation of temperature, top_p, and other OpenAI parameters (where supported by backend)
+- **Dynamic Model Info:** Automatic detection of model capabilities and token limits
+- **Reasoning Mode:** Enhanced handling of reasoning content for capable models
+- **Configurable System Prompts:** Control instruction injection (override, append, or disabled)
+- **Session Persistence:** Full support for maintaining conversation context across requests
 
-**Note:** The Codex instruction prompt is automatically injected into all conversations to maintain compatibility with the ChatGPT backend.
+**Note:** The Codex instruction prompt injection is now configurable via `CODEX__SYSTEM_PROMPT_INJECTION_MODE` setting.
 
 ### Codex Response API Details
 
@@ -625,17 +647,17 @@ The proxy exposes endpoints under multiple prefixes for different providers and 
   - Supports streaming via SSE when `stream: true` is set
   - See [Response API docs](https://platform.openai.com/docs/api-reference/responses)
 
-**Codex Chat Completions Limitations:**
+**Codex Chat Completions Features:**
 
-- **No Tool/Function Calling Support**: Tool use and function calling are not supported (use `/codex/responses` for tool calls)
-- **Limited Parameter Support**: Many OpenAI parameters (temperature, top_p, frequency_penalty, etc.) are not supported
-- **Restricted Model Support**: Only certain models work (e.g., `gpt-5` confirmed working, others may fail)
-- **No Custom System Prompts**: System messages and instructions are overridden by the required Codex instruction prompt
-- **Reasoning Mode**: GPT models with reasoning capabilities pass reasoning content between XML tags (`<reasoning>...</reasoning>`)
-- **Session Management**: Uses auto-generated sessions; persistent sessions require the `/codex/{session_id}/responses` endpoint
+- **Tool/Function Calling**: Full support for OpenAI-style tool and function calling
+- **Parameter Support**: Most OpenAI parameters (temperature, top_p, max_tokens, etc.) are now supported
+- **Extended Model Support**: Dynamic model detection and expanded model compatibility
+- **Configurable System Prompts**: Control how system messages are handled via injection modes
+- **Reasoning Mode**: Enhanced handling of reasoning content for capable models
+- **Session Management**: Both auto-generated and persistent sessions via `/codex/{session_id}/chat/completions`
 - **ChatGPT Plus Required**: Requires active ChatGPT Plus subscription for access
 
-**Note**: The `/codex/responses` endpoint supports tool calling and more parameters, but specific feature availability depends on ChatGPT's backend - users should test individual capabilities.
+**Note**: Both `/codex/responses` and `/codex/chat/completions` endpoints now support full tool calling and most OpenAI parameters. The chat completions endpoint provides better OpenAI API compatibility.
 
 ### Utility Endpoints
 
