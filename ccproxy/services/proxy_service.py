@@ -25,6 +25,10 @@ from ccproxy.core.http_transformers import (
     HTTPResponseTransformer,
 )
 from ccproxy.services.model_info_service import get_model_info_service
+from ccproxy.auth.exceptions import (
+    CredentialsExpiredError,
+    CredentialsNotFoundError,
+)
 from ccproxy.observability import (
     PrometheusMetrics,
     get_metrics,
@@ -146,6 +150,39 @@ class ProxyService:
             streaming = stream_value
 
         return model, streaming
+
+    async def _get_access_token(self) -> str:
+        """Retrieve a valid Claude access token via the credentials manager."""
+
+        try:
+            token = await self.credentials_manager.get_access_token()
+            if not token:
+                raise CredentialsNotFoundError(
+                    "No Claude credentials available. Please run 'ccproxy auth login'."
+                )
+            return token
+        except CredentialsNotFoundError as exc:
+            logger.warning("claude_credentials_missing")
+            raise HTTPException(
+                status_code=401,
+                detail="No Claude credentials found. Run 'ccproxy auth login'.",
+            ) from exc
+        except CredentialsExpiredError as exc:
+            logger.warning("claude_credentials_expired")
+            raise HTTPException(
+                status_code=401,
+                detail="Claude credentials expired. Run 'ccproxy auth login'.",
+            ) from exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "claude_credentials_unexpected_error",
+                error=str(exc),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to retrieve Claude credentials",
+            ) from exc
 
         # Create mock response generator for bypass mode
         self.mock_generator = RealisticMockResponseGenerator()
