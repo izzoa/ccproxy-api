@@ -35,6 +35,14 @@ class ModelInfoService:
             "claude-opus-4-20250514": 200_000,
             "claude-sonnet-4-20250514": 200_000,
             "claude-3-7-sonnet-20250219": 200_000,
+            # OpenAI Response API models (fallback estimates)
+            "gpt-5": 200_000,
+            "gpt-4o": 128_000,
+            "gpt-4o-mini": 128_000,
+            "o1": 64_000,
+            "o1-mini": 64_000,
+            "o1-preview": 64_000,
+            "o3-mini": 64_000,
         }
         self._fallback_output_limits = {
             # Most models default to 4096
@@ -44,6 +52,14 @@ class ModelInfoService:
             "claude-3-opus-20240229": 4096,
             "claude-3-sonnet-20240229": 4096,
             "claude-3-haiku-20240307": 4096,
+            # OpenAI Response API fallbacks
+            "gpt-5": 8192,
+            "gpt-4o": 8192,
+            "gpt-4o-mini": 8192,
+            "o1": 4096,
+            "o1-mini": 4096,
+            "o1-preview": 4096,
+            "o3-mini": 4096,
         }
     
     @classmethod

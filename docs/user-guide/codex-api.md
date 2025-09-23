@@ -115,13 +115,13 @@ curl -X POST http://localhost:8000/codex/v1/chat/completions \
   }'
 ```
 
-**Important Limitations for Chat Completions:**
+**Important Notes for Chat Completions:**
 
-- **Limited Model Support**: Only certain models work (e.g., `gpt-5` confirmed, others may fail)
-- **No Parameter Support**: OpenAI parameters like `temperature`, `top_p`, `frequency_penalty`, etc. are not supported
-- **No Tool Calling**: Function calling and tool use are NOT supported (use `/codex/responses` for tool calls)
-- **No System Prompts**: System messages and instructions are overridden by the required Codex instruction prompt
-- **Reasoning in XML**: Models with reasoning show reasoning content in `<reasoning>...</reasoning>` tags
+- **Feature Parity**: Codex requests now translate tool/function calls, reasoning deltas, sampling parameters, and usage blocks into the OpenAI Chat Completions schema.
+- **Model Availability**: Supported models mirror the ChatGPT Response API. Use `ccproxy codex info` (and optionally `ccproxy codex set --enable-dynamic-model-info`) to inspect the active list.
+- **Backend Guardrails**: The upstream service still enforces a single choice (`n=1`) and does not expose `logprobs`/`top_logprobs` outputs.
+- **Custom Instructions**: System prompts are controllable via `system_prompt_injection_mode` (`override`, `append`, or `disabled`).
+- **Reasoning Output**: Reasoning-capable models stream `<thinking>...</thinking>` segments; strip them if your client cannot render reasoning traces.
 
 ### Response API (Direct Backend Access)
 
@@ -142,11 +142,11 @@ curl -X POST http://localhost:8000/codex/responses \
 
 **Response API Features:**
 
-- **Tool Calling**: Function calling and tool use are supported (main feature advantage)
-- **Parameter Support**: More OpenAI parameters may work (temperature, max_tokens, etc.)
-- **Session Management**: Full session management capabilities
-- **No Custom Instructions**: System prompts/instructions are overridden by the required Codex instruction prompt
-- **Backend Dependent**: Features depend on what ChatGPT's backend API actually supports - users need to test individual parameters and capabilities
+- **Tool Calling**: Function calling, parallel tool calls, and tool outputs are fully bridged to OpenAI formats.
+- **Parameter Support**: Sampling knobs (`temperature`, `top_p`, penalties, `max_tokens`, `response_format`, `seed`, etc.) are forwarded to the Response API when supported.
+- **Session Management**: Full session support through `/codex/{session_id}/responses` and the OpenAI-compatible chat endpoints.
+- **Instruction Modes**: Configure prompt handling (`override`, `append`, or `disabled`) via `ccproxy codex set`.
+- **Backend Guardrails**: The ChatGPT backend ultimately decides which parameters it accepts; unsupported options still surface descriptive errors.
 
 ### Response Format
 
@@ -298,6 +298,32 @@ What the backend actually receives:
 }
 ```
 
+## Configuring Codex Features
+
+Use the `ccproxy codex set` command to adjust Codex behaviour without manually editing configuration files:
+
+```bash
+# Enable dynamic model metadata lookups and raise the fallback token limit
+ccproxy codex set --enable-dynamic-model-info --max-output-tokens-fallback 8192
+
+# Allow custom system prompts to append after Codex instructions
+ccproxy codex set --system-prompt-injection-mode append
+
+# Block unsupported OpenAI parameters instead of forwarding them upstream
+ccproxy codex set --block-unsupported-params
+```
+
+Available toggles include:
+
+- `--enable-dynamic-model-info/--disable-dynamic-model-info`
+- `--max-output-tokens-fallback <int>`
+- `--propagate-unsupported-params/--block-unsupported-params`
+- `--system-prompt-injection-mode {override|append|disabled}`
+- `--verbose-logging/--no-verbose-logging`
+- `--header-override-enabled/--header-override-disabled`
+
+Changes are written to your active ccproxy TOML configuration (for example `~/.config/ccproxy/config.toml`).
+
 ## Model Differences
 
 ### Available Models
@@ -306,9 +332,13 @@ The Response API uses ChatGPT Plus models, which differ from standard OpenAI API
 
 | Response API Model | Equivalent To      | Notes                  |
 | ------------------ | ------------------ | ---------------------- |
-| `gpt-5`            | ChatGPT Plus GPT-4 | Latest GPT-4 version   |
-| `gpt-5-turbo`      | ChatGPT Plus Turbo | Faster, more efficient |
-| `gpt-3.5-turbo`    | ChatGPT Free tier  | Basic model            |
+| `gpt-5`            | ChatGPT Plus GPT-4 | Latest GPT-4 release   |
+| `gpt-4o`           | ChatGPT Omni       | Multimodal, default    |
+| `gpt-4o-mini`      | ChatGPT Omni Mini  | Cost-efficient tier    |
+| `o1`, `o1-mini`    | ChatGPT o1 family  | Reasoning-focused      |
+| `o3-mini`          | ChatGPT o3 mini    | Fast reasoning model   |
+
+Use `ccproxy codex info` to see the exact list detected in your environment. When dynamic discovery is enabled (`ccproxy codex set --enable-dynamic-model-info`), CCProxy refreshes this list from the ChatGPT backend.
 
 ### Behavioral Differences
 
@@ -333,12 +363,12 @@ clients:
 Usage:
 
 ```bash
-# Note: Only certain models work (gpt-5 confirmed working)
+# Tip: Run `ccproxy codex info` to confirm available models
 aichat --model openai:gpt-5 "Hello world"
 
-# Reasoning models show XML tags
+# Reasoning-capable models include <thinking> segments
 aichat --model openai:gpt-5 "Solve this step by step: 2+2*3"
-# Output will include: <reasoning>...</reasoning> followed by the answer
+# Output will include: <thinking>...</thinking> followed by the answer
 ```
 
 ### OpenAI SDK Example (Response API)

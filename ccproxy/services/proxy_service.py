@@ -24,6 +24,7 @@ from ccproxy.core.http_transformers import (
     HTTPRequestTransformer,
     HTTPResponseTransformer,
 )
+from ccproxy.services.model_info_service import get_model_info_service
 from ccproxy.observability import (
     PrometheusMetrics,
     get_metrics,
@@ -551,6 +552,45 @@ class ProxyService:
                         )
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         transformed_request_data = request_data
+
+                # Attach request-level metadata for observability/dynamic insight
+                if isinstance(transformed_request_data, dict):
+                    ctx.add_metadata(
+                        requested_codex_model=transformed_request_data.get("model"),
+                        requested_max_output_tokens=transformed_request_data.get(
+                            "max_output_tokens"
+                        ),
+                        requested_temperature=transformed_request_data.get("temperature"),
+                        requested_top_p=transformed_request_data.get("top_p"),
+                    )
+
+                    if settings.codex.enable_dynamic_model_info and transformed_request_data.get(
+                        "model"
+                    ):
+                        try:
+                            model_info_service = get_model_info_service()
+                            model_capabilities = await model_info_service.get_model_capabilities(
+                                transformed_request_data["model"]
+                            )
+
+                            ctx.add_metadata(
+                                model_context_window=model_capabilities.get("max_tokens"),
+                                model_max_output_tokens=model_capabilities.get(
+                                    "max_output_tokens"
+                                ),
+                                model_supports_tools=model_capabilities.get(
+                                    "supports_function_calling"
+                                ),
+                                model_supports_vision=model_capabilities.get(
+                                    "supports_vision"
+                                ),
+                            )
+                        except Exception as exc:
+                            logger.debug(
+                                "codex_dynamic_model_lookup_failed",
+                                model=transformed_request_data.get("model"),
+                                error=str(exc),
+                            )
 
                 # Use context request_id instead of generating new one
                 request_id = ctx.request_id

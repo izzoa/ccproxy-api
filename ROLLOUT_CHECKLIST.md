@@ -36,6 +36,7 @@ This checklist outlines the steps for safely deploying the Codex parity improvem
   - `CODEX__ENABLE_DYNAMIC_MODEL_INFO`
   - `CODEX__MAX_OUTPUT_TOKENS_FALLBACK`
   - `CODEX__PROPAGATE_UNSUPPORTED_PARAMS`
+- [ ] Verify CLI overrides where needed using `ccproxy codex set`
 - [ ] Ensure monitoring/alerting is configured for new metrics
 
 ### 2. Gradual Rollout
@@ -45,13 +46,13 @@ This checklist outlines the steps for safely deploying the Codex parity improvem
 - [ ] Run smoke tests:
   ```bash
   # Test basic connectivity
-  ccproxy codex test
-  
-  # Check configuration
   ccproxy codex info
-  
+
   # Verify cache management
-  ccproxy codex cache --list
+  ccproxy codex cache
+
+  # Confirm configuration overrides
+  ccproxy codex set --enable-dynamic-model-info --max-output-tokens-fallback 8192
   ```
 - [ ] Monitor metrics for anomalies
 - [ ] Test with internal tools/applications

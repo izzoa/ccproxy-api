@@ -573,7 +573,7 @@ aider --model o3-mini
 
 ### Using with OpenAI Codex
 
-For tools that support custom API bases, you can use the Codex provider. Note that this has significant limitations compared to Claude providers.
+For tools that support custom API bases, you can use the Codex provider. The Codex proxy now mirrors the ChatGPT Response API feature set—including tool/function calling, sampling parameters, and dynamic model limits—while using your ChatGPT Plus subscription.
 
 **Example with aichat:**
 
@@ -589,11 +589,12 @@ clients:
 aichat --model openai:gpt-5 "hello"
 ```
 
-**Codex Limitations:**
+**Codex Notes:**
 
-- Only select models work (gpt-5 confirmed, others may fail)
-- No support for temperature, top_p, or most OpenAI parameters
-- When using reasoning models, reasoning appears as XML tags in output
+- A ChatGPT Plus subscription is still required; CCProxy authenticates with OAuth on first use.
+- Available models track the ChatGPT Response API. Run `ccproxy codex info` to inspect support or enable dynamic discovery with `ccproxy codex set --enable-dynamic-model-info`.
+- The backend only returns a single choice (`n=1`) and does not expose logprobs/top_logprobs today.
+- Reasoning-capable models emit `<thinking>…</thinking>` segments; strip them if your client cannot display reasoning traces.
 
 ### `curl` Example
 

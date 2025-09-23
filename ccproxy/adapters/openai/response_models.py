@@ -50,9 +50,15 @@ class ResponseRequest(BaseModel):
     store: bool = False
     include: list[str] | None = None
     prompt_cache_key: str | None = None
-    # Note: The following OpenAI parameters are not supported by Response API (Codex backend):
-    # temperature, max_output_tokens, top_p, frequency_penalty, presence_penalty, metadata
-    # If included, they'll cause "Unsupported parameter" errors
+    max_output_tokens: int | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    logit_bias: dict[str, float] | None = None
+    metadata: dict[str, Any] | None = None
+    stop: str | list[str] | None = None
+    seed: int | None = None
 
 
 # Response Models

@@ -1,14 +1,18 @@
 """Codex-specific CLI commands."""
 
 import json
+import os
 from pathlib import Path
+from typing import Any
 
+import toml
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from ccproxy.cli.helpers import get_rich_toolkit
+from ccproxy.config.discovery import find_toml_config_file, get_ccproxy_config_dir
 from ccproxy.config.settings import Settings, get_settings
 
 
@@ -107,6 +111,131 @@ def codex_info() -> None:
     except Exception as e:
         toolkit.print(f"Error loading Codex configuration: {e}", tag="error")
         raise typer.Exit(1) from e
+
+
+def _resolve_config_path(config_file: Path | None) -> Path:
+    """Resolve the configuration file path for Codex settings updates."""
+    if config_file:
+        return config_file.expanduser()
+
+    env_config = os.getenv("CONFIG_FILE")
+    if env_config:
+        return Path(env_config).expanduser()
+
+    discovered = find_toml_config_file()
+    if discovered:
+        return discovered
+
+    return get_ccproxy_config_dir() / "config.toml"
+
+
+def _load_config(config_path: Path) -> dict[str, Any]:
+    if config_path.exists():
+        try:
+            return toml.load(config_path)
+        except (toml.TomlDecodeError, OSError):
+            raise typer.BadParameter(
+                f"Failed to parse TOML config at {config_path}. Please fix the file or specify an alternate path."
+            )
+    return {}
+
+
+def _validate_injection_mode(mode: str) -> str:
+    valid_modes = {"override", "append", "disabled"}
+    mode_lower = mode.lower()
+    if mode_lower not in valid_modes:
+        raise typer.BadParameter(
+            f"Invalid system prompt injection mode '{mode}'. Choose from: {', '.join(sorted(valid_modes))}."
+        )
+    return mode_lower
+
+
+@app.command(name="set")
+def codex_set(
+    enable_dynamic_model_info: bool | None = typer.Option(
+        None,
+        "--enable-dynamic-model-info/--disable-dynamic-model-info",
+        help="Toggle dynamic model metadata lookups for Codex.",
+    ),
+    max_output_tokens_fallback: int | None = typer.Option(
+        None,
+        "--max-output-tokens-fallback",
+        min=1,
+        help="Fallback max output tokens when dynamic info is unavailable.",
+    ),
+    propagate_unsupported_params: bool | None = typer.Option(
+        None,
+        "--propagate-unsupported-params/--block-unsupported-params",
+        help="Control whether unsupported OpenAI parameters are forwarded to Codex.",
+    ),
+    system_prompt_injection_mode: str | None = typer.Option(
+        None,
+        "--system-prompt-injection-mode",
+        help="Injection mode: override, append, or disabled.",
+    ),
+    verbose_logging: bool | None = typer.Option(
+        None,
+        "--verbose-logging/--no-verbose-logging",
+        help="Enable verbose Codex logging for troubleshooting.",
+    ),
+    header_override_enabled: bool | None = typer.Option(
+        None,
+        "--header-override-enabled/--header-override-disabled",
+        help="Allow custom header overrides when forwarding Codex requests.",
+    ),
+    config_file: Path | None = typer.Option(
+        None,
+        "--config-file",
+        "-c",
+        help="Explicit configuration file to modify. Defaults to detected ccproxy config.",
+    ),
+) -> None:
+    """Update Codex configuration values in the ccproxy config file."""
+
+    toolkit = get_rich_toolkit()
+
+    pending_changes: dict[str, Any] = {}
+    if enable_dynamic_model_info is not None:
+        pending_changes["enable_dynamic_model_info"] = enable_dynamic_model_info
+    if max_output_tokens_fallback is not None:
+        pending_changes["max_output_tokens_fallback"] = max_output_tokens_fallback
+    if propagate_unsupported_params is not None:
+        pending_changes["propagate_unsupported_params"] = propagate_unsupported_params
+    if verbose_logging is not None:
+        pending_changes["verbose_logging"] = verbose_logging
+    if header_override_enabled is not None:
+        pending_changes["header_override_enabled"] = header_override_enabled
+    if system_prompt_injection_mode is not None:
+        pending_changes["system_prompt_injection_mode"] = _validate_injection_mode(
+            system_prompt_injection_mode
+        )
+
+    if not pending_changes:
+        toolkit.print(
+            "No changes specified. Use --help to view available options.",
+            tag="warning",
+        )
+        raise typer.Exit(0)
+
+    config_path = _resolve_config_path(config_file)
+    config_data = _load_config(config_path)
+    codex_section: dict[str, Any] = config_data.get("codex", {})
+
+    codex_section.update(pending_changes)
+    config_data["codex"] = codex_section
+
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with config_path.open("w", encoding="utf-8") as handle:
+            toml.dump(config_data, handle)
+    except OSError as exc:
+        toolkit.print(f"Failed to write configuration: {exc}", tag="error")
+        raise typer.Exit(1) from exc
+
+    toolkit.print(f"Updated Codex configuration at {config_path}", tag="success")
+    for key, value in sorted(pending_changes.items()):
+        toolkit.print(f"{key} = {value}", tag="config")
+    toolkit.print("Run `ccproxy codex info` to verify the active settings.", tag="info")
 
 
 @app.command(name="cache")

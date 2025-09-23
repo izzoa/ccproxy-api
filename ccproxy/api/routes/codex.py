@@ -15,7 +15,11 @@ from ccproxy.adapters.openai.models import (
     OpenAIChatCompletionRequest,
     OpenAIChatCompletionResponse,
 )
-from ccproxy.adapters.openai.response_adapter import ResponseAdapter
+from ccproxy.adapters.openai.response_adapter import (
+    ResponseAdapter,
+    UnsupportedCodexModelError,
+    UnsupportedOpenAIParametersError,
+)
 from ccproxy.api.dependencies import ProxyServiceDep
 from ccproxy.auth.openai import OpenAITokenManager
 from ccproxy.config.settings import Settings, get_settings
@@ -1178,6 +1182,10 @@ async def codex_chat_completions(
 
     except HTTPException:
         raise
+    except UnsupportedCodexModelError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    except UnsupportedOpenAIParametersError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
     except AuthenticationError as e:
         raise HTTPException(status_code=401, detail=str(e)) from None
     except ProxyError as e:
@@ -1481,6 +1489,10 @@ async def codex_chat_completions_with_session(
 
     except HTTPException:
         raise
+    except UnsupportedCodexModelError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    except UnsupportedOpenAIParametersError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
     except AuthenticationError as e:
         raise HTTPException(status_code=401, detail=str(e)) from None
     except ProxyError as e:

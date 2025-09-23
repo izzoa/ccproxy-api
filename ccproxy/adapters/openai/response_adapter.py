@@ -11,7 +11,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -29,13 +29,75 @@ from ccproxy.adapters.openai.response_models import (
     ResponseReasoning,
     ResponseRequest,
 )
+from ccproxy.config.codex import CodexSettings
+from ccproxy.config.settings import get_settings
+from ccproxy.services.model_info_service import get_model_info_service
+
+if TYPE_CHECKING:  # pragma: no cover
+    from ccproxy.services.model_info_service import ModelInfoService
 
 
 logger = structlog.get_logger(__name__)
 
 
+SUPPORTED_RESPONSE_MODELS: set[str] = {
+    "gpt-5",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "o1",
+    "o1-mini",
+    "o1-preview",
+    "o3-mini",
+}
+
+MODEL_ALIASES: dict[str, str] = {
+    "chatgpt-4o-latest": "gpt-4o",
+    "gpt-4o-latest": "gpt-4o",
+    "gpt-4.1": "gpt-4o",
+    "gpt-4.1-mini": "gpt-4o-mini",
+    "gpt-4-turbo": "gpt-4o",
+    "gpt-4": "gpt-4o",
+    "gpt-3.5": "gpt-4o-mini",
+    "gpt-3.5-turbo": "gpt-4o-mini",
+    "gpt-3.5-turbo-0125": "gpt-4o-mini",
+    "gpt-4o-realtime-preview": "gpt-4o",
+    "o3": "o3-mini",
+    "o3-mini-2024-05-20": "o3-mini",
+}
+
+DEFAULT_RESPONSE_MODEL = "gpt-4o"
+
+
+class UnsupportedOpenAIParametersError(ValueError):
+    """Raised when a Chat Completions request includes unsupported parameters."""
+
+    def __init__(self, parameters: list[str]) -> None:
+        self.parameters = parameters
+        message = (
+            "Unsupported OpenAI parameters for Codex: "
+            + ", ".join(parameters)
+        )
+        super().__init__(message)
+
+
+class UnsupportedCodexModelError(ValueError):
+    """Raised when a requested Codex model is not supported."""
+
+    def __init__(self, model: str, supported: list[str]) -> None:
+        self.model = model
+        self.supported = supported
+        message = (
+            f"Model '{model}' is not supported by Codex. Supported models: "
+            + ", ".join(supported)
+        )
+        super().__init__(message)
+
+
 class ResponseAdapter:
     """Adapter for OpenAI Response API format conversion."""
+
+    def __init__(self, codex_settings: CodexSettings | None = None) -> None:
+        self._codex_settings = codex_settings
 
     def chat_to_response_request(
         self, chat_request: dict[str, Any] | OpenAIChatCompletionRequest
@@ -51,6 +113,8 @@ class ResponseAdapter:
         Returns:
             Response API formatted request
         """
+        codex_settings = self._get_codex_settings()
+
         if isinstance(chat_request, OpenAIChatCompletionRequest):
             chat_dict = chat_request.model_dump()
         else:
@@ -127,6 +191,8 @@ class ResponseAdapter:
         # Map model for Response API
         model = chat_dict.get("model", "gpt-4")
         response_model = self._map_to_response_api_model(model)
+        if not self._is_model_supported(response_model, set(SUPPORTED_RESPONSE_MODELS)):
+            raise UnsupportedCodexModelError(response_model, sorted(SUPPORTED_RESPONSE_MODELS))
 
         # Handle response_format for JSON mode
         response_format = chat_dict.get("response_format")
@@ -177,51 +243,13 @@ class ResponseAdapter:
         if instructions is not None:
             request_dict["instructions"] = instructions
 
-        # Audit and log unsupported OpenAI parameters
-        unsupported_params = []
-        
-        # Parameters that Response API explicitly does not support
-        if chat_dict.get("temperature") is not None:
-            unsupported_params.append(f"temperature={chat_dict.get('temperature')}")
-        if chat_dict.get("top_p") is not None:
-            unsupported_params.append(f"top_p={chat_dict.get('top_p')}")
-        if chat_dict.get("frequency_penalty") is not None:
-            unsupported_params.append(f"frequency_penalty={chat_dict.get('frequency_penalty')}")
-        if chat_dict.get("presence_penalty") is not None:
-            unsupported_params.append(f"presence_penalty={chat_dict.get('presence_penalty')}")
-        if chat_dict.get("seed") is not None:
-            unsupported_params.append(f"seed={chat_dict.get('seed')}")
-        if chat_dict.get("logprobs"):
-            unsupported_params.append(f"logprobs={chat_dict.get('logprobs')}")
-        if chat_dict.get("top_logprobs"):
-            unsupported_params.append(f"top_logprobs={chat_dict.get('top_logprobs')}")
-        if chat_dict.get("n") and chat_dict.get("n") != 1:
-            unsupported_params.append(f"n={chat_dict.get('n')} (only n=1 supported)")
-        if chat_dict.get("stop"):
-            unsupported_params.append(f"stop={chat_dict.get('stop')}")
-        if chat_dict.get("user"):
-            unsupported_params.append(f"user={chat_dict.get('user')}")
-        if chat_dict.get("metadata"):
-            unsupported_params.append(f"metadata={chat_dict.get('metadata')}")
-        
-        # Log warning if unsupported parameters were provided
-        if unsupported_params:
-            import structlog
-            logger = structlog.get_logger(__name__)
-            logger.warning(
-                "response_adapter_unsupported_parameters",
-                parameters=unsupported_params,
-                note="These OpenAI parameters are not supported by Response API and will be ignored"
-            )
-        
-        # Handle max_tokens parameter
-        # Response API uses max_output_tokens but it's not in the ResponseRequest model
-        # It's handled at the API level, so we'll just note it
-        if chat_dict.get("max_tokens"):
-            # This would need to be handled at a different layer
-            # since ResponseRequest doesn't have max_output_tokens field
-            pass
-        
+        # Apply parameter translation/validation (sync path falls back to configured default)
+        self._apply_openai_parameters(
+            chat_dict,
+            request_dict,
+            default_max_output_tokens=codex_settings.max_output_tokens_fallback,
+        )
+
         request = ResponseRequest(**request_dict)
         return request
 
@@ -239,6 +267,8 @@ class ResponseAdapter:
         Raises:
             ValueError: If the request format is invalid
         """
+        codex_settings = self._get_codex_settings()
+
         if isinstance(chat_request, OpenAIChatCompletionRequest):
             chat_dict = chat_request.model_dump()
         else:
@@ -318,32 +348,42 @@ class ResponseAdapter:
 
         # Get dynamic model info for max_tokens if needed
         max_tokens = chat_dict.get("max_tokens")
-        if max_tokens is None:
-            # Try to get model-specific default for max_tokens
+        default_dynamic_max: int | None = None
+        model_info_service: "ModelInfoService" | None = None
+
+        if codex_settings.enable_dynamic_model_info:
             try:
-                from ccproxy.services.model_info_service import get_model_info_service
                 model_info_service = get_model_info_service()
-                # Use a default for Codex models since they may not be in the Claude model list
-                # Response API models typically support 8192 tokens
-                max_tokens = 8192
-                
-                # Try to get dynamic info if available
-                try:
-                    # Check if we have info for this specific model
-                    max_tokens = await model_info_service.get_max_output_tokens(response_model)
-                except Exception:
-                    # Model not found in dynamic info, use default
-                    pass
-            except Exception as e:
-                import structlog
-                logger = structlog.get_logger(__name__)
-                logger.warning(
-                    "failed_to_get_dynamic_max_tokens",
-                    model=response_model,
-                    error=str(e),
-                    fallback=8192,
+            except Exception as exc:
+                logger.debug(
+                    "codex_model_info_service_unavailable",
+                    error=str(exc),
                 )
-                max_tokens = 8192  # Conservative fallback
+
+        if max_tokens is None:
+            if model_info_service is not None:
+                try:
+                    default_dynamic_max = await model_info_service.get_max_output_tokens(
+                        response_model
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "failed_to_get_dynamic_max_tokens",
+                        model=response_model,
+                        error=str(exc),
+                        fallback=codex_settings.max_output_tokens_fallback,
+                    )
+                    default_dynamic_max = codex_settings.max_output_tokens_fallback
+            else:
+                default_dynamic_max = codex_settings.max_output_tokens_fallback
+        else:
+            default_dynamic_max = max_tokens
+
+        await self._ensure_model_supported(
+            response_model,
+            codex_settings,
+            model_info_service=model_info_service,
+        )
 
         # Handle response_format for JSON mode
         response_format = chat_dict.get("response_format")
@@ -394,45 +434,198 @@ class ResponseAdapter:
         if instructions is not None:
             request_dict["instructions"] = instructions
 
-        # Audit and log unsupported OpenAI parameters
-        unsupported_params = []
-        
-        # Parameters that Response API explicitly does not support
-        if chat_dict.get("temperature") is not None:
-            unsupported_params.append(f"temperature={chat_dict.get('temperature')}")
-        if chat_dict.get("top_p") is not None:
-            unsupported_params.append(f"top_p={chat_dict.get('top_p')}")
-        if chat_dict.get("frequency_penalty") is not None:
-            unsupported_params.append(f"frequency_penalty={chat_dict.get('frequency_penalty')}")
-        if chat_dict.get("presence_penalty") is not None:
-            unsupported_params.append(f"presence_penalty={chat_dict.get('presence_penalty')}")
-        if chat_dict.get("seed") is not None:
-            unsupported_params.append(f"seed={chat_dict.get('seed')}")
-        if chat_dict.get("logprobs"):
-            unsupported_params.append(f"logprobs={chat_dict.get('logprobs')}")
-        if chat_dict.get("top_logprobs"):
-            unsupported_params.append(f"top_logprobs={chat_dict.get('top_logprobs')}")
-        if chat_dict.get("n") and chat_dict.get("n") != 1:
-            unsupported_params.append(f"n={chat_dict.get('n')} (only n=1 supported)")
-        if chat_dict.get("stop"):
-            unsupported_params.append(f"stop={chat_dict.get('stop')}")
-        if chat_dict.get("user"):
-            unsupported_params.append(f"user={chat_dict.get('user')}")
-        if chat_dict.get("metadata"):
-            unsupported_params.append(f"metadata={chat_dict.get('metadata')}")
-        
-        # Log warning if unsupported parameters were provided
-        if unsupported_params:
-            import structlog
-            logger = structlog.get_logger(__name__)
-            logger.warning(
-                "response_adapter_unsupported_parameters",
-                parameters=unsupported_params,
-                note="These OpenAI parameters are not supported by Response API and will be ignored"
-            )
-        
+        # Apply parameter translation/validation using dynamic defaults
+        self._apply_openai_parameters(
+            chat_dict,
+            request_dict,
+            default_max_output_tokens=default_dynamic_max,
+        )
+
         request = ResponseRequest(**request_dict)
         return request
+
+    def _get_codex_settings(self) -> CodexSettings:
+        if self._codex_settings is None:
+            self._codex_settings = get_settings().codex
+        return self._codex_settings
+
+    def _map_to_response_api_model(self, model: str | None) -> str:
+        """Map incoming OpenAI model identifier to Response API equivalent."""
+        if not model:
+            logger.debug("response_adapter_default_model", fallback=DEFAULT_RESPONSE_MODEL)
+            return DEFAULT_RESPONSE_MODEL
+
+        normalized = model.strip()
+        alias_key = normalized.lower()
+        mapped = MODEL_ALIASES.get(alias_key, normalized)
+
+        # Allow suffix variations (e.g., gpt-4o-mini-2024-05-13)
+        for candidate in SUPPORTED_RESPONSE_MODELS:
+            if mapped == candidate or mapped.startswith(f"{candidate}-"):
+                return candidate
+
+        # If alias resolved to supported name, accept
+        if mapped in SUPPORTED_RESPONSE_MODELS:
+            return mapped
+
+        logger.warning(
+            "unsupported_codex_model_requested",
+            requested=model,
+            normalized=normalized,
+            mapped=mapped,
+        )
+        raise UnsupportedCodexModelError(mapped, sorted(SUPPORTED_RESPONSE_MODELS))
+
+    def _is_response_api_model_name(self, model_name: str | None) -> bool:
+        if not model_name:
+            return False
+        model_lower = model_name.lower()
+        return model_lower.startswith("gpt-") or model_lower.startswith("o1") or model_lower.startswith("o3")
+
+    def _is_model_supported(self, model: str, supported: set[str]) -> bool:
+        if model in supported:
+            return True
+        return any(model.startswith(candidate) for candidate in supported)
+
+    async def _ensure_model_supported(
+        self,
+        model: str,
+        settings: CodexSettings,
+        model_info_service: "ModelInfoService" | None = None,
+    ) -> None:
+        """Ensure the mapped Response API model is supported."""
+
+        supported_models = set(SUPPORTED_RESPONSE_MODELS)
+
+        if settings.enable_dynamic_model_info:
+            try:
+                service = model_info_service or get_model_info_service()
+                dynamic_models = await service.get_available_models()
+                if dynamic_models:
+                    supported_models.update(
+                        {
+                            m
+                            for m in dynamic_models
+                            if self._is_response_api_model_name(m)
+                        }
+                    )
+            except Exception as exc:
+                logger.debug(
+                    "codex_dynamic_model_list_failed",
+                    error=str(exc),
+                )
+
+        if not self._is_model_supported(model, supported_models):
+            raise UnsupportedCodexModelError(model, sorted(supported_models))
+
+    def _apply_openai_parameters(
+        self,
+        chat_dict: dict[str, Any],
+        request_dict: dict[str, Any],
+        default_max_output_tokens: int | None = None,
+    ) -> None:
+        """Translate OpenAI chat parameters into Response API fields.
+
+        Args:
+            chat_dict: Original OpenAI Chat Completion request data
+            request_dict: Mutable Response API request dictionary
+            default_max_output_tokens: Optional default when request omits max_tokens
+
+        Raises:
+            UnsupportedOpenAIParametersError: if unsupported parameters are present and
+                propagation is disabled in Codex settings
+        """
+
+        settings = self._get_codex_settings()
+        propagate = settings.propagate_unsupported_params
+
+        ignored: list[str] = []
+        blocked: list[str] = []
+
+        def mark_unsupported(name: str, value: Any, reason: str) -> None:
+            param_repr = f"{name}={value!r} ({reason})"
+            if propagate:
+                ignored.append(param_repr)
+            else:
+                blocked.append(param_repr)
+
+        # max_tokens maps to Response API max_output_tokens; fall back to defaults
+        if chat_dict.get("max_tokens") is not None:
+            request_dict["max_output_tokens"] = chat_dict.get("max_tokens")
+        else:
+            fallback_value = default_max_output_tokens
+            if fallback_value is None:
+                fallback_value = settings.max_output_tokens_fallback
+            if fallback_value is not None:
+                request_dict.setdefault("max_output_tokens", fallback_value)
+
+        # Standard sampling knobs
+        if chat_dict.get("temperature") is not None:
+            request_dict["temperature"] = chat_dict.get("temperature")
+        if chat_dict.get("top_p") is not None:
+            request_dict["top_p"] = chat_dict.get("top_p")
+
+        # Penalties
+        if chat_dict.get("frequency_penalty") is not None:
+            request_dict["frequency_penalty"] = chat_dict.get("frequency_penalty")
+        if chat_dict.get("presence_penalty") is not None:
+            request_dict["presence_penalty"] = chat_dict.get("presence_penalty")
+
+        # Seed is accepted for deterministic sampling
+        if chat_dict.get("seed") is not None:
+            request_dict["seed"] = chat_dict.get("seed")
+
+        # Logit bias - ensure keys are strings for Response API compatibility
+        if chat_dict.get("logit_bias"):
+            bias = chat_dict.get("logit_bias", {})
+            request_dict["logit_bias"] = {str(k): v for k, v in bias.items()}
+
+        # Stop sequences map directly
+        if chat_dict.get("stop") is not None:
+            request_dict["stop"] = chat_dict.get("stop")
+
+        # Store flag mirrors OpenAI behaviour when explicitly provided
+        if chat_dict.get("store") is not None:
+            request_dict["store"] = bool(chat_dict.get("store"))
+
+        # Metadata + user identifier combine into metadata payload
+        metadata = chat_dict.get("metadata") or {}
+        user = chat_dict.get("user")
+        if user:
+            metadata = dict(metadata) if metadata else {}
+            metadata.setdefault("user", user)
+        if metadata:
+            request_dict["metadata"] = metadata
+
+        # Unsupported parameters -> warn or block
+        if chat_dict.get("n") not in (None, 1):
+            mark_unsupported("n", chat_dict.get("n"), "Response API only supports a single choice")
+
+        if chat_dict.get("logprobs") is not None:
+            mark_unsupported("logprobs", chat_dict.get("logprobs"), "log probabilities are unavailable in Codex Responses")
+
+        if chat_dict.get("top_logprobs") is not None:
+            mark_unsupported("top_logprobs", chat_dict.get("top_logprobs"), "Top log probabilities are unavailable in Codex Responses")
+
+        if chat_dict.get("stream_options") is not None:
+            mark_unsupported("stream_options", chat_dict.get("stream_options"), "stream options are not supported by Codex backend")
+
+        if chat_dict.get("functions") is not None:
+            mark_unsupported("functions", "deprecated", "Use the tools array instead of legacy functions")
+
+        if chat_dict.get("function_call") is not None:
+            mark_unsupported("function_call", chat_dict.get("function_call"), "Use tool_choice for function invocation control")
+
+        # Raise if unsupported parameters present and cannot be ignored
+        if blocked:
+            raise UnsupportedOpenAIParametersError(blocked)
+
+        if ignored:
+            logger.warning(
+                "response_adapter_ignored_unsupported_parameters",
+                parameters=ignored,
+                propagate="enabled",
+            )
 
     def _extract_text_from_content(
         self, content: str | list[Any] | None
