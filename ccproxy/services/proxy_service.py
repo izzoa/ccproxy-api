@@ -121,6 +121,19 @@ class ProxyService:
         from ccproxy.adapters.openai.adapter import OpenAIAdapter
 
         self.openai_adapter = OpenAIAdapter()
+        
+        # Create mock response generator for bypass mode
+        self.mock_generator = RealisticMockResponseGenerator()
+
+        # Cache environment-based configuration
+        self._proxy_url = self._init_proxy_url()
+        self._ssl_context = self._init_ssl_context()
+        self._verbose_streaming = (
+            os.environ.get("CCPROXY_VERBOSE_STREAMING", "false").lower() == "true"
+        )
+        self._verbose_api = (
+            os.environ.get("CCPROXY_VERBOSE_API", "false").lower() == "true"
+        )
 
     def _extract_request_metadata(
         self, body: bytes | None
@@ -183,19 +196,6 @@ class ProxyService:
                 status_code=500,
                 detail="Failed to retrieve Claude credentials",
             ) from exc
-
-        # Create mock response generator for bypass mode
-        self.mock_generator = RealisticMockResponseGenerator()
-
-        # Cache environment-based configuration
-        self._proxy_url = self._init_proxy_url()
-        self._ssl_context = self._init_ssl_context()
-        self._verbose_streaming = (
-            os.environ.get("CCPROXY_VERBOSE_STREAMING", "false").lower() == "true"
-        )
-        self._verbose_api = (
-            os.environ.get("CCPROXY_VERBOSE_API", "false").lower() == "true"
-        )
 
     def _init_proxy_url(self) -> str | None:
         """Initialize proxy URL from environment variables."""
