@@ -225,7 +225,8 @@ async def codex_chat_completions(
                 self.method = original_request.method
                 self.url = original_request.url
                 self.headers = dict(original_request.headers)
-                self.headers["content-length"] = str(len(new_body))
+                # Don't set content-length here - let httpx calculate it after all transformations
+                # self.headers["content-length"] = str(len(new_body))  # REMOVED: Causes size mismatch
                 self.state = original_request.state
                 self._body = new_body
 
@@ -1255,7 +1256,8 @@ async def codex_chat_completions_with_session(
                 self.method = original_request.method
                 self.url = original_request.url
                 self.headers = dict(original_request.headers)
-                self.headers["content-length"] = str(len(new_body))
+                # Don't set content-length here - let httpx calculate it after all transformations
+                # self.headers["content-length"] = str(len(new_body))  # REMOVED: Causes size mismatch
                 self.state = original_request.state
                 self._body = new_body
 
