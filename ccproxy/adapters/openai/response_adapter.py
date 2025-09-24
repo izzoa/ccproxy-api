@@ -607,9 +607,11 @@ class ResponseAdapter:
         if chat_dict.get("top_logprobs") is not None:
             mark_unsupported("top_logprobs", chat_dict.get("top_logprobs"), "Top log probabilities are unavailable in Codex Responses")
 
-        if chat_dict.get("stream_options") is not None:
-            mark_unsupported("stream_options", chat_dict.get("stream_options"), "stream options are not supported by Codex backend")
-
+        # stream_options is a common parameter sent by OpenAI clients
+        # It's safe to ignore it without blocking the request
+        # The parameter just requests usage info in streaming responses
+        # which we can provide from other sources if needed
+        
         if chat_dict.get("functions") is not None:
             mark_unsupported("functions", "deprecated", "Use the tools array instead of legacy functions")
 
