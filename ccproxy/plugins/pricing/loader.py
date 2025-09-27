@@ -8,16 +8,27 @@ import httpx
 from pydantic import ValidationError
 
 from ccproxy.core.logging import get_plugin_logger
-from ccproxy.utils.model_mapping import (
-    get_claude_aliases_mapping,
-    is_openai_model,
-    map_model_to_claude,
+from ccproxy.plugins.claude_shared.model_defaults import (
+    DEFAULT_CLAUDE_MODEL_MAPPINGS,
 )
+from ccproxy.utils.model_mapper import ModelMapper
 
 from .models import PricingData
 
 
 logger = get_plugin_logger(__name__)
+
+_CLAUDE_MODEL_MAPPER = ModelMapper(DEFAULT_CLAUDE_MODEL_MAPPINGS)
+_CLAUDE_ALIAS_MAP: dict[str, str] = {
+    rule.match: rule.target
+    for rule in DEFAULT_CLAUDE_MODEL_MAPPINGS
+    if rule.match.startswith("claude-")
+}
+
+
+def _is_openai_model(model_name: str) -> bool:
+    lowered = model_name.lower()
+    return lowered.startswith(("gpt-", "o1", "o3", "text-davinci"))
 
 
 class PricingLoader:
@@ -76,7 +87,7 @@ class PricingLoader:
             # Check if this is an OpenAI model
             if isinstance(model_data, dict) and (
                 model_data.get("litellm_provider") == "openai"
-                or is_openai_model(model_name)
+                or _is_openai_model(model_name)
             ):
                 openai_models[model_name] = model_data
                 if verbose:
@@ -222,7 +233,7 @@ class PricingLoader:
 
                 # Optionally map to canonical model name
                 if map_to_claude:
-                    canonical_name = map_model_to_claude(model_name)
+                    canonical_name = _CLAUDE_MODEL_MAPPER.map(model_name).mapped
                 else:
                     canonical_name = model_name
 
@@ -297,7 +308,7 @@ class PricingLoader:
                 return None
 
             # Validate and create PricingData model
-            pricing_data = PricingData.from_dict(internal_pricing)
+            pricing_data = PricingData.model_validate(internal_pricing)
 
             if verbose:
                 logger.info(
@@ -370,7 +381,7 @@ class PricingLoader:
                     return None
 
                 # Try to create PricingData model
-                validated_data = PricingData.from_dict(pricing_data)
+                validated_data = PricingData.model_validate(pricing_data)
 
                 if verbose:
                     logger.debug(
@@ -414,7 +425,7 @@ class PricingLoader:
         Returns:
             Dictionary mapping aliases to canonical model names
         """
-        return get_claude_aliases_mapping()
+        return _CLAUDE_ALIAS_MAP.copy()
 
     @staticmethod
     def get_canonical_model_name(model_name: str) -> str:
@@ -426,4 +437,4 @@ class PricingLoader:
         Returns:
             Canonical model name
         """
-        return map_model_to_claude(model_name)
+        return _CLAUDE_MODEL_MAPPER.map(model_name).mapped

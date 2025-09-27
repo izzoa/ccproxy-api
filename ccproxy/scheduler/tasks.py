@@ -1,7 +1,6 @@
 """Base scheduled task classes and task implementations."""
 
 import asyncio
-import contextlib
 import random
 import time
 from abc import ABC, abstractmethod
@@ -62,6 +61,7 @@ class BaseScheduledTask(ABC):
         self._last_run_time: float = 0
         self._running = False
         self._task: asyncio.Task[Any] | None = None
+        self._stop_complete: asyncio.Event | None = None
 
     @abstractmethod
     async def run(self) -> bool:
@@ -123,6 +123,7 @@ class BaseScheduledTask(ABC):
             return
 
         self._running = True
+        self._stop_complete = asyncio.Event()
         logger.debug("task_starting", task_name=self.name)
 
         try:
@@ -162,11 +163,36 @@ class BaseScheduledTask(ABC):
         self._running = False
         logger.debug("task_stopping", task_name=self.name)
 
-        # Cancel the running task
+        # Cancel the running task and wait for it to complete
         if self._task and not self._task.done():
             self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            try:
+                # Wait for the task to complete cancellation
                 await self._task
+            except asyncio.CancelledError:
+                # Expected when task is cancelled
+                pass
+            except Exception as e:
+                logger.warning(
+                    "task_stop_unexpected_error",
+                    task_name=self.name,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+
+        # Ensure the task reference is cleared
+        self._task = None
+
+        # Wait for the completion event to be signaled
+        if self._stop_complete is not None:
+            try:
+                await asyncio.wait_for(self._stop_complete.wait(), timeout=1.0)
+            except TimeoutError:
+                logger.warning(
+                    "task_stop_completion_timeout",
+                    task_name=self.name,
+                    message="Task stop completion event not signaled within timeout",
+                )
 
         try:
             await self.cleanup()
@@ -274,6 +300,10 @@ class BaseScheduledTask(ABC):
                 # Use backoff delay for exceptions too
                 backoff_delay = self.calculate_next_delay()
                 await asyncio.sleep(backoff_delay)
+
+        # Signal that the task has completed
+        if self._stop_complete is not None:
+            self._stop_complete.set()
 
     @property
     def is_running(self) -> bool:
@@ -480,7 +510,7 @@ class VersionUpdateCheckTask(BaseScheduledTask):
                 current_version=current_version,
                 latest_version=latest_version,
                 source=source,
-                message=(f"New version available: {latest_version}"),
+                description=(f"New version available: {latest_version}"),
             )
         else:
             logger.debug(
@@ -489,7 +519,7 @@ class VersionUpdateCheckTask(BaseScheduledTask):
                 current_version=current_version,
                 latest_version=latest_version,
                 source=source,
-                message=(
+                description=(
                     f"No update: latest_version={latest_version} "
                     f"current_version={current_version}"
                 ),

@@ -77,16 +77,7 @@ class PricingUpdater:
         )
 
         if should_refresh:
-            from ccproxy.core.logging import info_allowed
-
-            log_fn = (
-                logger.info
-                if info_allowed(
-                    self.context.get("app") if hasattr(self, "context") else None
-                )
-                else logger.debug
-            )
-            log_fn("pricing_refresh_start")
+            logger.debug("pricing_refresh_start")
             await self._refresh_pricing()
 
         # Load pricing data
@@ -125,16 +116,7 @@ class PricingUpdater:
             True if refresh was successful
         """
         try:
-            from ccproxy.core.logging import info_allowed
-
-            log_fn = (
-                logger.info
-                if info_allowed(
-                    self.context.get("app") if hasattr(self, "context") else None
-                )
-                else logger.debug
-            )
-            log_fn("pricing_refresh_start")
+            logger.debug("pricing_refresh_start")
 
             # Download fresh data
             raw_data = await self.cache.download_pricing_data()
@@ -147,16 +129,7 @@ class PricingUpdater:
                 logger.error("cache_save_failed")
                 return False
 
-            from ccproxy.core.logging import info_allowed
-
-            log_fn = (
-                logger.info
-                if info_allowed(
-                    self.context.get("app") if hasattr(self, "context") else None
-                )
-                else logger.debug
-            )
-            log_fn("pricing_refresh_completed")
+            logger.debug("pricing_refresh_completed")
             return True
 
         except httpx.TimeoutException as e:
@@ -216,16 +189,7 @@ class PricingUpdater:
             else:
                 logger.warning("external_pricing_validation_failed")
 
-        # Embedded fallback kept for typing compatibility
         logger.error("pricing_unavailable_no_fallback")
-        return None
-
-    # Backward-compatibility helper for tests expecting embedded pricing access
-    def _get_embedded_pricing(self) -> PricingData | None:
-        """Return embedded pricing data if bundled (deprecated).
-
-        For compatibility with older tests; returns None when no embedded data is bundled.
-        """
         return None
 
     async def force_refresh(self) -> bool:

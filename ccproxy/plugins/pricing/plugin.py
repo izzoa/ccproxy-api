@@ -35,14 +35,7 @@ class PricingRuntime(SystemPluginRuntime):
         # Get configuration
         config = self.context.get("config")
         if not isinstance(config, PricingConfig):
-            from ccproxy.core.logging import reduce_startup
-
-            if reduce_startup(
-                self.context.get("app") if hasattr(self, "context") else None
-            ):
-                logger.debug("plugin_no_config_using_defaults", category="plugin")
-            else:
-                logger.debug("plugin_no_config_using_defaults", category="plugin")
+            logger.debug("plugin_no_config_using_defaults", category="plugin")
             # Use default config if none provided
             self.config = PricingConfig()
         else:

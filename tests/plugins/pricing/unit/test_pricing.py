@@ -428,7 +428,7 @@ class TestPricingLoader:
 
     def test_validate_pricing_data_already_validated(self) -> None:
         """Test validation with already validated PricingData."""
-        original_data = PricingData.from_dict(
+        original_data = PricingData.model_validate(
             {
                 "claude-3-5-sonnet-20241022": {
                     "input": Decimal("3.00"),
@@ -580,7 +580,7 @@ class TestPricingUpdater:
 
         from ccproxy.plugins.pricing.models import PricingData
 
-        mock_pricing_data = PricingData.from_dict(
+        mock_pricing_data = PricingData.model_validate(
             {
                 "claude-3-5-sonnet-20241022": {
                     "input": Decimal("3.00"),
@@ -640,13 +640,6 @@ class TestPricingUpdater:
 
             assert result is False
 
-    def test_get_embedded_pricing(self, updater: PricingUpdater) -> None:
-        """Test embedded pricing returns None (deprecated feature)."""
-        embedded_pricing = updater._get_embedded_pricing()
-
-        # Embedded pricing has been removed, should return None
-        assert embedded_pricing is None
-
     @pytest.mark.asyncio
     async def test_force_refresh(self, updater: PricingUpdater) -> None:
         """Test forced refresh functionality."""
@@ -665,7 +658,7 @@ class TestPricingUpdater:
     def test_clear_cache(self, updater: PricingUpdater) -> None:
         """Test cache clearing functionality."""
         # Set up cached data
-        updater._cached_pricing = updater._get_embedded_pricing()
+        updater._cached_pricing = None
         updater._last_load_time = time.time()
 
         with patch.object(
@@ -681,9 +674,7 @@ class TestPricingUpdater:
     @pytest.mark.asyncio
     async def test_get_pricing_info(self, updater: PricingUpdater) -> None:
         """Test pricing information retrieval."""
-        with patch.object(
-            updater, "get_current_pricing", return_value=updater._get_embedded_pricing()
-        ):
+        with patch.object(updater, "get_current_pricing", return_value=None):
             info = await updater.get_pricing_info()
 
             assert isinstance(info, dict)

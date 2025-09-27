@@ -25,6 +25,31 @@ from ccproxy.utils.headers import (
 logger = get_logger(__name__)
 
 
+MAX_BODY_LOG_CHARS = 2048
+
+
+def _stringify_body_for_logging(body: Any) -> tuple[str | None, int, bool]:
+    """Convert a request/response body into a safe preview for logging."""
+
+    if body is None:
+        return None, 0, False
+
+    try:
+        if isinstance(body, bytes | bytearray | memoryview):
+            text = bytes(body).decode("utf-8", errors="replace")
+        elif isinstance(body, str):
+            text = body
+        else:
+            text = jsonlib.dumps(body, ensure_ascii=False)
+    except Exception:
+        text = str(body)
+
+    length = len(text)
+    truncated = length > MAX_BODY_LOG_CHARS
+    preview = f"{text[:MAX_BODY_LOG_CHARS]}...[truncated]" if truncated else text
+    return preview, length, truncated
+
+
 class HookableHTTPClient(httpx.AsyncClient):
     """HTTP client wrapper that emits hooks for all requests/responses."""
 
@@ -85,6 +110,8 @@ class HookableHTTPClient(httpx.AsyncClient):
             "method": method,
             "url": str(url),
             "headers": dict(self._normalize_header_pairs(headers)),
+            "is_provider_request": True,
+            "origin": "upstream",
         }
 
         # Try to get current request ID from RequestContext
@@ -100,9 +127,11 @@ class HookableHTTPClient(httpx.AsyncClient):
         if json is not None:
             request_context["body"] = json
             request_context["is_json"] = True
+            preview, length, truncated = _stringify_body_for_logging(json)
         elif data is not None:
             request_context["body"] = data
             request_context["is_json"] = False
+            preview, length, truncated = _stringify_body_for_logging(data)
         elif content is not None:
             # Handle content parameter - could be bytes, string, or other
             if isinstance(content, bytes | str):
@@ -125,6 +154,23 @@ class HookableHTTPClient(httpx.AsyncClient):
             else:
                 request_context["body"] = content
                 request_context["is_json"] = False
+            preview, length, truncated = _stringify_body_for_logging(
+                request_context["body"]
+            )
+        else:
+            preview, length, truncated = (None, 0, False)
+
+        logger.info(
+            "upstream_http_request",
+            method=method,
+            url=str(url),
+            request_id=request_context.get("request_id"),
+            body_preview=preview,
+            body_size=length,
+            body_truncated=truncated,
+            is_json=request_context.get("is_json", False),
+            category="http",
+        )
 
         # Emit pre-request hook
         if self.hook_manager:
@@ -164,6 +210,7 @@ class HookableHTTPClient(httpx.AsyncClient):
                     **request_context,  # Include request info
                     "status_code": response.status_code,
                     "response_headers": extract_response_headers(response),
+                    "is_provider_response": True,
                 }
 
                 # Include response body from the content we just read
@@ -188,6 +235,20 @@ class HookableHTTPClient(httpx.AsyncClient):
                 except Exception:
                     # Last resort - include as bytes
                     response_context["response_body"] = response_content
+
+                preview, length, truncated = _stringify_body_for_logging(
+                    response_context.get("response_body")
+                )
+                logger.info(
+                    "upstream_http_response",
+                    url=str(url),
+                    request_id=response_context.get("request_id"),
+                    status_code=response.status_code,
+                    body_preview=preview,
+                    body_size=length,
+                    body_truncated=truncated,
+                    category="http",
+                )
 
                 try:
                     await self.hook_manager.emit(
@@ -242,6 +303,15 @@ class HookableHTTPClient(httpx.AsyncClient):
                         original_error=str(error),
                     )
 
+            logger.error(
+                "upstream_http_error",
+                url=str(url),
+                request_id=request_context.get("request_id"),
+                error_type=type(error).__name__,
+                error_detail=str(error),
+                category="http",
+            )
+
             # Re-raise the original error
             raise
 
@@ -274,6 +344,8 @@ class HookableHTTPClient(httpx.AsyncClient):
             "method": method,
             "url": str(url),
             "headers": dict(self._normalize_header_pairs(headers)),
+            "is_provider_request": True,
+            "origin": "upstream",
         }
 
         # Try to get current request ID from RequestContext
@@ -286,8 +358,31 @@ class HookableHTTPClient(httpx.AsyncClient):
             pass
 
         # Add request body to context if available
-        if content is not None:
+        if json is not None:
+            request_context["body"] = json
+            request_context["is_json"] = True
+        elif data is not None:
+            request_context["body"] = data
+            request_context["is_json"] = False
+        elif content is not None:
             request_context["body"] = content
+            request_context["is_json"] = False
+
+        preview, length, truncated = _stringify_body_for_logging(
+            request_context.get("body")
+        )
+        logger.info(
+            "upstream_http_request",
+            method=method,
+            url=str(url),
+            request_id=request_context.get("request_id"),
+            body_preview=preview,
+            body_size=length,
+            body_truncated=truncated,
+            is_json=request_context.get("is_json", False),
+            streaming=True,
+            category="http",
+        )
 
         # Emit pre-request hook
         if self.hook_manager:
@@ -327,6 +422,7 @@ class HookableHTTPClient(httpx.AsyncClient):
                             **request_context,
                             "status_code": response.status_code,
                             "response_headers": extract_response_headers(response),
+                            "is_provider_response": True,
                             # Indicate streaming; omit body to avoid buffering
                             "streaming": True,
                         }
@@ -342,6 +438,17 @@ class HookableHTTPClient(httpx.AsyncClient):
                         )
 
                 # Yield the original streaming response (no pre-buffering)
+                logger.info(
+                    "upstream_http_response",
+                    url=str(url),
+                    request_id=request_context.get("request_id"),
+                    status_code=response.status_code,
+                    streaming=True,
+                    body_preview=None,
+                    body_size=0,
+                    body_truncated=False,
+                    category="http",
+                )
                 yield response
 
         except Exception as error:
@@ -369,6 +476,16 @@ class HookableHTTPClient(httpx.AsyncClient):
                         error=str(e),
                         original_error=str(error),
                     )
+
+            logger.error(
+                "upstream_http_error",
+                url=str(url),
+                request_id=request_context.get("request_id"),
+                error_type=type(error).__name__,
+                error_detail=str(error),
+                streaming=True,
+                category="http",
+            )
 
             # Re-raise the original error
             raise

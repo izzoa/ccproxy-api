@@ -152,12 +152,11 @@ class OptionsHandler:
         Returns:
             List of supported model names
         """
-        # Import here to avoid circular imports
-        from ccproxy.utils.model_mapping import get_supported_claude_models
+        from ccproxy.plugins.claude_shared.model_defaults import (
+            DEFAULT_CLAUDE_MODEL_CARDS,
+        )
 
-        # Get supported Claude models
-        claude_models = get_supported_claude_models()
-        return claude_models
+        return [card.id for card in DEFAULT_CLAUDE_MODEL_CARDS]
 
     @staticmethod
     def validate_model(model: str) -> bool:

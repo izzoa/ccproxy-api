@@ -26,6 +26,7 @@ json_logs_enabled = true
 verbose_api = true
 log_client_request = true
 log_client_response = true
+log_streaming_chunks = true
 
 # Access Log plugin configuration
 [plugins.access_log]

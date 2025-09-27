@@ -7,7 +7,10 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response, StreamingResponse
 
 from ccproxy.api.decorators import with_format_chain
-from ccproxy.api.dependencies import get_plugin_adapter
+from ccproxy.api.dependencies import (
+    get_plugin_adapter,
+    get_provider_config_dependency,
+)
 from ccproxy.auth.conditional import ConditionalAuthDep
 from ccproxy.core.constants import (
     FORMAT_ANTHROPIC_MESSAGES,
@@ -20,6 +23,8 @@ from ccproxy.llms.models import anthropic as anthropic_models
 from ccproxy.llms.models import openai as openai_models
 from ccproxy.streaming import DeferredStreaming
 
+from .config import ClaudeAPISettings
+
 
 if TYPE_CHECKING:
     pass
@@ -27,6 +32,10 @@ if TYPE_CHECKING:
 logger = get_plugin_logger()
 
 ClaudeAPIAdapterDep = Annotated[Any, Depends(get_plugin_adapter("claude_api"))]
+ClaudeAPIConfigDep = Annotated[
+    ClaudeAPISettings,
+    Depends(get_provider_config_dependency("claude_api", ClaudeAPISettings)),
+]
 
 APIResponse = Response | StreamingResponse | DeferredStreaming
 
@@ -102,25 +111,8 @@ async def claude_v1_responses(
 async def list_models(
     request: Request,
     auth: ConditionalAuthDep,
+    config: ClaudeAPIConfigDep,
 ) -> dict[str, Any]:
-    """List available Claude models."""
-    model_list = [
-        "claude-3-5-sonnet-20241022",
-        "claude-3-5-haiku-20241022",
-        "claude-3-opus-20240229",
-        "claude-3-sonnet-20240229",
-        "claude-3-haiku-20240307",
-    ]
-    models: list[dict[str, Any]] = [
-        {
-            "id": model_id,
-            "object": "model",
-            "created": 1696000000,
-            "owned_by": "anthropic",
-            "permission": [],
-            "root": model_id,
-            "parent": None,
-        }
-        for model_id in model_list
-    ]
+    """List available Claude models from configuration."""
+    models = [card.model_dump(mode="json") for card in config.models_endpoint]
     return {"object": "list", "data": models}

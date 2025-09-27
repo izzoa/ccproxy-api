@@ -20,6 +20,21 @@ from ccproxy.utils.headers import (
 
 logger: TraceBoundLogger = get_logger()
 
+MAX_BODY_LOG_CHARS = 2048
+
+
+def _stringify_raw_body(body: bytes | None) -> tuple[str | None, int, bool]:
+    """Convert raw body bytes into a logging-friendly preview."""
+
+    if not body:
+        return None, 0, False
+
+    text = body.decode("utf-8", errors="replace")
+    length = len(text)
+    truncated = length > MAX_BODY_LOG_CHARS
+    preview = f"{text[:MAX_BODY_LOG_CHARS]}...[truncated]" if truncated else text
+    return preview, length, truncated
+
 
 class HooksMiddleware(BaseHTTPMiddleware):
     """Middleware that emits hook lifecycle events for requests.
@@ -290,6 +305,18 @@ class HooksMiddleware(BaseHTTPMiddleware):
                 content_type = request.headers.get("content-type", "")
                 http_request_context["is_json"] = "application/json" in content_type
 
+            preview, length, truncated = _stringify_raw_body(request_body)
+            logger.info(
+                "client_http_request",
+                request_id=base_context.data.get("request_id"),
+                method=request.method,
+                url=str(request.url),
+                body_preview=preview,
+                body_size=length,
+                body_truncated=truncated,
+                category="http",
+            )
+
             # Emit HTTP_REQUEST hook
             await hook_manager.emit(HookEvent.HTTP_REQUEST, http_request_context)
 
@@ -333,6 +360,19 @@ class HooksMiddleware(BaseHTTPMiddleware):
             response_body = await self._capture_response_body(response)
             if response_body is not None:
                 http_response_context["response_body"] = response_body
+
+            preview, length, truncated = _stringify_raw_body(response_body)
+            logger.info(
+                "client_http_response",
+                request_id=base_context.data.get("request_id"),
+                method=request.method,
+                url=str(request.url),
+                status_code=getattr(response, "status_code", 200),
+                body_preview=preview,
+                body_size=length,
+                body_truncated=truncated,
+                category="http",
+            )
 
             # Emit HTTP_RESPONSE hook
             await hook_manager.emit(HookEvent.HTTP_RESPONSE, http_response_context)

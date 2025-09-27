@@ -2,6 +2,7 @@
 
 from typing import Any, cast
 
+from ccproxy.auth.oauth import OAuthProviderProtocol
 from ccproxy.core.logging import get_plugin_logger
 from ccproxy.core.plugins import (
     AuthProviderPluginFactory,
@@ -105,7 +106,7 @@ class OAuthCodexFactory(AuthProviderPluginFactory):
 
     def create_auth_provider(
         self, context: PluginContext | None = None
-    ) -> CodexOAuthProvider:
+    ) -> OAuthProviderProtocol:
         """Create OAuth provider instance.
 
         Args:
@@ -123,12 +124,13 @@ class OAuthCodexFactory(AuthProviderPluginFactory):
         http_client = context.get("http_client") if context else None
         hook_manager = context.get("hook_manager") if context else None
         settings = context.get("settings") if context else None
-        return CodexOAuthProvider(
+        provider = CodexOAuthProvider(
             config,
             http_client=http_client,
             hook_manager=hook_manager,
             settings=settings,
         )
+        return cast(OAuthProviderProtocol, provider)
 
     def create_storage(self) -> Any | None:
         """Create storage for OAuth credentials.

@@ -35,6 +35,7 @@ from ccproxy.utils.binary_resolver import BinaryResolver
 
 
 if TYPE_CHECKING:
+    from ccproxy.core.async_task_manager import AsyncTaskManager
     from ccproxy.services.container import ServiceContainer
 
 logger = structlog.get_logger(__name__)
@@ -89,7 +90,6 @@ class ConcreteServiceFactory:
         self._container.register_service(
             FormatRegistry, factory=self.create_format_registry
         )
-        # Removed legacy FormatterRegistry; FormatRegistry is canonical.
 
         # Registries
         self._container.register_service(
@@ -110,6 +110,12 @@ class ConcreteServiceFactory:
         self._container.register_service(
             BackgroundHookThreadManager,
             factory=self.create_background_hook_thread_manager,
+        )
+        from ccproxy.core.async_task_manager import AsyncTaskManager
+
+        self._container.register_service(
+            AsyncTaskManager,
+            factory=self.create_async_task_manager,
         )
 
     def create_mock_handler(self) -> MockResponseHandler:
@@ -202,6 +208,7 @@ class ConcreteServiceFactory:
 
         # Pre-register core format adapters
         self._register_core_format_adapters(registry, settings)
+        registry.flush_all_logs()
 
         logger.debug(
             "format_registry_created",
@@ -209,8 +216,6 @@ class ConcreteServiceFactory:
         )
 
         return registry
-
-    # Legacy create_formatter_registry removed
 
     def create_hook_registry(self) -> HookRegistry:
         """Create a HookRegistry instance."""
@@ -352,46 +357,24 @@ class ConcreteServiceFactory:
                 plugin_name="core",
             )
 
-        # Respect info_summaries_only to reduce noise at INFO
-        try:
-            from ccproxy.core.logging import info_allowed
-
-            app = None
-            # Attempt to get app from a known settings/service container path if present
-            # Fallback: if not available, default to allowing INFO
-            if info_allowed(app):
-                logger.info(
-                    "core_format_adapters_registered",
-                    count=len(core_adapter_specs),
-                    adapters=[
-                        f"{spec['from_format']}->{spec['to_format']}"
-                        for spec in core_adapter_specs
-                    ],
-                    category="format",
-                )
-            else:
-                logger.debug(
-                    "core_format_adapters_registered",
-                    count=len(core_adapter_specs),
-                    adapters=[
-                        f"{spec['from_format']}->{spec['to_format']}"
-                        for spec in core_adapter_specs
-                    ],
-                    category="format",
-                )
-        except Exception:
-            logger.info(
-                "core_format_adapters_registered",
-                count=len(core_adapter_specs),
-                adapters=[
-                    f"{spec['from_format']}->{spec['to_format']}"
-                    for spec in core_adapter_specs
-                ],
-                category="format",
-            )
+        logger.debug(
+            "core_format_adapters_registered",
+            count=len(core_adapter_specs),
+            adapters=[
+                f"{spec['from_format']}->{spec['to_format']}"
+                for spec in core_adapter_specs
+            ],
+            category="format",
+        )
 
     def create_background_hook_thread_manager(self) -> BackgroundHookThreadManager:
         """Create background hook thread manager instance."""
         manager = BackgroundHookThreadManager()
         logger.debug("background_hook_thread_manager_created", category="lifecycle")
         return manager
+
+    def create_async_task_manager(self) -> AsyncTaskManager:
+        """Create async task manager instance."""
+        from ccproxy.core.async_task_manager import AsyncTaskManager
+
+        return AsyncTaskManager()

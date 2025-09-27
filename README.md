@@ -3,6 +3,7 @@ CCProxy API Server
 CCProxy is a local, plugin‑based reverse proxy that unifies access to multiple AI providers (e.g., Claude SDK/API and OpenAI Codex) behind a consistent API. It ships with bundled plugins for providers, logging, tracing, metrics, analytics, and more.
 
 Quick Links
+
 - Docs site entry: `docs/index.md`
 - Getting started: `docs/getting-started/quickstart.md`
 - Configuration reference: `docs/getting-started/configuration.md`
@@ -19,19 +20,17 @@ TOML example (`.ccproxy.toml`):
 enable_plugins = true
 
 [plugins.access_log]
-enabled = true
 client_enabled = true
 client_format = "structured"
 client_log_file = "/tmp/ccproxy/access.log"
 
 [plugins.request_tracer]
-enabled = true
 json_logs_enabled = true
 raw_http_enabled = true
 log_dir = "/tmp/ccproxy/traces"
 
 [plugins.duckdb_storage]
-enabled = true
+enabled = false
 
 [plugins.analytics]
 enabled = true

@@ -17,7 +17,7 @@ from ccproxy.core.request_context import RequestContext
 from ccproxy.llms.models import anthropic as anthropic_models
 
 # from ccproxy.observability.metrics import  # Metrics moved to plugin PrometheusMetrics
-from ccproxy.utils.model_mapping import map_model_to_claude
+from ccproxy.utils.model_mapper import ModelMapper, add_model_alias
 
 from . import models as sdk_models
 from .client import ClaudeSDKClient
@@ -74,6 +74,7 @@ class ClaudeSDKHandler:
         self.hook_manager = hook_manager
         self.message_converter = MessageConverter()
         self.options_handler = OptionsHandler(config=config)
+        self.model_mapper = ModelMapper(config.model_mappings)
 
         # Create streaming hook if hook_manager is available
         streaming_hook = None
@@ -191,8 +192,15 @@ class ClaudeSDKHandler:
         # Extract system message and create options
         system_message = self.options_handler.extract_system_message(messages)
 
-        # Map model to Claude model
-        model = map_model_to_claude(model)
+        if isinstance(request_context, RequestContext):
+            metadata = request_context.metadata
+        else:
+            metadata = None
+
+        match = self.model_mapper.map(model)
+        if match.mapped != match.original and isinstance(metadata, dict):
+            add_model_alias(metadata, match.original, match.mapped)
+        model = match.mapped
 
         options = self.options_handler.create_options(
             model=model,

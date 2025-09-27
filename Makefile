@@ -17,11 +17,6 @@ help:
 	@echo "  test         - Run all tests with coverage (after quality checks)"
 	@echo "  test-unit    - Run fast unit tests only (excluding real API and integration)"
 	@echo "  test-integration - Run integration tests across all plugins (parallel)"
-	@echo "  test-integration-plugin PLUGIN=name - Run integration tests for specific plugin"
-	@echo "  test-real-api - Run tests with real API calls (marked 'real_api', slow)"
-	@echo "  test-watch   - Auto-run unit tests on file changes (with quality checks)"
-	@echo "  test-watch-integration - Auto-run integration tests on file changes"
-	@echo "  test-fast    - Run tests without coverage (quick, after quality checks)"
 	@echo "  test-coverage - Run tests with detailed coverage report"
 	@echo ""
 	@echo "Code quality:"
@@ -107,70 +102,17 @@ test:
 # Run fast unit tests only (exclude tests marked with 'real_api' and 'integration')
 test-unit:
 	@echo "Running fast unit tests (excluding real API calls and integration tests)..."
-	@if [ ! -d "tests" ]; then echo "Error: tests/ directory not found. Create tests/ directory and add test files."; exit 1; fi
-	$(UV_RUN) pytest -v --import-mode=importlib -m "not real_api and not integration" --tb=short
-
-# Run smoketests for essential endpoint validation
-test-smoke:
-	@echo "Running smoketests for core endpoints..."
-	@if [ ! -d "tests" ]; then echo "Error: tests/ directory not found. Create tests/ directory and add test files."; exit 1; fi
-	$(UV_RUN) pytest -v --import-mode=importlib -m "smoketest" --tb=short tests/smoketest.py
+	$(UV_RUN) pytest -v --import-mode=importlib -m "not integration" --tb=short
 
 # Run integration tests across all plugins
 test-integration:
 	@echo "Running integration tests across all plugins..."
-	$(UV_RUN) pytest -v --import-mode=importlib -m "integration" --tb=short -n auto tests/
-
-# Run integration tests for specific plugin (usage: make test-integration-plugin PLUGIN=metrics)
-test-integration-plugin:
-	@if [ -z "$(PLUGIN)" ]; then echo "Error: Please specify PLUGIN=<plugin_name>"; exit 1; fi
-	@echo "Running integration tests for $(PLUGIN) plugin..."
-	$(UV_RUN) pytest -v --import-mode=importlib -m "integration" --tb=short tests/plugins/$(PLUGIN)/integration/
-
-# Run tests with real API calls (marked with 'real_api')
-test-real-api:
-	@echo "Running tests with real API calls (slow)..."
-	@if [ ! -d "tests" ]; then echo "Error: tests/ directory not found. Create tests/ directory and add test files."; exit 1; fi
-	$(UV_RUN) pytest -v -m "real_api" --tb=short
-
-# Auto-run tests on file changes (requires entr or similar tool)
-test-watch:
-	@echo "Watching for file changes and running unit tests..."
-	@echo "Note: Runs unit tests only (no real API calls or integration) for faster feedback"
-	@echo "Requires 'entr' tool: install with 'apt install entr' or 'brew install entr'"
-	@echo "Use Ctrl+C to stop watching"
-	@if command -v entr >/dev/null 2>&1; then \
-		find ccproxy tests plugins -name "*.py" | entr -c sh -c '$(UV_RUN) pytest -v -m "not real_api and not integration" --tb=short'; \
-	else \
-		echo "Error: 'entr' not found. Install with 'apt install entr' or 'brew install entr'"; \
-		echo "Alternatively, use 'make test-unit' to run tests once"; \
-		exit 1; \
-	fi
-
-# Watch integration tests on file changes
-test-watch-integration:
-	@echo "Watching for file changes and running integration tests..."
-	@echo "Requires 'entr' tool: install with 'apt install entr' or 'brew install entr'"
-	@echo "Use Ctrl+C to stop watching"
-	@if command -v entr >/dev/null 2>&1; then \
-		find ccproxy tests plugins -name "*.py" | entr -c sh -c 'make test-integration'; \
-	else \
-		echo "Error: 'entr' not found. Install with 'apt install entr' or 'brew install entr'"; \
-		echo "Alternatively, use 'make test-integration' to run tests once"; \
-		exit 1; \
-	fi
-
-# Quick test run (no coverage, but with quality checks)
-test-fast: check
-	@echo "Running fast tests without coverage..."
-	@if [ ! -d "tests" ]; then echo "Error: tests/ directory not found. Create tests/ directory and add test files."; exit 1; fi
-	$(UV_RUN) pytest -v --import-mode=importlib --tb=short
+	$(UV_RUN) pytest -v --import-mode=importlib -m "integration and not slow and not real_api" --tb=short -n auto tests/
 
 # Run tests with detailed coverage report (HTML + terminal)
 test-coverage: check
 	@echo "Running tests with detailed coverage report..."
-	@if [ ! -d "tests" ]; then echo "Error: tests/ directory not found. Create tests/ directory and add test files."; exit 1; fi
-	$(UV_RUN) pytest -v --import-mode=importlib --cov=ccproxy --cov-report=term-missing --cov-report=html
+	$(UV_RUN) pytest -v --import-mode=importlib --cov=ccproxy --cov-report=term-missing --cov-report=html -m  "not slow or not real_api"
 	@echo "HTML coverage report generated in htmlcov/"
 
 # Run plugin tests only
@@ -181,13 +123,11 @@ test-plugins:
 # Run specific test file (with quality checks)
 test-file: check
 	@echo "Running specific test file: $(FILE)"
-	@if [ ! -d "tests" ]; then echo "Error: tests/ directory not found. Create tests/ directory and add test files."; exit 1; fi
 	$(UV_RUN) pytest $(FILE) -v
 
 # Run tests matching a pattern (with quality checks)
 test-match: check
 	@echo "Running tests matching pattern: $(MATCH)"
-	@if [ ! -d "tests" ]; then echo "Error: tests/ directory not found. Create tests/ directory and add test files."; exit 1; fi
 	$(UV_RUN) pytest -k "$(MATCH)" -v
 
 # Code quality

@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response, StreamingResponse
 
 from ccproxy.api.decorators import with_format_chain
-from ccproxy.api.dependencies import get_plugin_adapter
+from ccproxy.api.dependencies import (
+    get_plugin_adapter,
+    get_provider_config_dependency,
+)
 from ccproxy.auth.conditional import ConditionalAuthDep
 from ccproxy.core.constants import (
     FORMAT_ANTHROPIC_MESSAGES,
@@ -18,11 +21,17 @@ from ccproxy.core.constants import (
 )
 from ccproxy.streaming import DeferredStreaming
 
+from .config import CodexSettings
+
 
 if TYPE_CHECKING:
     pass
 
 CodexAdapterDep = Annotated[Any, Depends(get_plugin_adapter("codex"))]
+CodexConfigDep = Annotated[
+    CodexSettings,
+    Depends(get_provider_config_dependency("codex", CodexSettings)),
+]
 router = APIRouter()
 
 
@@ -36,6 +45,15 @@ async def handle_codex_request(
 
 
 # Route definitions
+async def _codex_responses_handler(
+    request: Request,
+    adapter: CodexAdapterDep,
+) -> StreamingResponse | Response | DeferredStreaming:
+    """Shared handler for Codex responses endpoints."""
+
+    return await handle_codex_request(request, adapter)
+
+
 @router.post("/v1/responses", response_model=None)
 @with_format_chain(
     [FORMAT_OPENAI_RESPONSES], endpoint=UPSTREAM_ENDPOINT_OPENAI_RESPONSES
@@ -45,7 +63,19 @@ async def codex_responses(
     auth: ConditionalAuthDep,
     adapter: CodexAdapterDep,
 ) -> StreamingResponse | Response | DeferredStreaming:
-    return await handle_codex_request(request, adapter)
+    return await _codex_responses_handler(request, adapter)
+
+
+@router.post("/responses", response_model=None, include_in_schema=False)
+@with_format_chain(
+    [FORMAT_OPENAI_RESPONSES], endpoint=UPSTREAM_ENDPOINT_OPENAI_RESPONSES
+)
+async def codex_responses_legacy(
+    request: Request,
+    auth: ConditionalAuthDep,
+    adapter: CodexAdapterDep,
+) -> StreamingResponse | Response | DeferredStreaming:
+    return await _codex_responses_handler(request, adapter)
 
 
 @router.post("/v1/chat/completions", response_model=None)
@@ -61,45 +91,14 @@ async def codex_chat_completions(
     return await handle_codex_request(request, adapter)
 
 
-@router.post("/v1/chat/completions", response_model=None)
-@with_format_chain(
-    [FORMAT_OPENAI_CHAT, FORMAT_OPENAI_RESPONSES],
-    endpoint="/v1/chat/completions",
-)
-async def codex_v1_chat_completions(
-    request: Request,
-    auth: ConditionalAuthDep,
-    adapter: CodexAdapterDep,
-) -> StreamingResponse | Response | DeferredStreaming:
-    return await handle_codex_request(request, adapter)
-
-
 @router.get("/v1/models", response_model=None)
 async def list_models(
     request: Request,
     auth: ConditionalAuthDep,
+    config: CodexConfigDep,
 ) -> dict[str, Any]:
     """List available Codex models."""
-    model_list = [
-        "gpt-5",
-        "gpt-5-2025-08-07",
-        "gpt-5-mini",
-        "gpt-5-mini-2025-08-07",
-        "gpt-5-nano",
-        "gpt-5-nano-2025-08-07",
-    ]
-    models: list[dict[str, Any]] = [
-        {
-            "id": model_id,
-            "object": "model",
-            "created": 1704000000,
-            "owned_by": "openai",
-            "permission": [],
-            "root": model_id,
-            "parent": None,
-        }
-        for model_id in model_list
-    ]
+    models = [card.model_dump(mode="json") for card in config.models_endpoint]
     return {"object": "list", "data": models}
 
 

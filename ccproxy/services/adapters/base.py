@@ -20,6 +20,7 @@ class BaseAdapter(ABC):
             **kwargs: Additional keyword arguments for subclasses
         """
         self.config = config
+        self.tool_accumulator_class = kwargs.pop("tool_accumulator_class", None)
 
     @abstractmethod
     async def handle_request(
@@ -86,6 +87,30 @@ class BaseAdapter(ABC):
             Transformed response data
         """
         return response_data
+
+    def _ensure_tool_accumulator(self, request_context: Any) -> None:
+        """Attach tool accumulator metadata to the request context if available."""
+
+        if not self.tool_accumulator_class or not request_context:
+            return
+
+        if getattr(request_context, "_tool_accumulator_class", None) is None:
+            request_context._tool_accumulator_class = self.tool_accumulator_class
+
+    @staticmethod
+    def _record_tool_definitions(request_context: Any, payload: Any) -> None:
+        """Persist tool definitions on the request context for downstream consumers."""
+
+        if not request_context or not isinstance(payload, dict):
+            return
+
+        metadata = getattr(request_context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return
+
+        tools = payload.get("tools")
+        if tools and "_tool_definitions" not in metadata:
+            metadata["_tool_definitions"] = tools
 
     @abstractmethod
     async def cleanup(self) -> None:

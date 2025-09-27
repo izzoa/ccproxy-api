@@ -47,14 +47,7 @@ class CommandReplayHook(Hook):
         self.config = config or CommandReplayConfig()
         self.file_formatter = file_formatter
 
-        from ccproxy.core.logging import info_allowed
-
-        log_fn = (
-            logger.info
-            if info_allowed(getattr(context := None, "app", None))
-            else logger.debug
-        )
-        log_fn(
+        logger.debug(
             "command_replay_hook_initialized",
             enabled=self.config.enabled,
             generate_curl=self.config.generate_curl,

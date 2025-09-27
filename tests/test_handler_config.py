@@ -6,6 +6,7 @@ import pytest
 from pydantic import SecretStr
 
 from ccproxy.auth.manager import AuthManager
+from ccproxy.auth.oauth.protocol import StandardProfileFields
 from ccproxy.llms.formatters.base import APIAdapter
 from ccproxy.services.handler_config import HandlerConfig
 
@@ -38,7 +39,7 @@ class MockAuthManager(AuthManager):
         """Mock authentication check."""
         return True
 
-    async def get_user_profile(self) -> Any:
+    async def get_user_profile(self) -> StandardProfileFields | None:
         """Get mock user profile."""
         return None
 

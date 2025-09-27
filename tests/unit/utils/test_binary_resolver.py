@@ -58,8 +58,9 @@ class TestBinaryResolver:
         assert result.package_manager is None
         mock_which.assert_called_once_with("claude")
 
+    @patch.object(BinaryResolver, "_get_common_paths", return_value=[])
     @patch("shutil.which")
-    def test_find_binary_not_found_no_fallback(self, mock_which):
+    def test_find_binary_not_found_no_fallback(self, mock_which, _mock_paths):
         """Test binary not found with fallback disabled."""
         mock_which.return_value = None
         resolver = BinaryResolver(fallback_enabled=False)
@@ -381,17 +382,19 @@ class TestHelperFunctions:
 
         assert result == ["/usr/local/bin/claude"]
 
+    @patch.object(BinaryResolver, "_get_common_paths", return_value=[])
+    @patch("subprocess.run")
     @patch("shutil.which")
-    def test_find_binary_with_fallback_not_found(self, mock_which):
+    def test_find_binary_with_fallback_not_found(
+        self, mock_which, mock_run, _mock_paths
+    ):
         """Test convenience function when binary not found."""
         mock_which.return_value = None
+        mock_run.return_value = MagicMock(returncode=1)  # No managers available
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=1)  # No managers available
+        result = find_binary_with_fallback("claude", fallback_enabled=False)
 
-            result = find_binary_with_fallback("claude", fallback_enabled=False)
-
-            assert result is None
+        assert result is None
 
     def test_is_package_manager_command(self):
         """Test package manager command detection."""

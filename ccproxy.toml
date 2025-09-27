@@ -1,0 +1,9 @@
+# Local CCProxy Configuration for testing streaming chunk collection
+
+[plugins.request_tracer]
+enabled = true
+verbose_api = true
+json_logs_enabled = true
+raw_http_enabled = true
+log_dir = "/tmp/ccproxy/traces"
+log_streaming_chunks = true  # Enable streaming chunk collection

@@ -5,9 +5,15 @@ circular dependencies between factory and runtime modules.
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 import structlog
+from fastapi import FastAPI
+
+from ccproxy.auth import TokenStorage
+from ccproxy.auth.managers import BaseTokenManager, TokenSnapshot
+from ccproxy.auth.oauth import OAuthProviderProtocol
+from ccproxy.models.detection import DetectedHeaders, DetectedPrompts
 
 
 if TYPE_CHECKING:
@@ -19,6 +25,42 @@ from .declaration import PluginContext, PluginManifest
 
 # Type variable for service type checking
 T = TypeVar("T")
+
+# --- Adapter protocol helpers -------------------------------------------------
+
+
+class DetectionServiceProtocol(Protocol):
+    """Common capabilities shared by detection services."""
+
+    def get_detected_headers(self) -> DetectedHeaders: ...
+
+    def get_detected_prompts(self) -> DetectedPrompts: ...
+
+    def get_cached_data(self) -> object: ...
+
+    def get_system_prompt(self, mode: str | None = None) -> dict[str, object]: ...
+
+    def get_ignored_headers(self) -> list[str]: ...
+
+    def get_redacted_headers(self) -> list[str]: ...
+
+
+class TokenManagerProtocol(Protocol):
+    """Minimal async token manager contract used by adapters."""
+
+    async def get_access_token(self) -> str | None: ...
+
+    async def get_access_token_with_refresh(self) -> str | None: ...
+
+    async def load_credentials(self) -> object: ...
+
+    async def get_token_snapshot(self) -> TokenSnapshot | None: ...
+
+
+class ProfiledTokenManagerProtocol(TokenManagerProtocol, Protocol):
+    """Token manager that can return a lightweight profile snapshot."""
+
+    async def get_profile_quick(self) -> object | None: ...
 
 
 class PluginFactory(ABC):
@@ -47,7 +89,7 @@ class PluginFactory(ABC):
         ...
 
     @abstractmethod
-    def create_context(self, core_services: Any) -> PluginContext:
+    def create_context(self, core_services: "ServiceContainer") -> PluginContext:
         """Create the context for plugin initialization.
 
         Args:
@@ -121,8 +163,19 @@ class BasePluginFactory(PluginFactory):
 
         # Add hook registry and manager
         context.hook_registry = service_container.get_hook_registry()
-        context.hook_manager = None  # Will be set from app.state if needed
-        context.app = None  # Will be set from app.state if needed
+
+        # Provide runtime helpers when available in the container
+        try:
+            from ccproxy.core.plugins.hooks.manager import HookManager
+
+            context.hook_manager = service_container.get_service(HookManager)
+        except (ValueError, ImportError):
+            context.hook_manager = None
+
+        try:
+            context.app = service_container.get_service(FastAPI)
+        except ValueError:
+            context.app = None
 
         # Add service container directly
         context.service_container = service_container
@@ -170,7 +223,7 @@ class ProviderPluginFactory(BasePluginFactory):
                 f"Plugin {manifest.name} is not marked as provider but using ProviderPluginFactory"
             )
 
-    def create_context(self, core_services: Any) -> PluginContext:
+    def create_context(self, service_container: "ServiceContainer") -> PluginContext:
         """Create context with provider-specific components.
 
         Args:
@@ -180,7 +233,7 @@ class ProviderPluginFactory(BasePluginFactory):
             Plugin context with provider components
         """
         # Start with base context
-        context = super().create_context(core_services)
+        context = super().create_context(service_container)
 
         # Provider plugins need to create their own adapter and detection service
         # This is typically done in the specific plugin factory implementation
@@ -201,7 +254,9 @@ class ProviderPluginFactory(BasePluginFactory):
         ...
 
     @abstractmethod
-    def create_detection_service(self, context: PluginContext) -> Any:
+    def create_detection_service(
+        self, context: PluginContext
+    ) -> DetectionServiceProtocol | None:
         """Create the detection service for this provider.
 
         Args:
@@ -213,7 +268,9 @@ class ProviderPluginFactory(BasePluginFactory):
         ...
 
     @abstractmethod
-    async def create_credentials_manager(self, context: PluginContext) -> Any:
+    async def create_credentials_manager(
+        self, context: PluginContext
+    ) -> BaseTokenManager[Any] | None:
         """Create the credentials manager for this provider.
 
         Args:
@@ -272,7 +329,7 @@ class AuthProviderPluginFactory(BasePluginFactory):
                 f"Plugin {manifest.name} must be marked as provider for AuthProviderPluginFactory"
             )
 
-    def create_context(self, core_services: Any) -> PluginContext:
+    def create_context(self, service_container: "ServiceContainer") -> PluginContext:
         """Create context with auth provider-specific components.
 
         Args:
@@ -282,7 +339,7 @@ class AuthProviderPluginFactory(BasePluginFactory):
             Plugin context with auth provider components
         """
         # Start with base context
-        context = super().create_context(core_services)
+        context = super().create_context(service_container)
 
         # Auth provider plugins need to create their auth components
         # This is typically done in the specific plugin factory implementation
@@ -296,18 +353,20 @@ class AuthProviderPluginFactory(BasePluginFactory):
         return name or self.manifest.name
 
     @abstractmethod
-    def create_auth_provider(self, context: PluginContext | None = None) -> Any:
+    def create_auth_provider(
+        self, context: PluginContext | None = None
+    ) -> OAuthProviderProtocol:
         """Create the OAuth provider for this auth plugin.
 
         Args:
             context: Optional plugin context for initialization
 
         Returns:
-            OAuth provider instance implementing OAuthProviderProtocol
+            OAuth provider instance implementing  OAuthProviderProtocol
         """
         ...
 
-    def create_token_manager(self) -> Any | None:
+    def create_token_manager(self) -> BaseTokenManager[Any] | None:
         """Create the token manager for this auth plugin.
 
         Returns:
@@ -315,7 +374,7 @@ class AuthProviderPluginFactory(BasePluginFactory):
         """
         return None
 
-    def create_storage(self) -> Any | None:
+    def create_storage(self) -> TokenStorage[Any] | None:
         """Create the storage implementation for this auth plugin.
 
         Returns:

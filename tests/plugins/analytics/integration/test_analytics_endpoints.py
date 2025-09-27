@@ -13,11 +13,13 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlmodel import Session, select
 
+from ccproxy.api.bootstrap import create_service_container
 from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
 from ccproxy.plugins.analytics import models as _analytics_models  # noqa: F401
 from ccproxy.plugins.analytics.models import AccessLog, AccessLogPayload
 from ccproxy.plugins.analytics.routes import router as analytics_router
 from ccproxy.plugins.duckdb_storage.storage import SimpleDuckDBStorage
+from ccproxy.services.container import ServiceContainer
 
 
 # Use a single event loop for this module's async fixtures
@@ -27,9 +29,14 @@ pytestmark = pytest.mark.asyncio(loop_scope="module")
 @pytest_asyncio.fixture(scope="module", loop_scope="module", autouse=True)
 async def task_manager_fixture() -> AsyncGenerator[None, None]:
     """Start and stop the global async task manager for background tasks."""
-    await start_task_manager()
-    yield
-    await stop_task_manager()
+    container = ServiceContainer.get_current(strict=False)
+    if container is None:
+        container = create_service_container()
+    await start_task_manager(container=container)
+    try:
+        yield
+    finally:
+        await stop_task_manager(container=container)
 
 
 @pytest.fixture(scope="module")
@@ -78,8 +85,8 @@ async def storage_with_data(
     for log_data in sample_logs:
         await storage.store_request(log_data)
 
-    # Give background worker time to process
-    await asyncio.sleep(0.2)
+    # Wait for background worker to process all queued items
+    await storage.wait_for_queue_processing()
 
     yield storage
     await storage.close()
@@ -364,16 +371,8 @@ class TestAnalyticsResetEndpoint:
         assert success is True
 
         # Ensure background worker flushed queued write for determinism
-        try:
-            queue = getattr(storage_with_data, "_write_queue", None)
-            if queue is not None:
-                # Wait until all items are processed
-                await asyncio.wait_for(queue.join(), timeout=1.0)
-            else:
-                await asyncio.sleep(0.3)
-        except Exception:
-            # Fallback to small delay if queue not exposed
-            await asyncio.sleep(0.3)
+        # Wait for background worker to process all queued items
+        await storage_with_data.wait_for_queue_processing(timeout=1.0)
 
         # Verify new data was stored successfully (poll to avoid flakes)
         non_reset_results = []

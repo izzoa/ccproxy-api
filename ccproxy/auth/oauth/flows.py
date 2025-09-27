@@ -111,7 +111,7 @@ class CLICallbackServer:
         return aiohttp.web.Response(text=html_content, content_type="text/html")
 
     async def wait_for_callback(
-        self, expected_state: str | None = None, timeout: int = 300
+        self, expected_state: str | None = None, timeout: float = 300
     ) -> dict[str, Any]:
         """Wait for OAuth callback with optional state validation.
 

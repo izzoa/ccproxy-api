@@ -543,6 +543,11 @@ class TerminalPermissionHandler:
                 creator="TerminalHandler",
             )
 
+    async def _ensure_processing_task_running_async(self) -> None:
+        """Ensure the processing task is running (async version for tests)."""
+        if self._processing_task is None or self._processing_task.done():
+            await self._create_processing_task()
+
     async def _create_processing_task(self) -> None:
         """Create the processing task in async context."""
         self._processing_task = await create_managed_task(

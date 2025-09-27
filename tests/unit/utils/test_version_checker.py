@@ -3,7 +3,7 @@
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -123,7 +123,7 @@ class TestGitHubVersionFetching:
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"tag_name": "v1.2.3"}
-        mock_response.raise_for_status.return_value = None
+        mock_response.raise_for_status = Mock()  # Sync method, not async
 
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_response
@@ -145,7 +145,7 @@ class TestGitHubVersionFetching:
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"tag_name": "1.2.3"}
-        mock_response.raise_for_status.return_value = None
+        mock_response.raise_for_status = Mock()  # Sync method, not async
 
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_response
@@ -162,7 +162,7 @@ class TestGitHubVersionFetching:
         """Test GitHub version fetch when tag_name is missing."""
         mock_response = AsyncMock()
         mock_response.json.return_value = {}
-        mock_response.raise_for_status.return_value = None
+        mock_response.raise_for_status = Mock()  # Sync method, not async
 
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_response
@@ -313,7 +313,7 @@ class TestVersionCheckIntegration:
 
             mock_response = MagicMock()
             mock_response.json.return_value = {"tag_name": "v1.5.0"}
-            mock_response.raise_for_status.return_value = None
+            mock_response.raise_for_status = Mock()  # Sync method, not async
 
             mock_client = AsyncMock()
             mock_client.get.return_value = mock_response

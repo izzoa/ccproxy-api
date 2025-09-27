@@ -79,7 +79,6 @@ class ClaudeOAuthToken(BaseModel):
     def is_expired(self) -> bool:
         """Check if the token is expired."""
         if self.expires_at is None:
-            # If no expiration info, assume not expired for backward compatibility
             return False
         now = datetime.now(UTC).timestamp() * 1000  # Convert to milliseconds
         return now >= self.expires_at
@@ -150,8 +149,7 @@ class ClaudeTokenWrapper(BaseTokenInfo):
     # Embed the original credentials to preserve JSON schema
     credentials: ClaudeCredentials
 
-    @computed_field  # type: ignore[prop-decorator]
-    @property
+    @computed_field
     def access_token_value(self) -> str:
         """Extract access token from Claude OAuth structure."""
         return self.credentials.claude_ai_oauth.access_token.get_secret_value()
@@ -202,7 +200,6 @@ class ClaudeTokenWrapper(BaseTokenInfo):
             # Ignore any profile read/parse errors and fall back
             pass
 
-        # Fallback to stored token field for backward compatibility
         return self.credentials.claude_ai_oauth.subscription_type
 
     @property

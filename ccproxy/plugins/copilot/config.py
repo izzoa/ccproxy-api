@@ -77,9 +77,6 @@ class CopilotProviderConfig(ProviderConfig):
     priority: int = 5  # Higher priority than SDK-based approach
     default_max_tokens: int = 4096
 
-    # Supported models
-    models: list[str] = []
-
     account_type: str = Field(
         default="individual",
         description="Account type: individual, business, or enterprise",

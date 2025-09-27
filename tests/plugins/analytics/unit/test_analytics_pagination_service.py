@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 
 import pytest
@@ -38,7 +37,7 @@ async def test_service_pagination_asc_desc() -> None:
         t1, t2, t3 = base - 30, base - 20, base - 10
         for ts, rid in [(t1, "a"), (t2, "b"), (t3, "c")]:
             await storage.store_request(_mk(ts, rid))
-        await asyncio.sleep(0.2)
+        await storage.wait_for_queue_processing()
 
         svc = AnalyticsService(storage._engine)
 

@@ -13,6 +13,7 @@ from ccproxy.core.plugins import (
     TaskSpec,
 )
 from ccproxy.core.plugins.declaration import RouterSpec
+from ccproxy.llms.streaming.accumulators import ClaudeAccumulator
 from ccproxy.plugins.oauth_claude.manager import ClaudeApiTokenManager
 
 from .adapter import ClaudeAPIAdapter
@@ -50,18 +51,8 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
             logger.warning("plugin_no_config")
             # Use default config if none provided
             config = ClaudeAPISettings()
-            from ccproxy.core.logging import reduce_startup
-
-            if reduce_startup(
-                self.context.get("app") if hasattr(self, "context") else None
-            ):
-                logger.debug("plugin_using_default_config", category="plugin")
-            else:
-                logger.info("plugin_using_default_config", category="plugin")
+            logger.debug("plugin_using_default_config", category="plugin")
         self.config = config
-
-        # Setup format registry
-        await self._setup_format_registry()
 
         # Register streaming metrics hook
         await self._register_streaming_metrics_hook()
@@ -101,23 +92,16 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
                 }
             )
 
-        from ccproxy.core.logging import info_allowed
-
-        log_fn = (
-            logger.info
-            if info_allowed(
-                self.context.get("app") if hasattr(self, "context") else None
-            )
-            else logger.debug
-        )
-        log_fn(
+        logger.debug(
             "plugin_initialized",
             plugin="claude_api",
             version="1.0.0",
             status="initialized",
             has_credentials=self.credentials_manager is not None,
             base_url=self.config.base_url,
-            models_count=len(self.config.models) if self.config.models else 0,
+            models_count=len(self.config.models_endpoint)
+            if self.config.models_endpoint
+            else 0,
             has_adapter=self.adapter is not None,
             **cli_info,
         )
@@ -142,60 +126,6 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
                 details["health_check_error"] = str(e)
 
         return details
-
-    async def get_profile_info(self) -> dict[str, Any] | None:
-        """Get Claude-specific profile information from stored credentials."""
-        try:
-            if not self.credentials_manager:
-                return None
-
-            # Get profile using credentials manager
-            profile = await self.credentials_manager.get_account_profile()
-            if not profile:
-                # Try to fetch fresh profile
-                profile = await self.credentials_manager.fetch_user_profile()
-
-            if profile:
-                profile_info = {}
-
-                if profile.organization:
-                    profile_info.update(
-                        {
-                            "organization_name": profile.organization.name,
-                            "organization_type": profile.organization.organization_type,
-                            "billing_type": profile.organization.billing_type,
-                            "rate_limit_tier": profile.organization.rate_limit_tier,
-                        }
-                    )
-
-                if profile.account:
-                    profile_info.update(
-                        {
-                            "email": profile.account.email,
-                            "full_name": profile.account.full_name,
-                            "display_name": profile.account.display_name,
-                            "has_claude_pro": profile.account.has_claude_pro,
-                            "has_claude_max": profile.account.has_claude_max,
-                        }
-                    )
-
-                return profile_info
-
-        except Exception as e:
-            logger.debug(
-                "claude_api_profile_error",
-                error=str(e),
-                exc_info=e,
-            )
-
-        return None
-
-    async def _setup_format_registry(self) -> None:
-        """No-op; manifest-based format adapters are always used."""
-        logger.debug(
-            "claude_api_format_registry_setup_skipped_using_manifest",
-            category="format",
-        )
 
     async def _register_streaming_metrics_hook(self) -> None:
         """Register the streaming metrics extraction hook."""
@@ -279,32 +209,16 @@ class ClaudeAPIRuntime(ProviderPluginRuntime):
             )
             hook_registry.register(metrics_hook)
 
-            from ccproxy.core.logging import info_allowed
-
-            if info_allowed(
-                self.context.get("app") if hasattr(self, "context") else None
-            ):
-                logger.info(
-                    "streaming_metrics_hook_registered",
-                    plugin="claude_api",
-                    hook_name=metrics_hook.name,
-                    priority=metrics_hook.priority,
-                    has_pricing=pricing_service is not None,
-                    pricing_service_type=type(pricing_service).__name__
-                    if pricing_service
-                    else "None",
-                )
-            else:
-                logger.debug(
-                    "streaming_metrics_hook_registered",
-                    plugin="claude_api",
-                    hook_name=metrics_hook.name,
-                    priority=metrics_hook.priority,
-                    has_pricing=pricing_service is not None,
-                    pricing_service_type=type(pricing_service).__name__
-                    if pricing_service
-                    else "None",
-                )
+            logger.debug(
+                "streaming_metrics_hook_registered",
+                plugin="claude_api",
+                hook_name=metrics_hook.name,
+                priority=metrics_hook.priority,
+                has_pricing=pricing_service is not None,
+                pricing_service_type=type(pricing_service).__name__
+                if pricing_service
+                else "None",
+            )
 
         except Exception as e:
             logger.error(
@@ -356,6 +270,7 @@ class ClaudeAPIFactory(BaseProviderPluginFactory):
             kwargs={"skip_initial_run": True},
         )
     ]
+    tool_accumulator_class = ClaudeAccumulator
 
     def create_detection_service(self, context: PluginContext) -> Any:
         """Create detection service and inject it into task kwargs.

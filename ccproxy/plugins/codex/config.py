@@ -9,7 +9,11 @@ from ccproxy.core.constants import (
     FORMAT_OPENAI_CHAT,
     FORMAT_OPENAI_RESPONSES,
 )
-from ccproxy.models.provider import ProviderConfig
+from ccproxy.models.provider import ModelCard, ModelMappingRule, ProviderConfig
+from ccproxy.plugins.codex.model_defaults import (
+    DEFAULT_CODEX_MODEL_CARDS,
+    DEFAULT_CODEX_MODEL_MAPPINGS,
+)
 
 
 class OAuthSettings(BaseModel):
@@ -90,9 +94,17 @@ class CodexSettings(ProviderConfig):
     auth_type: str | None = Field(
         default="oauth", description="Authentication type (bearer, api_key, etc.)"
     )
-    models: list[str] = Field(
-        default_factory=lambda: ["gpt-5"],
-        description="List of supported models",
+    model_mappings: list[ModelMappingRule] = Field(
+        default_factory=lambda: [
+            rule.model_copy(deep=True) for rule in DEFAULT_CODEX_MODEL_MAPPINGS
+        ],
+        description="List of client-to-upstream model mapping rules",
+    )
+    models_endpoint: list[ModelCard] = Field(
+        default_factory=lambda: [
+            card.model_copy(deep=True) for card in DEFAULT_CODEX_MODEL_CARDS
+        ],
+        description="Model metadata served via the /models endpoint",
     )
 
     supported_input_formats: list[str] = Field(

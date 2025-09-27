@@ -3,50 +3,8 @@
 from typing import Any
 
 from ccproxy.auth.exceptions import AuthenticationError
-from ccproxy.auth.models.base import UserProfile
 from ccproxy.auth.models.credentials import BaseCredentials
-
-
-class BearerCredentials:
-    """Simple bearer token credentials that implement BaseCredentials protocol."""
-
-    def __init__(self, token: str):
-        """Initialize with a bearer token.
-
-        Args:
-            token: Bearer token string
-        """
-        self.token = token
-
-    def is_expired(self) -> bool:
-        """Check if credentials are expired.
-
-        Bearer tokens don't have expiration in this implementation.
-
-        Returns:
-            Always False for bearer tokens
-        """
-        return False
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for storage.
-
-        Returns:
-            Dictionary with token
-        """
-        return {"token": self.token, "type": "bearer"}
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BearerCredentials":
-        """Create from dictionary.
-
-        Args:
-            data: Dictionary containing token
-
-        Returns:
-            BearerCredentials instance
-        """
-        return cls(token=data["token"])
+from ccproxy.auth.oauth.protocol import StandardProfileFields
 
 
 class BearerTokenAuthManager:
@@ -76,12 +34,10 @@ class BearerTokenAuthManager:
         return self.token
 
     async def get_credentials(self) -> BaseCredentials:
-        """Get credentials as BearerCredentials.
-
-        Returns:
-            BearerCredentials instance wrapping the token
-        """
-        return BearerCredentials(token=self.token)
+        """Bearer tokens do not expose structured credentials."""
+        raise AuthenticationError(
+            "Bearer token authentication doesn't support full credentials"
+        )
 
     async def is_authenticated(self) -> bool:
         """Check if bearer token is available.
@@ -91,12 +47,8 @@ class BearerTokenAuthManager:
         """
         return bool(self.token)
 
-    async def get_user_profile(self) -> UserProfile | None:
-        """Get user profile (not supported for bearer tokens).
-
-        Returns:
-            None - bearer tokens don't support user profiles
-        """
+    async def get_user_profile(self) -> StandardProfileFields | None:
+        """Return ``None`` because bearer tokens have no profile context."""
         return None
 
     async def __aenter__(self) -> "BearerTokenAuthManager":

@@ -177,28 +177,6 @@ class BasePluginRuntime(PluginRuntimeProtocol):
         """
         return {}
 
-    async def get_profile_info(self) -> dict[str, Any] | None:
-        """Get provider profile information.
-
-        Default implementation returns None.
-        Provider plugins should override this method.
-
-        Returns:
-            Profile information or None
-        """
-        return None
-
-    async def get_auth_summary(self) -> dict[str, Any]:
-        """Get authentication summary.
-
-        Default implementation returns basic status.
-        Provider plugins should override this method.
-
-        Returns:
-            Authentication summary
-        """
-        return {"auth": "not_applicable"}
-
 
 class SystemPluginRuntime(BasePluginRuntime):
     """Runtime for system plugins (non-provider plugins).
@@ -422,9 +400,6 @@ class ProviderPluginRuntime(BasePluginRuntime):
         if self.manifest.oauth_provider_factory:
             await self._register_oauth_provider()
 
-        # Set up format registry
-        await self._setup_format_registry()
-
     async def _register_oauth_provider(self) -> None:
         """Register OAuth provider with the app-scoped registry."""
         if not self.manifest.oauth_provider_factory:
@@ -504,14 +479,6 @@ class ProviderPluginRuntime(BasePluginRuntime):
                 category="plugin",
             )
 
-    async def _setup_format_registry(self) -> None:
-        """No-op; manifest-based format adapters are always used."""
-        logger.debug(
-            "format_registry_setup_skipped_manifest_mode_enabled",
-            plugin=self.__class__.__name__,
-            category="format",
-        )
-
     async def _on_shutdown(self) -> None:
         """Provider plugin cleanup."""
         # Unregister OAuth provider if registered
@@ -550,115 +517,3 @@ class ProviderPluginRuntime(BasePluginRuntime):
                 details["cli_path"] = self.detection_service.get_cli_path()
 
         return details
-
-    async def get_profile_info(self) -> dict[str, Any] | None:
-        """Get provider profile information.
-
-        Returns:
-            Profile information from credentials manager
-        """
-        if not self.credentials_manager:
-            return None
-
-        try:
-            # Attempt to get profile from credentials manager
-            if hasattr(self.credentials_manager, "get_account_profile"):
-                profile = await self.credentials_manager.get_account_profile()
-                if profile:
-                    return self._format_profile(profile)
-
-            # Try to fetch fresh profile
-            if hasattr(self.credentials_manager, "fetch_user_profile"):
-                profile = await self.credentials_manager.fetch_user_profile()
-                if profile:
-                    return self._format_profile(profile)
-
-        except Exception as e:
-            logger.debug(
-                "profile_fetch_error",
-                plugin=self.name,
-                error=str(e),
-                exc_info=e,
-                category="plugin",
-            )
-
-        return None
-
-    def _format_profile(self, profile: Any) -> dict[str, Any]:
-        """Format profile data for response.
-
-        Args:
-            profile: Raw profile data
-
-        Returns:
-            Formatted profile dictionary
-        """
-        formatted = {}
-
-        # Extract organization info
-        if hasattr(profile, "organization") and profile.organization:
-            org = profile.organization
-            formatted.update(
-                {
-                    "organization_name": getattr(org, "name", None),
-                    "organization_type": getattr(org, "organization_type", None),
-                    "billing_type": getattr(org, "billing_type", None),
-                    "rate_limit_tier": getattr(org, "rate_limit_tier", None),
-                }
-            )
-
-        # Extract account info
-        if hasattr(profile, "account") and profile.account:
-            acc = profile.account
-            formatted.update(
-                {
-                    "email": getattr(acc, "email", None),
-                    "full_name": getattr(acc, "full_name", None),
-                    "display_name": getattr(acc, "display_name", None),
-                    "has_claude_pro": getattr(acc, "has_claude_pro", None),
-                    "has_claude_max": getattr(acc, "has_claude_max", None),
-                }
-            )
-
-        # Remove None values
-        return {k: v for k, v in formatted.items() if v is not None}
-
-    async def get_auth_summary(self) -> dict[str, Any]:
-        """Get authentication summary.
-
-        Returns:
-            Authentication status and details
-        """
-        if not self.credentials_manager:
-            return {"auth": "not_configured"}
-
-        try:
-            if hasattr(self.credentials_manager, "get_auth_status"):
-                auth_status = await self.credentials_manager.get_auth_status()
-
-                summary = {"auth": "not_configured"}
-
-                if auth_status.get("auth_configured"):
-                    if auth_status.get("token_available"):
-                        summary["auth"] = "authenticated"
-                        if "time_remaining" in auth_status:
-                            summary["auth_expires"] = auth_status["time_remaining"]
-                        if "token_expired" in auth_status:
-                            summary["auth_expired"] = auth_status["token_expired"]
-                        if "subscription_type" in auth_status:
-                            summary["subscription"] = auth_status["subscription_type"]
-                    else:
-                        summary["auth"] = "no_token"
-
-                return summary
-
-        except Exception as e:
-            logger.warning(
-                "auth_status_error",
-                plugin=self.name,
-                error=str(e),
-                exc_info=e,
-                category="plugin",
-            )
-
-        return {"auth": "status_error"}

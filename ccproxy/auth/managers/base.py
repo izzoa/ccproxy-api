@@ -11,6 +11,7 @@ from ccproxy.auth.exceptions import (
     CredentialsInvalidError,
     CredentialsStorageError,
 )
+from ccproxy.auth.managers.token_snapshot import TokenSnapshot
 from ccproxy.auth.models.credentials import BaseCredentials
 from ccproxy.auth.storage.base import TokenStorage
 from ccproxy.core.logging import get_logger
@@ -177,6 +178,43 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
         """
         return self.storage.get_location()
 
+    @abstractmethod
+    def _build_token_snapshot(self, credentials: CredentialsT) -> TokenSnapshot:
+        """Construct a token snapshot for the given credentials."""
+
+    def _safe_token_snapshot(self, credentials: CredentialsT) -> TokenSnapshot | None:
+        """Safely build a token snapshot with defensive logging."""
+        try:
+            return self._build_token_snapshot(credentials)
+        except NotImplementedError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug(
+                "token_snapshot_failed",
+                error=str(exc),
+                credentials_type=type(credentials).__name__,
+                category="auth",
+            )
+            return None
+
+    async def get_token_snapshot(self) -> TokenSnapshot | None:
+        """Return a lightweight snapshot of stored token metadata."""
+        credentials = await self.load_credentials()
+        if not credentials:
+            return None
+        try:
+            return self._build_token_snapshot(credentials)
+        except NotImplementedError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug(
+                "token_snapshot_failed",
+                error=str(exc),
+                credentials_type=type(credentials).__name__,
+                category="auth",
+            )
+            return None
+
     # ==================== Common Implementations ====================
 
     async def validate_token(self) -> bool:
@@ -198,11 +236,8 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
     # Subclasses should implement protocol methods
 
     @abstractmethod
-    async def refresh_token(self, oauth_client: Any) -> CredentialsT | None:
+    async def refresh_token(self) -> CredentialsT | None:
         """Refresh the access token using the refresh token.
-
-        Args:
-            oauth_client: The OAuth client to use for refreshing
 
         Returns:
             Updated credentials or None if refresh failed
@@ -294,22 +329,9 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
         Returns:
             Expiration datetime if available, None otherwise
         """
-        # Default implementation - plugins can override
-        from datetime import UTC, datetime
-
-        if hasattr(credentials, "expires_at"):
-            if isinstance(credentials.expires_at, datetime):
-                return credentials.expires_at
-            elif isinstance(credentials.expires_at, int | float):
-                # Assume Unix timestamp in seconds
-                return datetime.fromtimestamp(credentials.expires_at, tz=UTC)
-        elif hasattr(credentials, "claude_ai_oauth"):
-            # Handle Claude credentials format
-            expires_at = credentials.claude_ai_oauth.expires_at
-            if expires_at:
-                return datetime.fromtimestamp(
-                    expires_at / 1000, tz=UTC
-                )  # Convert from milliseconds
+        snapshot = self._safe_token_snapshot(credentials)
+        if snapshot:
+            return snapshot.expires_at
         return None
 
     # ==================== Unified Profile Support ====================
@@ -345,28 +367,17 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
         if not profile:
             return {}
 
-        # Handle both old UserProfile and new BaseProfileInfo
-        if hasattr(profile, "provider_type"):
-            # New BaseProfileInfo-based profile
-            return {
-                "account_id": profile.account_id,
-                "email": profile.email,
-                "display_name": profile.display_name,
-                "provider": profile.provider_type,
-                "extras": profile.extras,  # All provider-specific data
-            }
-        else:
-            # Legacy UserProfile format
-            account = getattr(profile, "account", None)
-            if account:
-                return {
-                    "account_id": account.uuid,
-                    "email": account.email,
-                    "display_name": account.full_name,
-                    "provider": "unknown",
-                    "extras": account.extras if hasattr(account, "extras") else {},
-                }
-            return {}
+        extras = getattr(profile, "extras", None)
+        if extras is None:
+            extras = getattr(profile, "features", {}) or {}
+
+        return {
+            "account_id": profile.account_id,
+            "email": profile.email,
+            "display_name": profile.display_name,
+            "provider": profile.provider_type,
+            "extras": extras,
+        }
 
     async def get_unified_profile_quick(self) -> dict[str, Any]:
         """Get a lightweight unified profile across providers.
@@ -381,26 +392,17 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
         if not profile:
             return {}
 
-        # Handle both old UserProfile and new BaseProfileInfo
-        if hasattr(profile, "provider_type"):
-            return {
-                "account_id": getattr(profile, "account_id", ""),
-                "email": getattr(profile, "email", ""),
-                "display_name": getattr(profile, "display_name", None),
-                "provider": getattr(profile, "provider_type", "unknown"),
-                "extras": getattr(profile, "extras", {}) or {},
-            }
-        else:
-            account = getattr(profile, "account", None)
-            if account:
-                return {
-                    "account_id": getattr(account, "uuid", ""),
-                    "email": getattr(account, "email", ""),
-                    "display_name": getattr(account, "full_name", None),
-                    "provider": "unknown",
-                    "extras": getattr(account, "extras", {}) or {},
-                }
-            return {}
+        extras = getattr(profile, "extras", None)
+        if extras is None:
+            extras = getattr(profile, "features", {}) or {}
+
+        return {
+            "account_id": getattr(profile, "account_id", ""),
+            "email": getattr(profile, "email", ""),
+            "display_name": getattr(profile, "display_name", None),
+            "provider": getattr(profile, "provider_type", "unknown"),
+            "extras": extras,
+        }
 
     async def clear_cache(self) -> None:
         """Clear any cached data (profiles, etc.).
@@ -447,12 +449,9 @@ class BaseTokenManager(ABC, Generic[CredentialsT]):
             logger.info("token_expired")
             return None
 
-        # Get access_token attribute from credentials
-        if hasattr(credentials, "access_token"):
-            return str(credentials.access_token)
-        elif hasattr(credentials, "claude_ai_oauth"):
-            # Handle Claude credentials format
-            return str(credentials.claude_ai_oauth.access_token.get_secret_value())
+        snapshot = self._safe_token_snapshot(credentials)
+        if snapshot and snapshot.access_token:
+            return snapshot.access_token
 
         return None
 

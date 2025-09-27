@@ -1,186 +1,162 @@
-"""Test pricing service integration with claude_api adapter."""
+"""Tests for Claude API pricing hook integration."""
 
-from collections.abc import Generator
-from unittest.mock import AsyncMock, Mock, patch
+from datetime import UTC, datetime
+from decimal import Decimal
+from unittest.mock import Mock
 
 import pytest
-from httpx import AsyncClient
 
-from ccproxy.core.plugins import PluginRegistry
-from ccproxy.plugins.claude_api.adapter import ClaudeAPIAdapter
-from ccproxy.plugins.pricing.service import PricingService
+from ccproxy.core.plugins.hooks import HookContext, HookEvent
+from ccproxy.plugins.claude_api.hooks import ClaudeAPIStreamingMetricsHook
 
 
 @pytest.fixture
-def mock_pricing_service() -> AsyncMock:
-    """Create a mock pricing service."""
-    service = AsyncMock(spec=PricingService)
-    service.calculate_cost = AsyncMock(return_value=0.0105)
+def pricing_service() -> Mock:
+    """Return a mock pricing service with synchronous calculator."""
+    service = Mock()
+    service.calculate_cost_sync.return_value = Decimal("0.0105")
     return service
 
 
-@pytest.fixture
-def plugin_registry_with_pricing(
-    mock_pricing_service: AsyncMock,
-) -> Generator[PluginRegistry, None, None]:
-    """Create a plugin registry with pricing service."""
-    registry = PluginRegistry()
-
-    # Patch the get_service method to return our mock pricing service
-    with patch.object(registry, "get_service", return_value=mock_pricing_service):
-        yield registry
-
-
-@pytest.fixture
-def adapter_with_pricing(
-    plugin_registry_with_pricing: PluginRegistry,
-) -> ClaudeAPIAdapter:
-    """Create a ClaudeAPIAdapter with pricing service access."""
-    context = {
-        "plugin_registry": plugin_registry_with_pricing,
-        "settings": Mock(),
-        "http_client": AsyncClient(),
-        "logger": Mock(),
-    }
-
-    adapter = ClaudeAPIAdapter(
-        auth_manager=Mock(),
-        detection_service=Mock(),
-        http_pool_manager=Mock(),
-        context=context,
-    )
-
-    return adapter
-
-
 @pytest.mark.unit
-class TestClaudeAPIPricingIntegration:
-    """Test pricing service integration in claude_api adapter."""
+class TestClaudeAPIPricingHook:
+    """Behavioral tests for the Claude streaming metrics hook."""
 
-    def test_adapter_stores_context(
-        self, adapter_with_pricing: ClaudeAPIAdapter
-    ) -> None:
-        """Test that adapter stores the context passed to it."""
-        assert hasattr(adapter_with_pricing, "context")
-        assert isinstance(adapter_with_pricing.context, dict)
-        assert "plugin_registry" in adapter_with_pricing.context
+    def test_get_pricing_service_direct(self, pricing_service: Mock) -> None:
+        """When provided explicitly, the hook should reuse the pricing service."""
+        hook = ClaudeAPIStreamingMetricsHook(pricing_service=pricing_service)
+        assert hook._get_pricing_service() is pricing_service
 
-    def test_get_pricing_service_with_registry(
-        self, adapter_with_pricing: ClaudeAPIAdapter, mock_pricing_service: AsyncMock
-    ) -> None:
-        """Test that adapter can get pricing service through plugin registry."""
-        service = adapter_with_pricing._get_pricing_service()
+    def test_get_pricing_service_lazy(self, pricing_service: Mock) -> None:
+        """Hook should resolve the pricing service lazily via the registry."""
+        registry = Mock()
+        registry.get_service.return_value = pricing_service
 
-        assert service is not None
-        assert service is mock_pricing_service
+        hook = ClaudeAPIStreamingMetricsHook(plugin_registry=registry)
+        resolved = hook._get_pricing_service()
 
-    def test_get_pricing_service_without_registry(self) -> None:
-        """Test that adapter returns None when no plugin registry is available."""
-        adapter = ClaudeAPIAdapter(
-            auth_manager=Mock(),
-            detection_service=Mock(),
-            http_pool_manager=Mock(),
-            context={},  # Empty context, no plugin_registry
-        )
+        registry.get_service.assert_called_once()
+        assert resolved is pricing_service
 
-        service = adapter._get_pricing_service()
-        assert service is None
-
-    def test_get_pricing_service_with_missing_runtime(self) -> None:
-        """Test graceful handling when pricing service is not available."""
-        registry = PluginRegistry()
-
-        context = {"plugin_registry": registry}
-        adapter = ClaudeAPIAdapter(
-            auth_manager=Mock(),
-            detection_service=Mock(),
-            http_pool_manager=Mock(),
-            context=context,
-        )
-
-        # Mock get_service to return None (service not available)
-        with patch.object(registry, "get_service", return_value=None):
-            service = adapter._get_pricing_service()
-            assert service is None
+    def test_get_pricing_service_missing(self) -> None:
+        """When no service is available hook should return None."""
+        hook = ClaudeAPIStreamingMetricsHook()
+        assert hook._get_pricing_service() is None
 
     @pytest.mark.asyncio
-    async def test_extract_usage_with_pricing(
-        self, adapter_with_pricing: ClaudeAPIAdapter, mock_pricing_service: AsyncMock
-    ) -> None:
-        """Test that cost calculation uses pricing service when available."""
-        import time
+    async def test_cost_calculation_with_pricing(self, pricing_service: Mock) -> None:
+        """Hook should compute cost when pricing service is configured."""
+        hook = ClaudeAPIStreamingMetricsHook(pricing_service=pricing_service)
+        request_id = "req-123"
 
-        from ccproxy.core.request_context import RequestContext
-
-        # Create a mock request context with required arguments
-        request_context = RequestContext(
-            request_id="test-123", start_time=time.time(), logger=Mock()
+        # message_start chunk provides model + input tokens
+        start_chunk = {
+            "type": "message_start",
+            "message": {
+                "model": "claude-3-5-sonnet-20241022",
+                "usage": {
+                    "input_tokens": 1000,
+                    "output_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                },
+            },
+        }
+        start_context = HookContext(
+            event=HookEvent.PROVIDER_STREAM_CHUNK,
+            timestamp=datetime.now(UTC),
+            data={"chunk": start_chunk},
+            metadata={"request_id": request_id},
+            provider="claude_api",
+            plugin="claude_api",
         )
-        request_context.metadata["model"] = "claude-3-5-sonnet-20241022"
 
-        # Simulate usage data already extracted in processor
-        request_context.metadata.update(
-            {
-                "tokens_input": 1000,
-                "tokens_output": 500,
-                "cache_read_tokens": 0,
-                "cache_write_tokens": 0,
-            }
+        # message_delta chunk provides final output tokens
+        delta_chunk = {
+            "type": "message_delta",
+            "usage": {
+                "output_tokens": 500,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+        delta_context = HookContext(
+            event=HookEvent.PROVIDER_STREAM_CHUNK,
+            timestamp=datetime.now(UTC),
+            data={"chunk": delta_chunk},
+            metadata={"request_id": request_id},
+            provider="claude_api",
+            plugin="claude_api",
         )
 
-        # Calculate cost with pricing service
-        await adapter_with_pricing._calculate_cost_for_usage(request_context)
+        end_context = HookContext(
+            event=HookEvent.PROVIDER_STREAM_END,
+            timestamp=datetime.now(UTC),
+            data={},
+            metadata={"request_id": request_id},
+            provider="claude_api",
+            plugin="claude_api",
+        )
 
-        # Verify pricing service was called
-        mock_pricing_service.calculate_cost.assert_called_once_with(
+        await hook(start_context)
+        await hook(delta_context)
+        await hook(end_context)
+
+        pricing_service.calculate_cost_sync.assert_called_once_with(
             model_name="claude-3-5-sonnet-20241022",
             input_tokens=1000,
             output_tokens=500,
             cache_read_tokens=0,
             cache_write_tokens=0,
         )
-
-        # Verify cost was added to metadata
-        assert "cost_usd" in request_context.metadata
-        assert request_context.metadata["cost_usd"] == 0.0105
+        assert end_context.data["usage_metrics"]["cost_usd"] == float(Decimal("0.0105"))
 
     @pytest.mark.asyncio
-    async def test_extract_usage_without_pricing(self) -> None:
-        """Test that usage extraction works without pricing service."""
-        import time
+    async def test_cost_calculation_without_pricing(self) -> None:
+        """Hook should skip cost calculation gracefully when service missing."""
+        hook = ClaudeAPIStreamingMetricsHook()
+        request_id = "req-999"
 
-        from ccproxy.core.request_context import RequestContext
+        start_chunk = {
+            "type": "message_start",
+            "message": {
+                "model": "claude-3-opus",
+                "usage": {"input_tokens": 50},
+            },
+        }
+        delta_chunk = {
+            "type": "message_delta",
+            "usage": {"output_tokens": 25},
+        }
 
-        # Create adapter without pricing service
-        adapter = ClaudeAPIAdapter(
-            auth_manager=Mock(),
-            detection_service=Mock(),
-            http_pool_manager=Mock(),
-            context={},  # No plugin_registry
+        start_context = HookContext(
+            event=HookEvent.PROVIDER_STREAM_CHUNK,
+            timestamp=datetime.now(UTC),
+            data={"chunk": start_chunk},
+            metadata={"request_id": request_id},
+            provider="claude_api",
+            plugin="claude_api",
+        )
+        delta_context = HookContext(
+            event=HookEvent.PROVIDER_STREAM_CHUNK,
+            timestamp=datetime.now(UTC),
+            data={"chunk": delta_chunk},
+            metadata={"request_id": request_id},
+            provider="claude_api",
+            plugin="claude_api",
+        )
+        end_context = HookContext(
+            event=HookEvent.PROVIDER_STREAM_END,
+            timestamp=datetime.now(UTC),
+            data={},
+            metadata={"request_id": request_id},
+            provider="claude_api",
+            plugin="claude_api",
         )
 
-        # Create a mock request context with required arguments
-        request_context = RequestContext(
-            request_id="test-456", start_time=time.time(), logger=Mock()
-        )
-        request_context.metadata["model"] = "claude-3-5-sonnet-20241022"
+        await hook(start_context)
+        await hook(delta_context)
+        await hook(end_context)
 
-        # Simulate usage data already extracted in processor
-        request_context.metadata.update(
-            {
-                "tokens_input": 1000,
-                "tokens_output": 500,
-                "tokens_total": 1500,
-            }
-        )
-
-        # Calculate cost (should not fail even without pricing service)
-        await adapter._calculate_cost_for_usage(request_context)
-
-        # Verify tokens are still in metadata
-        assert request_context.metadata["tokens_input"] == 1000
-        assert request_context.metadata["tokens_output"] == 500
-        assert request_context.metadata["tokens_total"] == 1500
-
-        # Cost should not be set when pricing service is not available
-        assert "cost_usd" not in request_context.metadata
+        assert "usage_metrics" in end_context.data
+        assert "cost_usd" not in end_context.data["usage_metrics"]

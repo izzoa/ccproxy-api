@@ -1,6 +1,5 @@
 """Integration tests for CLI login command with flow engines."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -58,19 +57,19 @@ class TestCLILoginIntegration:
         """Test login command with browser flow."""
         with (
             patch(
-                "ccproxy.cli.commands.auth.get_oauth_provider_for_name"
+                "ccproxy.cli.commands.auth.get_oauth_provider_for_name",
+                new_callable=AsyncMock,
             ) as mock_get_provider,
             patch(
-                "ccproxy.cli.commands.auth.discover_oauth_providers"
+                "ccproxy.cli.commands.auth.discover_oauth_providers",
+                new_callable=AsyncMock,
             ) as mock_discover,
             patch("ccproxy.cli.commands.auth._get_service_container") as mock_container,
             patch("ccproxy.auth.oauth.flows.CLICallbackServer") as mock_server_class,
             patch("ccproxy.auth.oauth.flows.webbrowser"),
         ):
-            mock_get_provider.return_value = asyncio.coroutine(lambda: mock_provider)()
-            mock_discover.return_value = asyncio.coroutine(
-                lambda: {"test-provider": ("oauth", "Test Provider")}
-            )()
+            mock_get_provider.return_value = mock_provider
+            mock_discover.return_value = {"test-provider": ("oauth", "Test Provider")}
             mock_container.return_value = MagicMock()
 
             # Mock callback server
@@ -98,18 +97,18 @@ class TestCLILoginIntegration:
 
         with (
             patch(
-                "ccproxy.cli.commands.auth.get_oauth_provider_for_name"
+                "ccproxy.cli.commands.auth.get_oauth_provider_for_name",
+                new_callable=AsyncMock,
             ) as mock_get_provider,
             patch(
-                "ccproxy.cli.commands.auth.discover_oauth_providers"
+                "ccproxy.cli.commands.auth.discover_oauth_providers",
+                new_callable=AsyncMock,
             ) as mock_discover,
             patch("ccproxy.cli.commands.auth._get_service_container") as mock_container,
             patch("ccproxy.auth.oauth.flows.render_qr_code"),
         ):
-            mock_get_provider.return_value = asyncio.coroutine(lambda: mock_provider)()
-            mock_discover.return_value = asyncio.coroutine(
-                lambda: {"test-provider": ("oauth", "Test Provider")}
-            )()
+            mock_get_provider.return_value = mock_provider
+            mock_discover.return_value = {"test-provider": ("oauth", "Test Provider")}
             mock_container.return_value = MagicMock()
 
             result = cli_runner.invoke(auth_app, ["login", "test-provider"])
@@ -124,19 +123,19 @@ class TestCLILoginIntegration:
         """Test login command with manual flow."""
         with (
             patch(
-                "ccproxy.cli.commands.auth.get_oauth_provider_for_name"
+                "ccproxy.cli.commands.auth.get_oauth_provider_for_name",
+                new_callable=AsyncMock,
             ) as mock_get_provider,
             patch(
-                "ccproxy.cli.commands.auth.discover_oauth_providers"
+                "ccproxy.cli.commands.auth.discover_oauth_providers",
+                new_callable=AsyncMock,
             ) as mock_discover,
             patch("ccproxy.cli.commands.auth._get_service_container") as mock_container,
             patch("ccproxy.auth.oauth.flows.typer.prompt") as mock_prompt,
             patch("ccproxy.auth.oauth.flows.render_qr_code"),
         ):
-            mock_get_provider.return_value = asyncio.coroutine(lambda: mock_provider)()
-            mock_discover.return_value = asyncio.coroutine(
-                lambda: {"test-provider": ("oauth", "Test Provider")}
-            )()
+            mock_get_provider.return_value = mock_provider
+            mock_discover.return_value = {"test-provider": ("oauth", "Test Provider")}
             mock_container.return_value = MagicMock()
             mock_prompt.return_value = "test_code"
 
@@ -150,15 +149,17 @@ class TestCLILoginIntegration:
         """Test login command with non-existent provider."""
         with (
             patch(
-                "ccproxy.cli.commands.auth.get_oauth_provider_for_name"
+                "ccproxy.cli.commands.auth.get_oauth_provider_for_name",
+                new_callable=AsyncMock,
             ) as mock_get_provider,
             patch(
-                "ccproxy.cli.commands.auth.discover_oauth_providers"
+                "ccproxy.cli.commands.auth.discover_oauth_providers",
+                new_callable=AsyncMock,
             ) as mock_discover,
             patch("ccproxy.cli.commands.auth._get_service_container") as mock_container,
         ):
-            mock_get_provider.return_value = asyncio.coroutine(lambda: None)()
-            mock_discover.return_value = asyncio.coroutine(lambda: {})()
+            mock_get_provider.return_value = None
+            mock_discover.return_value = {}
             mock_container.return_value = MagicMock()
 
             result = cli_runner.invoke(auth_app, ["login", "nonexistent-provider"])
@@ -173,20 +174,20 @@ class TestCLILoginIntegration:
         """Test login command with port bind error fallback to manual."""
         with (
             patch(
-                "ccproxy.cli.commands.auth.get_oauth_provider_for_name"
+                "ccproxy.cli.commands.auth.get_oauth_provider_for_name",
+                new_callable=AsyncMock,
             ) as mock_get_provider,
             patch(
-                "ccproxy.cli.commands.auth.discover_oauth_providers"
+                "ccproxy.cli.commands.auth.discover_oauth_providers",
+                new_callable=AsyncMock,
             ) as mock_discover,
             patch("ccproxy.cli.commands.auth._get_service_container") as mock_container,
             patch("ccproxy.auth.oauth.flows.CLICallbackServer") as mock_server_class,
             patch("ccproxy.auth.oauth.flows.typer.prompt") as mock_prompt,
             patch("ccproxy.auth.oauth.flows.render_qr_code"),
         ):
-            mock_get_provider.return_value = asyncio.coroutine(lambda: mock_provider)()
-            mock_discover.return_value = asyncio.coroutine(
-                lambda: {"test-provider": ("oauth", "Test Provider")}
-            )()
+            mock_get_provider.return_value = mock_provider
+            mock_discover.return_value = {"test-provider": ("oauth", "Test Provider")}
             mock_container.return_value = MagicMock()
             mock_prompt.return_value = "test_code"
 
@@ -211,23 +212,24 @@ class TestCLILoginIntegration:
 
         with (
             patch(
-                "ccproxy.cli.commands.auth.get_oauth_provider_for_name"
+                "ccproxy.cli.commands.auth.get_oauth_provider_for_name",
+                new_callable=AsyncMock,
             ) as mock_get_provider,
             patch(
-                "ccproxy.cli.commands.auth.discover_oauth_providers"
+                "ccproxy.cli.commands.auth.discover_oauth_providers",
+                new_callable=AsyncMock,
             ) as mock_discover,
             patch("ccproxy.cli.commands.auth._get_service_container") as mock_container,
         ):
-            mock_get_provider.return_value = asyncio.coroutine(lambda: mock_provider)()
-            mock_discover.return_value = asyncio.coroutine(
-                lambda: {"test-provider": ("oauth", "Test Provider")}
-            )()
+            mock_get_provider.return_value = mock_provider
+            mock_discover.return_value = {"test-provider": ("oauth", "Test Provider")}
             mock_container.return_value = MagicMock()
 
             result = cli_runner.invoke(auth_app, ["login", "test-provider", "--manual"])
 
             assert result.exit_code == 1
-            assert "doesn't support manual code entry" in result.stdout
+            normalized_output = " ".join(result.stdout.split())
+            assert "doesn't support manual code entry" in normalized_output
 
     @pytest.mark.integration
     def test_login_command_keyboard_interrupt(
@@ -244,10 +246,8 @@ class TestCLILoginIntegration:
             patch("ccproxy.cli.commands.auth._get_service_container") as mock_container,
             patch("ccproxy.auth.oauth.flows.BrowserFlow.run") as mock_flow_run,
         ):
-            mock_get_provider.return_value = asyncio.coroutine(lambda: mock_provider)()
-            mock_discover.return_value = asyncio.coroutine(
-                lambda: {"test-provider": ("oauth", "Test Provider")}
-            )()
+            mock_get_provider.return_value = mock_provider
+            mock_discover.return_value = {"test-provider": ("oauth", "Test Provider")}
             mock_container.return_value = MagicMock()
             mock_flow_run.side_effect = KeyboardInterrupt()
 
@@ -275,10 +275,8 @@ class TestCLILoginErrorHandling:
             patch("ccproxy.cli.commands.auth._get_service_container") as mock_container,
             patch("ccproxy.auth.oauth.flows.BrowserFlow.run") as mock_flow_run,
         ):
-            mock_get_provider.return_value = asyncio.coroutine(lambda: mock_provider)()
-            mock_discover.return_value = asyncio.coroutine(
-                lambda: {"test-provider": ("oauth", "Test Provider")}
-            )()
+            mock_get_provider.return_value = mock_provider
+            mock_discover.return_value = {"test-provider": ("oauth", "Test Provider")}
             mock_container.return_value = MagicMock()
             mock_flow_run.side_effect = AuthProviderError(
                 "Provider authentication failed"
@@ -301,18 +299,18 @@ class TestCLILoginErrorHandling:
 
         with (
             patch(
-                "ccproxy.cli.commands.auth.get_oauth_provider_for_name"
+                "ccproxy.cli.commands.auth.get_oauth_provider_for_name",
+                new_callable=AsyncMock,
             ) as mock_get_provider,
             patch(
-                "ccproxy.cli.commands.auth.discover_oauth_providers"
+                "ccproxy.cli.commands.auth.discover_oauth_providers",
+                new_callable=AsyncMock,
             ) as mock_discover,
             patch("ccproxy.cli.commands.auth._get_service_container") as mock_container,
             patch("ccproxy.auth.oauth.flows.CLICallbackServer") as mock_server_class,
         ):
-            mock_get_provider.return_value = asyncio.coroutine(lambda: mock_provider)()
-            mock_discover.return_value = asyncio.coroutine(
-                lambda: {"test-provider": ("oauth", "Test Provider")}
-            )()
+            mock_get_provider.return_value = mock_provider
+            mock_discover.return_value = {"test-provider": ("oauth", "Test Provider")}
             mock_container.return_value = MagicMock()
 
             # Mock port binding error

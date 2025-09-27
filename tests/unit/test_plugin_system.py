@@ -94,18 +94,6 @@ class MockPlugin:
         """Get OAuth client for this plugin if it supports OAuth authentication."""
         return None
 
-    async def get_profile_info(self):
-        """Get provider-specific profile information from stored credentials."""
-        return None
-
-    def get_auth_commands(self):
-        """Get provider-specific auth command extensions."""
-        return None
-
-    async def get_auth_summary(self):
-        """Get authentication summary for the plugin."""
-        return {"auth": "test", "description": "Test authentication"}
-
     def get_hooks(self):
         """Get hooks provided by this plugin (optional)."""
         return None

@@ -1,11 +1,7 @@
 """LLM format adapters with typed interfaces."""
 
 from .base import APIAdapter, BaseAPIAdapter
-from .shim import AdapterShim
+from .base_model import LlmBaseModel
 
 
-__all__ = [
-    "APIAdapter",
-    "AdapterShim",
-    "BaseAPIAdapter",
-]
+__all__ = ["APIAdapter", "BaseAPIAdapter", "LlmBaseModel"]

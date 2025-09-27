@@ -1,5 +1,12 @@
 """Hook-based request tracer implementation for REQUEST_* events only."""
 
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import aiofiles
+
 from ccproxy.core.logging import get_plugin_logger
 from ccproxy.core.plugins.hooks import Hook
 from ccproxy.core.plugins.hooks.base import HookContext
@@ -27,7 +34,6 @@ class RequestTracerHook(Hook):
         HookEvent.REQUEST_STARTED,
         HookEvent.REQUEST_COMPLETED,
         HookEvent.REQUEST_FAILED,
-        # Legacy provider events for compatibility
         HookEvent.PROVIDER_REQUEST_SENT,
         HookEvent.PROVIDER_RESPONSE_RECEIVED,
         HookEvent.PROVIDER_ERROR,
@@ -48,16 +54,11 @@ class RequestTracerHook(Hook):
         """
         self.config = config or RequestTracerConfig()
 
-        # Respect summaries-only flag if available via app state
-        info_summaries_only = False
-        try:
-            app = getattr(self, "app", None)
-            info_summaries_only = bool(
-                getattr(getattr(app, "state", None), "info_summaries_only", False)
-            )
-        except Exception:
-            info_summaries_only = False
-        (logger.debug if info_summaries_only else logger.info)(
+        # Storage for streaming chunks per request
+        self._streaming_chunks: dict[str, list[bytes]] = {}
+        self._streaming_metadata: dict[str, dict[str, Any]] = {}
+
+        logger.debug(
             "request_tracer_hook_initialized",
             enabled=self.config.enabled,
         )
@@ -69,12 +70,12 @@ class RequestTracerHook(Hook):
             context: Hook context with event data
         """
         # Debug logging for CLI hook calls
-        logger.debug(
-            "request_tracer_hook_called",
-            hook_event=context.event.value if context.event else "unknown",
-            enabled=self.config.enabled,
-            data_keys=list(context.data.keys()) if context.data else [],
-        )
+        # logger.trace(
+        #     "request_tracer_hook_called",
+        #     hook_event=context.event.value if context.event else "unknown",
+        #     enabled=self.config.enabled,
+        #     data_keys=list(context.data.keys()) if context.data else [],
+        # )
 
         if not self.config.enabled:
             return
@@ -119,7 +120,7 @@ class RequestTracerHook(Hook):
         if self._should_exclude_path(path):
             return
 
-        logger.debug(
+        logger.trace(
             "request_started",
             request_id=request_id,
             method=method,
@@ -142,7 +143,7 @@ class RequestTracerHook(Hook):
         if self._should_exclude_path(path):
             return
 
-        logger.debug(
+        logger.trace(
             "request_completed",
             request_id=request_id,
             status_code=status_code,
@@ -156,7 +157,7 @@ class RequestTracerHook(Hook):
         error = context.error
         duration = context.data.get("duration", 0)
 
-        logger.error(
+        logger.trace(
             "request_failed",
             request_id=request_id,
             error=str(error) if error else "unknown",
@@ -173,7 +174,7 @@ class RequestTracerHook(Hook):
         method = context.data.get("method", "UNKNOWN")
         provider = context.provider or "unknown"
 
-        logger.debug(
+        logger.trace(
             "provider_request_sent",
             request_id=request_id,
             provider=provider,
@@ -192,13 +193,12 @@ class RequestTracerHook(Hook):
         provider = context.provider or "unknown"
         is_streaming = context.data.get("is_streaming", False)
 
-        logger.debug(
+        logger.trace(
             "provider_response_received",
             request_id=request_id,
             provider=provider,
             status_code=status_code,
             is_streaming=is_streaming,
-            note="Response body logged by core HTTPTracerHook",
         )
 
     async def _handle_provider_error(self, context: HookContext) -> None:
@@ -216,11 +216,31 @@ class RequestTracerHook(Hook):
 
     async def _handle_stream_start(self, context: HookContext) -> None:
         """Handle PROVIDER_STREAM_START event."""
+        logger.debug(
+            "stream_start_handler_called",
+            enabled=self.config.log_streaming_chunks,
+            request_id=context.data.get(
+                "request_id", context.metadata.get("request_id", "unknown")
+            ),
+            provider=context.provider,
+        )
+
         if not self.config.log_streaming_chunks:
             return
 
-        request_id = context.data.get("request_id", "unknown")
+        request_id = context.data.get("request_id") or context.metadata.get(
+            "request_id", "unknown"
+        )
         provider = context.provider or "unknown"
+
+        # Initialize chunk collection for this request
+        self._streaming_chunks[request_id] = []
+        self._streaming_metadata[request_id] = {
+            "provider": provider,
+            "start_time": datetime.now(),
+            "url": context.data.get("url", ""),
+            "method": context.data.get("method", "UNKNOWN"),
+        }
 
         logger.debug(
             "stream_started",
@@ -233,9 +253,23 @@ class RequestTracerHook(Hook):
         if not self.config.log_streaming_chunks:
             return
 
-        # Note: We might want to skip individual chunks for performance
-        # This is just a placeholder for potential chunk processing
-        pass
+        request_id = context.data.get("request_id", "unknown")
+        chunk = context.data.get("chunk")
+
+        if chunk and request_id in self._streaming_chunks:
+            # Collect the chunk
+            self._streaming_chunks[request_id].append(chunk)
+
+            # Optional: Log chunk info for debugging
+            chunk_number = context.data.get("chunk_number", 0)
+            chunk_size = context.data.get("chunk_size", len(chunk) if chunk else 0)
+
+            logger.trace(
+                "stream_chunk_collected",
+                request_id=request_id,
+                chunk_number=chunk_number,
+                chunk_size=chunk_size,
+            )
 
     async def _handle_stream_end(self, context: HookContext) -> None:
         """Handle PROVIDER_STREAM_END event."""
@@ -248,7 +282,29 @@ class RequestTracerHook(Hook):
         total_bytes = context.data.get("total_bytes", 0)
         usage_metrics = context.data.get("usage_metrics", {})
 
-        logger.debug(
+        # Write collected chunks to response file
+        if request_id in self._streaming_chunks and self._streaming_chunks[request_id]:
+            metadata = self._streaming_metadata.get(request_id, {})
+            chunks = self._streaming_chunks[request_id]
+
+            # Add end time and metrics to metadata
+            metadata.update(
+                {
+                    "end_time": datetime.now(),
+                    "total_chunks": total_chunks,
+                    "total_bytes": total_bytes,
+                    "usage_metrics": usage_metrics,
+                }
+            )
+
+            # Write response file
+            await self._write_streaming_response_file(request_id, chunks, metadata)
+
+            # Clean up memory
+            del self._streaming_chunks[request_id]
+            del self._streaming_metadata[request_id]
+
+        logger.trace(
             "stream_ended",
             request_id=request_id,
             provider=provider,
@@ -276,3 +332,71 @@ class RequestTracerHook(Hook):
             return any(path.startswith(p) for p in self.config.exclude_paths)
 
         return False
+
+    def _generate_stream_response_file_path(
+        self, request_id: str, provider: str
+    ) -> Path:
+        """Generate file path for streaming response file."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"{request_id}_{timestamp}_{provider}_streaming_response.json"
+        return Path(self.config.get_json_log_dir()) / filename
+
+    async def _write_streaming_response_file(
+        self, request_id: str, chunks: list[bytes], metadata: dict[str, Any]
+    ) -> None:
+        """Write collected streaming chunks to a response file."""
+        try:
+            # Combine all chunks
+            combined_data = b"".join(chunks)
+
+            # Try to decode as text for JSON parsing
+            try:
+                response_text = combined_data.decode("utf-8", errors="replace")
+            except Exception:
+                response_text = str(combined_data)
+
+            # Build response data
+            response_data = {
+                "request_id": request_id,
+                "provider": metadata.get("provider", "unknown"),
+                "method": metadata.get("method", "UNKNOWN"),
+                "url": metadata.get("url", ""),
+                "start_time": metadata.get("start_time", datetime.now()).isoformat(),
+                "end_time": datetime.now().isoformat(),
+                "total_chunks": len(chunks),
+                "total_bytes": len(combined_data),
+                # "response_text": response_text[: self.config.truncate_body_preview]
+                # if len(response_text) > self.config.truncate_body_preview
+                # else response_text,
+                # "response_truncated": len(response_text)
+                # > self.config.truncate_body_preview,
+                "response_text": response_text,
+            }
+
+            # Generate file path
+            file_path = self._generate_stream_response_file_path(
+                request_id, metadata.get("provider", "unknown")
+            )
+
+            # Ensure directory exists
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write JSON file
+            async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(response_data, indent=2, ensure_ascii=False))
+
+            logger.debug(
+                "streaming_response_file_written",
+                request_id=request_id,
+                file_path=str(file_path),
+                total_chunks=len(chunks),
+                total_bytes=len(combined_data),
+            )
+
+        except Exception as e:
+            logger.error(
+                "streaming_response_file_write_failed",
+                request_id=request_id,
+                error=str(e),
+                exc_info=e,
+            )

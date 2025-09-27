@@ -30,8 +30,6 @@ from .config import ClaudeSDKSettings
 from .handler import ClaudeSDKHandler
 from .manager import SessionManager
 from .models import MessageResponse
-from .transformers.request import ClaudeSDKRequestTransformer
-from .transformers.response import ClaudeSDKResponseTransformer
 
 
 logger = get_plugin_logger()
@@ -111,9 +109,6 @@ class ClaudeSDKAdapter(BaseHTTPAdapter):
             session_manager=session_manager,
             hook_manager=hook_manager,
         )
-        self.request_transformer = ClaudeSDKRequestTransformer()
-        # Initialize response transformer (CORS settings can be added later if needed)
-        self.response_transformer = ClaudeSDKResponseTransformer(None)
         self.auth_manager = NoOpAuthManager()
         self._detection_service: Any | None = None
         self._initialized = False
@@ -193,6 +188,8 @@ class ClaudeSDKAdapter(BaseHTTPAdapter):
                     "application request lifecycle"
                 ),
             )
+
+        self._ensure_tool_accumulator(request_context)
 
         format_chain = list(getattr(request_context, "format_chain", []) or [])
         try:
@@ -471,8 +468,8 @@ class ClaudeSDKAdapter(BaseHTTPAdapter):
                             async for sse_chunk in processor.process_stream(
                                 stream_result
                             ):
-                                if isinstance(sse_chunk, str):
-                                    yield sse_chunk.encode()
+                                if isinstance(sse_chunk, bytes):
+                                    yield sse_chunk
                                 else:
                                     yield str(sse_chunk).encode()
                         else:
@@ -481,8 +478,8 @@ class ClaudeSDKAdapter(BaseHTTPAdapter):
                                 include_done=True,
                                 request_context=request_context,
                             ):
-                                if isinstance(chunk, str):
-                                    yield chunk.encode()
+                                if isinstance(chunk, bytes):
+                                    yield chunk
                                 else:
                                     yield str(chunk).encode()
                     except asyncio.CancelledError as exc:

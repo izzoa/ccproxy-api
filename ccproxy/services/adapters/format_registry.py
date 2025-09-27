@@ -22,6 +22,8 @@ class FormatRegistry:
     def __init__(self) -> None:
         self._adapters: dict[tuple[str, str], FormatAdapterProtocol] = {}
         self._registered_plugins: dict[tuple[str, str], str] = {}
+        self._pending_logs: dict[str, list[dict[str, str]]] = {}
+        self._current_batch_plugin: str | None = None
 
     def register(
         self,
@@ -34,9 +36,6 @@ class FormatRegistry:
         key = (from_format, to_format)
         if key in self._adapters:
             existing = self._registered_plugins[key]
-            raise ValueError(
-                f"Adapter for {from_format}->{to_format} already registered by plugin '{existing}'"
-            )
             logger.debug(
                 "format_adapter_duplicate_ignored",
                 from_format=from_format,
@@ -50,13 +49,19 @@ class FormatRegistry:
         self._adapters[key] = adapter
         self._registered_plugins[key] = plugin_name
 
-        logger.debug(
-            "format_adapter_registered",
-            from_format=from_format,
-            to_format=to_format,
-            adapter_type=type(adapter).__name__,
-            plugin=plugin_name,
-            category="format",
+        if self._current_batch_plugin is None:
+            self._current_batch_plugin = plugin_name
+        elif self._current_batch_plugin != plugin_name:
+            self._flush_plugin_logs(self._current_batch_plugin)
+            self._current_batch_plugin = plugin_name
+
+        entries = self._pending_logs.setdefault(plugin_name, [])
+        entries.append(
+            {
+                "from_format": from_format,
+                "to_format": to_format,
+                "adapter_type": type(adapter).__name__,
+            }
         )
 
     def get(self, from_format: str, to_format: str) -> FormatAdapterProtocol:
@@ -90,6 +95,8 @@ class FormatRegistry:
     def clear(self) -> None:
         self._adapters.clear()
         self._registered_plugins.clear()
+        self._pending_logs.clear()
+        self._current_batch_plugin = None
 
     async def register_from_manifest(
         self, manifest: PluginManifest, plugin_name: str
@@ -109,6 +116,31 @@ class FormatRegistry:
                 adapter=adapter,
                 plugin_name=plugin_name,
             )
+        self._flush_plugin_logs(plugin_name)
+
+    def flush_all_logs(self) -> None:
+        if self._current_batch_plugin is not None:
+            self._flush_plugin_logs(self._current_batch_plugin)
+            self._current_batch_plugin = None
+
+        for plugin_name in list(self._pending_logs.keys()):
+            self._flush_plugin_logs(plugin_name)
+
+    def _flush_plugin_logs(self, plugin_name: str) -> None:
+        entries = self._pending_logs.get(plugin_name)
+        if not entries:
+            return
+
+        logger.debug(
+            "format_adapters_registered",
+            plugin=plugin_name,
+            count=len(entries),
+            entries=[entry.copy() for entry in entries],
+            category="format",
+        )
+        self._pending_logs.pop(plugin_name, None)
+        if self._current_batch_plugin == plugin_name:
+            self._current_batch_plugin = None
 
     def validate_requirements(
         self, manifests: dict[str, PluginManifest]

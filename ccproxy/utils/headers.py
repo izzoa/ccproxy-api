@@ -1,4 +1,4 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 
 def extract_request_headers(request: Any) -> dict[str, str]:
@@ -173,4 +173,56 @@ EXCLUDED_REQUEST_HEADERS = {
     "x-api-key",
     # Content length (will be recalculated)
     "content-length",
+    "cdn-loop",
+    "cf-connecting-ip",
+    "cf-ew-via",
+    "cf-ipcountry",
+    "cf-ray",
+    "cf-visitor",
+    "cf-warp-tag-id",
+    "cf-worker",
 }
+
+
+if TYPE_CHECKING:
+    from ccproxy.core.plugins.interfaces import DetectionServiceProtocol
+
+
+def collect_cli_forward_headers(
+    detection_service: "DetectionServiceProtocol | None",
+) -> dict[str, str]:
+    """Collect CLI-provided headers for safe forwarding to providers."""
+
+    if not detection_service:
+        return {}
+
+    try:
+        headers_data = detection_service.get_detected_headers()
+    except Exception:
+        return {}
+
+    if not headers_data:
+        return {}
+
+    try:
+        ignore_set = {
+            header.lower() for header in detection_service.get_ignored_headers()
+        }
+    except Exception:
+        ignore_set = set()
+
+    try:
+        redacted_set = {
+            header.lower() for header in detection_service.get_redacted_headers()
+        }
+    except Exception:
+        redacted_set = set()
+
+    try:
+        return headers_data.filtered(ignores=ignore_set, redacted=redacted_set)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        from ccproxy.core.logging import get_plugin_logger
+
+        logger = get_plugin_logger()
+        logger.debug("cli_header_filter_failed", error=str(exc))
+        return headers_data.as_dict()

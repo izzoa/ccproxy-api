@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from ccproxy.api.bootstrap import create_service_container
 from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
 from ccproxy.core.errors import PermissionNotFoundError
 from ccproxy.plugins.permissions.models import PermissionStatus
@@ -11,14 +12,20 @@ from ccproxy.plugins.permissions.service import (
     PermissionService,
     get_permission_service,
 )
+from ccproxy.services.container import ServiceContainer
 
 
 @pytest.fixture(autouse=True)
 async def task_manager_fixture():
     """Start and stop task manager for each test."""
-    await start_task_manager()
-    yield
-    await stop_task_manager()
+    container = ServiceContainer.get_current(strict=False)
+    if container is None:
+        container = create_service_container()
+    await start_task_manager(container=container)
+    try:
+        yield
+    finally:
+        await stop_task_manager(container=container)
 
 
 @pytest.mark.asyncio(loop_scope="session")

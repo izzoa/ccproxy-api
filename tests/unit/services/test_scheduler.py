@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from ccproxy.api.bootstrap import create_service_container
 from ccproxy.config.settings import Settings
 from ccproxy.config.utils import SchedulerSettings
 from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
@@ -19,6 +20,7 @@ from ccproxy.scheduler.tasks import (
     # StatsPrintingTask removed - functionality moved to metrics plugin
     BaseScheduledTask,
 )
+from ccproxy.services.container import ServiceContainer
 
 
 # Mock task for testing since PushgatewayTask moved to metrics plugin
@@ -40,11 +42,14 @@ class TestSchedulerCore:
     @pytest.fixture
     async def task_manager_lifecycle(self) -> AsyncGenerator[None, None]:
         """Start and stop the task manager for tests that need it."""
-        await start_task_manager()
+        container = ServiceContainer.get_current(strict=False)
+        if container is None:
+            container = create_service_container()
+        await start_task_manager(container=container)
         try:
             yield
         finally:
-            await stop_task_manager()
+            await stop_task_manager(container=container)
 
     @pytest.fixture
     def scheduler(self) -> Generator[Scheduler, None, None]:

@@ -121,6 +121,12 @@ tests/
 - **Configuration**: Use test settings objects, not mocks
 - **No mock explosion**: Removed 300+ redundant test fixtures
 
+### Provider Model Mapping Coverage
+
+- Add unit coverage for `ModelMapper` (ordering, `regex`, `prefix`/`suffix`) and the alias-restore helpers.
+- Integration tests covering provider adapters should assert that mapped requests still emit the original client `model` in downstream responses (JSON and streaming SSE).
+- `/models` endpoint tests should configure `models_endpoint` in test settings instead of patching routes directly.
+
 ## Type Safety and Code Quality
 
 **REQUIREMENT**: All test files MUST pass type checking and linting. This is not optional.
@@ -244,7 +250,6 @@ After aggressive cleanup, we maintain only essential, well-typed fixtures:
 #### Logging Performance Tips
 - **Use `ERROR` level** - Minimal logging for faster test execution
 - **Disable JSON logs** - `json_logs=False` for better performance
-- **Disable plugin logging** - `enable_plugin_logging=False` in test settings
 - **Manual setup required** - Call `setup_logging()` explicitly in test environment
 
 ## Common Patterns
@@ -328,7 +333,6 @@ def metrics_integration_app():
         },
         logging={
             "level": "ERROR",  # Minimal logging for speed
-            "enable_plugin_logging": False,
             "verbose_api": False,
         },
     )

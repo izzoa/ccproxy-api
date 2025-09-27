@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request, Response
 from ccproxy.config.settings import Settings
 from ccproxy.config.utils import get_ccproxy_cache_dir
 from ccproxy.core.logging import get_plugin_logger
+from ccproxy.models.detection import DetectedHeaders, DetectedPrompts
 from ccproxy.services.cli_detection import CLIDetectionService
 from ccproxy.utils.caching import async_ttl_cache
 from ccproxy.utils.headers import extract_request_headers
@@ -131,6 +132,32 @@ class CodexDetectionService:
     def get_cached_data(self) -> CodexCacheData | None:
         """Get currently cached detection data."""
         return self._cached_data
+
+    def get_detected_headers(self) -> DetectedHeaders:
+        """Return cached headers as structured data."""
+
+        data = self.get_cached_data()
+        if not data:
+            return DetectedHeaders()
+        return data.headers
+
+    def get_detected_prompts(self) -> DetectedPrompts:
+        """Return cached prompt metadata as structured data."""
+
+        data = self.get_cached_data()
+        if not data:
+            return DetectedPrompts()
+        return data.prompts
+
+    def get_ignored_headers(self) -> list[str]:
+        """Headers that should be ignored when forwarding CLI values."""
+
+        return list(self.ignores_header)
+
+    def get_redacted_headers(self) -> list[str]:
+        """Headers that must always be removed before forwarding."""
+
+        return list(getattr(self, "REDACTED_HEADERS", []))
 
     def get_version(self) -> str:
         """Get the Codex CLI version.
@@ -380,9 +407,12 @@ class CodexDetectionService:
                 else captured_data.get("body_json")
             )
 
+            prompts = DetectedPrompts.from_body(body_json)
+
             return CodexCacheData(
                 codex_version=version,
-                headers=headers_dict,
+                headers=DetectedHeaders(headers_dict),
+                prompts=prompts,
                 body_json=body_json,
                 method=captured_data.get("method"),
                 url=captured_data.get("url"),
@@ -483,12 +513,7 @@ class CodexDetectionService:
 
         return cast(dict[str, Any] | None, redact(body))
 
-    def get_system_prompt(self) -> dict[str, Any]:
-        """Return an instructions dict for injection based on cached body_json."""
-        data = self.get_cached_data()
-        if not data or not data.body_json:
-            return {}
-        instructions = data.body_json.get("instructions")
-        if not isinstance(instructions, str) or not instructions:
-            return {}
-        return {"instructions": instructions}
+    def get_system_prompt(self, mode: str | None = None) -> dict[str, Any]:
+        """Return an instructions dict for injection based on cached prompts."""
+        prompts = self.get_detected_prompts()
+        return prompts.instructions_payload()

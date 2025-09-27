@@ -8,14 +8,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ccproxy.core.logging import get_logger
 
-from .core import CORSSettings, HTTPSettings, LoggingSettings, ServerSettings
+from .core import (
+    CORSSettings,
+    HTTPSettings,
+    LoggingSettings,
+    PluginDiscoverySettings,
+    ServerSettings,
+)
 from .runtime import BinarySettings
 from .security import AuthSettings, SecuritySettings
 from .utils import SchedulerSettings, find_toml_config_file
 
 
 def _auth_default() -> AuthSettings:
-    return AuthSettings()  # type: ignore[call-arg]
+    return AuthSettings(credentials_ttl_seconds=3600.0)
 
 
 __all__ = ["Settings", "ConfigurationError"]
@@ -85,6 +91,11 @@ class Settings(BaseSettings):
     scheduler: SchedulerSettings = Field(
         default_factory=SchedulerSettings,
         description="Task scheduler configuration settings",
+    )
+
+    plugin_discovery: PluginDiscoverySettings = Field(
+        default_factory=PluginDiscoverySettings,
+        description="Filesystem plugin discovery search paths",
     )
 
     enable_plugins: bool = Field(
@@ -211,6 +222,144 @@ class Settings(BaseSettings):
         """Create Settings instance from TOML configuration."""
         return cls.from_config(config_path=toml_path, **kwargs)
 
+    # ------------------------------
+    # Internal helpers (merging/overrides)
+    # ------------------------------
+    @staticmethod
+    def _env_has_prefix(prefix: str) -> bool:
+        p = prefix.upper()
+        return any(k.upper().startswith(p) for k in os.environ)
+
+    @staticmethod
+    def _merge_model(
+        model: BaseModel, overrides: dict[str, Any], env_prefix: str
+    ) -> BaseModel:
+        """
+        Deep-merge a dict of overrides into a BaseModel while preserving env-var precedence.
+        env_prefix should end with '__' when called for nested fields.
+        """
+        update_payload: dict[str, Any] = {}
+
+        for field_name, override_value in overrides.items():
+            field_env_key = f"{env_prefix}{field_name.upper()}"
+            # If an env var exists for this field, do NOT override from file.
+            if os.getenv(field_env_key) is not None:
+                continue
+
+            current_value = getattr(model, field_name, None)
+
+            if isinstance(current_value, BaseModel) and isinstance(
+                override_value, dict
+            ):
+                nested_prefix = f"{field_env_key}__"
+                merged_nested = Settings._merge_model(
+                    current_value, override_value, nested_prefix
+                )
+                update_payload[field_name] = merged_nested
+            elif isinstance(current_value, dict) and isinstance(override_value, dict):
+                # Deep-merge dict but skip keys that have env overrides
+                merged_dict = current_value.copy()
+                for nk, nv in override_value.items():
+                    nested_env_key = f"{field_env_key}__{nk.upper()}"
+                    if os.getenv(nested_env_key) is None:
+                        if isinstance(merged_dict.get(nk), dict) and isinstance(
+                            nv, dict
+                        ):
+                            # deep merge nested dicts with respect to env
+                            merged_dict[nk] = Settings._merge_dict(
+                                merged_dict.get(nk, {}), nv, f"{nested_env_key}__"
+                            )
+                        else:
+                            merged_dict[nk] = nv
+                update_payload[field_name] = merged_dict
+            else:
+                update_payload[field_name] = override_value
+
+        if not update_payload:
+            return model
+        return model.model_copy(update=update_payload)
+
+    @staticmethod
+    def _merge_dict(
+        base: dict[str, Any], overrides: dict[str, Any], env_prefix: str
+    ) -> dict[str, Any]:
+        """
+        Deep-merge dicts while respecting env-var precedence using the given env_prefix (no trailing __ required).
+        """
+        out = dict(base)
+        for k, v in overrides.items():
+            key_env = f"{env_prefix}{k.upper()}"
+            if os.getenv(key_env) is not None:
+                continue
+            if isinstance(out.get(k), dict) and isinstance(v, dict):
+                out[k] = Settings._merge_dict(out[k], v, f"{key_env}__")
+            else:
+                out[k] = v
+        return out
+
+    @staticmethod
+    def _merge_plugins(
+        current_plugins: dict[str, Any], overrides: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Merge plugin configuration trees with env precedence at both plugin and nested key levels.
+        """
+        merged = dict(current_plugins)
+        for plugin_name, plugin_cfg in overrides.items():
+            env_prefix = f"PLUGINS__{plugin_name.upper()}__"
+
+            # If any env for this plugin exists, we keep current_plugins[plugin_name] as-is,
+            # but we still allow env-free nested keys to merge if we already have a dict.
+            if isinstance(plugin_cfg, dict):
+                if Settings._env_has_prefix(env_prefix):
+                    # Partial merge respecting env at nested levels if the plugin already exists as a dict.
+                    if isinstance(merged.get(plugin_name), dict):
+                        merged[plugin_name] = Settings._merge_dict(
+                            merged[plugin_name],
+                            plugin_cfg,
+                            env_prefix,
+                        )
+                    else:
+                        # Keep existing unless it's missing entirely.
+                        merged.setdefault(plugin_name, merged.get(plugin_name, {}))
+                else:
+                    existing = merged.get(plugin_name, {})
+                    if isinstance(existing, dict):
+                        merged[plugin_name] = Settings._merge_dict(
+                            existing, plugin_cfg, env_prefix
+                        )
+                    else:
+                        merged[plugin_name] = plugin_cfg
+            else:
+                # Non-dict plugin setting: only apply if no top-level env overrides present.
+                if not Settings._env_has_prefix(env_prefix):
+                    merged[plugin_name] = plugin_cfg
+        return merged
+
+    @staticmethod
+    def _apply_overrides(target: Any, overrides: dict[str, Any]) -> None:
+        """
+        Apply CLI/kwargs overrides after file and env processing.
+        Dicts are shallow-merged; nested BaseModels recurse.
+        """
+        for k, v in overrides.items():
+            if (
+                isinstance(v, dict)
+                and hasattr(target, k)
+                and isinstance(getattr(target, k), (BaseModel | dict))
+            ):
+                sub = getattr(target, k)
+                if isinstance(sub, BaseModel):
+                    # Apply directly field-by-field
+                    Settings._apply_overrides(sub, v)
+                elif isinstance(sub, dict):
+                    sub.update(v)
+            else:
+                setattr(target, k, v)
+
+    # ------------------------------
+    # Factory
+    # ------------------------------
     @classmethod
     def from_config(
         cls,
@@ -218,7 +367,7 @@ class Settings(BaseSettings):
         cli_context: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> "Settings":
-        """Create Settings instance from configuration file."""
+        """Create Settings instance from configuration file with env precedence and safe merging."""
         if config_path is None:
             config_path_env = os.environ.get("CONFIG_FILE")
             if config_path_env:
@@ -234,7 +383,6 @@ class Settings(BaseSettings):
         if config_path and config_path.exists():
             config_data = cls.load_config_file(config_path)
             logger = get_logger(__name__)
-
             logger.info(
                 "config_file_loaded",
                 path=str(config_path),
@@ -243,70 +391,41 @@ class Settings(BaseSettings):
 
         cls._validate_deprecated_keys(config_data)
 
+        # Start from env + .env via BaseSettings
         settings = cls()
 
+        # Merge file-based configuration with env-var precedence
         for key, value in config_data.items():
-            if hasattr(settings, key):
-                if key in ["logging", "server", "security"] and isinstance(value, dict):
-                    nested_obj = getattr(settings, key)
-                    for nested_key, nested_value in value.items():
-                        env_key = f"{key.upper()}__{nested_key.upper()}"
-                        if os.getenv(env_key) is None:
-                            setattr(nested_obj, nested_key, nested_value)
-                elif key == "plugins" and isinstance(value, dict):
-                    current_plugins = getattr(settings, key, {})
+            if not hasattr(settings, key):
+                continue
 
-                    for plugin_name, plugin_config in value.items():
-                        if isinstance(plugin_config, dict):
-                            env_prefix = f"PLUGINS__{plugin_name.upper()}__"
-                            has_env_override = any(
-                                k.startswith(env_prefix) for k in os.environ
-                            )
+            if key == "plugins" and isinstance(value, dict):
+                current_plugins = getattr(settings, key, {})
+                merged_plugins = cls._merge_plugins(current_plugins, value)
+                setattr(settings, key, merged_plugins)
+                continue
 
-                            if has_env_override:
-                                if plugin_name in current_plugins:
-                                    merged_plugin_config = dict(plugin_config)
-                                    merged_plugin_config.update(
-                                        current_plugins[plugin_name]
-                                    )
-                                    current_plugins[plugin_name] = merged_plugin_config
-                                else:
-                                    pass
-                            else:
-                                current_plugins[plugin_name] = plugin_config
-                        else:
-                            current_plugins[plugin_name] = plugin_config
+            current_attr = getattr(settings, key)
 
-                    setattr(settings, key, current_plugins)
-                else:
-                    env_key = key.upper()
-                    if os.getenv(env_key) is None:
-                        setattr(settings, key, value)
+            if isinstance(value, dict) and isinstance(current_attr, BaseModel):
+                merged_model = cls._merge_model(current_attr, value, f"{key.upper()}__")
+                setattr(settings, key, merged_model)
+            else:
+                # Only set top-level simple types if there is no top-level env override
+                env_key = key.upper()
+                if os.getenv(env_key) is None:
+                    setattr(settings, key, value)
 
-        def _apply_overrides(target: Any, overrides: dict[str, Any]) -> None:
-            for k, v in overrides.items():
-                if (
-                    isinstance(v, dict)
-                    and hasattr(target, k)
-                    and isinstance(getattr(target, k), BaseModel | dict)
-                ):
-                    sub = getattr(target, k)
-                    if isinstance(sub, BaseModel):
-                        _apply_overrides(sub, v)
-                    elif isinstance(sub, dict):
-                        sub.update(v)
-                else:
-                    setattr(target, k, v)
-
+        # Apply direct kwargs overrides (highest precedence within process)
         if kwargs:
-            _apply_overrides(settings, kwargs)
+            cls._apply_overrides(settings, kwargs)
 
+        # Apply CLI context (explicit flags)
         if cli_context:
-            # Store raw CLI context for plugins
+            # Store raw CLI context for plugin access
             settings.cli_context = cli_context
 
             # Apply common serve CLI overrides directly to settings
-            # Only override when a value is explicitly provided (not None / empty)
             server_overrides: dict[str, Any] = {}
             if cli_context.get("host") is not None:
                 server_overrides["host"] = cli_context["host"]
@@ -326,11 +445,11 @@ class Settings(BaseSettings):
                 security_overrides["auth_token"] = cli_context["auth_token"]
 
             if server_overrides:
-                _apply_overrides(settings, {"server": server_overrides})
+                cls._apply_overrides(settings, {"server": server_overrides})
             if logging_overrides:
-                _apply_overrides(settings, {"logging": logging_overrides})
+                cls._apply_overrides(settings, {"logging": logging_overrides})
             if security_overrides:
-                _apply_overrides(settings, {"security": security_overrides})
+                cls._apply_overrides(settings, {"security": security_overrides})
 
             # Apply plugin enable/disable lists if provided
             enabled_plugins = cli_context.get("enabled_plugins")

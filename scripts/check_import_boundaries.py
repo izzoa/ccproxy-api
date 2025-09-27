@@ -108,7 +108,11 @@ def iter_py_files(root: pathlib.Path) -> Iterable[pathlib.Path]:
 def should_check_file(file: pathlib.Path, core_dir: pathlib.Path) -> bool:
     """Check if a file should be analyzed for import violations."""
     # Exclude files under ccproxy/plugins (plugin framework itself)
-    return not file.is_relative_to(core_dir / "plugins")
+    paths_to_exclude = [
+        core_dir / "plugins",
+        core_dir / "testing",
+    ]
+    return not any(file.is_relative_to(p) for p in paths_to_exclude)
 
 
 def get_context_lines(

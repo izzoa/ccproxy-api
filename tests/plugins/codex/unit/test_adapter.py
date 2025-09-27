@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 
+from ccproxy.models.detection import DetectedHeaders, DetectedPrompts
 from ccproxy.plugins.codex.adapter import CodexAdapter
 from ccproxy.plugins.codex.detection_service import CodexDetectionService
+from ccproxy.plugins.oauth_codex.manager import CodexTokenManager
 
 
 class TestCodexAdapter:
@@ -18,16 +20,40 @@ class TestCodexAdapter:
         """Create mock detection service."""
         service = Mock(spec=CodexDetectionService)
         service.get_cached_data.return_value = None
+        service.instructions_value = "Mock detection instructions"
+        prompts = DetectedPrompts.from_body(
+            {"instructions": service.instructions_value}
+        )
+        service.get_detected_prompts.return_value = prompts
+        service.get_system_prompt.return_value = prompts.instructions_payload()
+        headers = DetectedHeaders(
+            {
+                "session_id": "session-123",
+                "chatgpt-account-id": "test-account-123",
+                "authorization": "existing-auth",  # will be filtered
+            }
+        )
+        service.get_detected_headers.return_value = headers
+        service.get_ignored_headers.return_value = list(
+            CodexDetectionService.ignores_header
+        )
+        service.get_redacted_headers.return_value = list(
+            CodexDetectionService.REDACTED_HEADERS
+        )
         return service
 
     @pytest.fixture
     def mock_auth_manager(self):
         """Create mock auth manager."""
-        auth_manager = Mock()
-        auth_data = Mock()
-        auth_data.access_token = "test-token"
-        auth_data.account_id = "account-123"
-        auth_manager.load_credentials = AsyncMock(return_value=auth_data)
+        auth_manager = Mock(spec=CodexTokenManager)
+        auth_manager.get_access_token = AsyncMock(return_value="test-token")
+        auth_manager.get_access_token_with_refresh = AsyncMock(
+            return_value="test-token"
+        )
+
+        credentials = Mock()
+        credentials.access_token = "test-token"
+        auth_manager.load_credentials = AsyncMock(return_value=credentials)
 
         profile = Mock()
         profile.chatgpt_account_id = "test-account-123"
@@ -106,11 +132,13 @@ class TestCodexAdapter:
     ) -> None:
         """Test request preparation with custom instructions."""
         # Setup detection service with custom instructions
-        cached_data = Mock()
-        cached_data.instructions = Mock()
-        cached_data.instructions.instructions_field = "You are a Python expert."
-        cached_data.headers = None
-        mock_detection_service.get_cached_data.return_value = cached_data
+        prompts = DetectedPrompts.from_body(
+            {"instructions": "You are a Python expert."}
+        )
+        mock_detection_service.get_detected_prompts.return_value = prompts
+        mock_detection_service.get_system_prompt.return_value = (
+            prompts.instructions_payload()
+        )
 
         mock_config = Mock()
         mock_config.base_url = "https://chat.openai.com/backend-anon"
@@ -156,7 +184,15 @@ class TestCodexAdapter:
 
         # Should keep existing instructions
         result_data = json.loads(result_body.decode())
-        assert result_data["instructions"] == "You are a JavaScript expert."
+        expected_instructions = getattr(
+            adapter.detection_service,
+            "instructions_value",
+            "Mock detection instructions",
+        )
+        assert (
+            result_data["instructions"]
+            == f"{expected_instructions}\nYou are a JavaScript expert."
+        )
 
     @pytest.mark.asyncio
     async def test_prepare_provider_request_sets_stream_true(
@@ -217,14 +253,20 @@ class TestCodexAdapter:
     ) -> None:
         """Test CLI headers injection."""
         # Setup detection service with CLI headers
-        cached_data = Mock()
-        cached_data.headers = Mock()
-        cached_data.headers.to_headers_dict.return_value = {
-            "X-CLI-Version": "1.0.0",
-            "X-Session-ID": "cli-session-123",
-        }
-        cached_data.instructions = None
-        mock_detection_service.get_cached_data.return_value = cached_data
+        cli_headers = DetectedHeaders(
+            {
+                "X-CLI-Version": "1.0.0",
+                "X-Session-ID": "cli-session-123",
+            }
+        )
+        mock_detection_service.get_detected_headers.return_value = cli_headers
+        prompts = DetectedPrompts.from_body(
+            {"instructions": mock_detection_service.instructions_value}
+        )
+        mock_detection_service.get_detected_prompts.return_value = prompts
+        mock_detection_service.get_system_prompt.return_value = (
+            prompts.instructions_payload()
+        )
 
         mock_config = Mock()
         mock_config.base_url = "https://chat.openai.com/backend-anon"
@@ -248,16 +290,15 @@ class TestCodexAdapter:
         assert result_headers["x-cli-version"] == "1.0.0"
         assert result_headers["x-session-id"] == "cli-session-123"
 
-    def test_needs_format_conversion(self, adapter: CodexAdapter) -> None:
-        """Test format conversion detection."""
-        # Format conversion now handled by format chain, adapter always returns False
-        assert adapter._needs_format_conversion("/responses") is False
-        assert adapter._needs_format_conversion("/chat/completions") is False
-
     def test_get_instructions_default(self, adapter: CodexAdapter) -> None:
         """Test default instructions when no detection service data."""
         instructions = adapter._get_instructions()
-        assert "coding agent" in instructions.lower()
+        expected = getattr(
+            adapter.detection_service,
+            "instructions_value",
+            "Mock detection instructions",
+        )
+        assert instructions == expected
 
     def test_get_instructions_from_detection_service(
         self,
@@ -266,10 +307,11 @@ class TestCodexAdapter:
         mock_http_pool_manager,
     ) -> None:
         """Test instructions from detection service."""
-        cached_data = Mock()
-        cached_data.instructions = Mock()
-        cached_data.instructions.instructions_field = "Custom instructions"
-        mock_detection_service.get_cached_data.return_value = cached_data
+        prompts = DetectedPrompts.from_body({"instructions": "Custom instructions"})
+        mock_detection_service.get_detected_prompts.return_value = prompts
+        mock_detection_service.get_system_prompt.return_value = (
+            prompts.instructions_payload()
+        )
 
         mock_config = Mock()
         mock_config.base_url = "https://chat.openai.com/backend-anon"
@@ -297,7 +339,7 @@ class TestCodexAdapter:
         )
 
         # Verify auth manager was called
-        mock_auth_manager.load_credentials.assert_called_once()
+        mock_auth_manager.get_access_token.assert_awaited()
 
         # Verify auth headers are set
         assert result_headers["authorization"] == "Bearer test-token"

@@ -11,6 +11,7 @@ import httpx
 import structlog
 from fastapi import APIRouter
 
+from ccproxy.models.provider import ProviderConfig
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.adapters.http_adapter import BaseHTTPAdapter
 from ccproxy.services.interfaces import (
@@ -21,6 +22,7 @@ from ccproxy.services.interfaces import (
     NullStreamingHandler,
     StreamingMetrics,
 )
+from ccproxy.utils.model_mapper import ModelMapper
 
 from .declaration import (
     CliArgumentSpec,
@@ -101,6 +103,7 @@ class BaseProviderPluginFactory(ProviderPluginFactory):
     # CLI extension declarations (populated by subclasses)
     cli_commands: list[CliCommandSpec] = []
     cli_arguments: list[CliArgumentSpec] = []
+    tool_accumulator_class: type | None = None
 
     def __init__(self) -> None:
         """Initialize factory with manifest built from class attributes."""
@@ -143,6 +146,7 @@ class BaseProviderPluginFactory(ProviderPluginFactory):
             description=self.plugin_description,
             is_provider=True,
             config_class=self.config_class,
+            tool_accumulator_class=self.tool_accumulator_class,
             dependencies=self.dependencies.copy(),
             optional_requires=self.optional_requires.copy(),
             routes=routes,
@@ -260,7 +264,12 @@ class BaseProviderPluginFactory(ProviderPluginFactory):
                 "hook_manager": hook_manager,
                 "format_registry": adapter_dependencies["format_registry"],
                 "context": context,
+                "model_mapper": context.get("model_mapper")
+                if hasattr(context, "get")
+                else None,
             }
+            if self.tool_accumulator_class:
+                adapter_kwargs["tool_accumulator_class"] = self.tool_accumulator_class
 
             return cast(BaseAdapter, self.adapter_class(**adapter_kwargs))
         else:
@@ -291,7 +300,14 @@ class BaseProviderPluginFactory(ProviderPluginFactory):
                 "hook_manager": hook_manager,
                 "format_registry": adapter_dependencies["format_registry"],
                 "context": context,
+                "model_mapper": context.get("model_mapper")
+                if hasattr(context, "get")
+                else None,
             }
+            if self.tool_accumulator_class:
+                non_http_adapter_kwargs["tool_accumulator_class"] = (
+                    self.tool_accumulator_class
+                )
 
             # Add parameters that the adapter expects
             for param_name, param in params.items():
@@ -405,7 +421,7 @@ class BaseProviderPluginFactory(ProviderPluginFactory):
         # Use plugin's default auth manager name
         return self.auth_manager_name
 
-    def create_context(self, core_services: Any) -> PluginContext:
+    def create_context(self, service_container: "ServiceContainer") -> PluginContext:
         """Create context with provider-specific components.
 
         This method provides a hook for subclasses to customize context creation.
@@ -417,7 +433,11 @@ class BaseProviderPluginFactory(ProviderPluginFactory):
         Returns:
             Plugin context
         """
-        return super().create_context(core_services)
+        context = super().create_context(service_container)
+        config = context.get("config", None)
+        if isinstance(config, ProviderConfig) and config.model_mappings:
+            context.model_mapper = ModelMapper(config.model_mappings)
+        return context
 
 
 class PluginRegistry:

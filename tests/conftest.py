@@ -5,6 +5,7 @@ All fixtures have proper type hints and are designed to work with real component
 while mocking only external services.
 """
 
+import asyncio
 import json
 import os
 import time
@@ -16,15 +17,26 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
+import pytest_asyncio
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from ccproxy.api.app import create_app
+from ccproxy.api.bootstrap import create_service_container
 from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
+from ccproxy.core.logging import setup_logging
 from ccproxy.core.request_context import RequestContext
+from ccproxy.services.container import ServiceContainer
+from ccproxy.testing.endpoints import (
+    ENDPOINT_TESTS,
+    EndpointTestResult,
+    TestEndpoint,
+    resolve_selected_indices,
+)
 
 
 if TYPE_CHECKING:
@@ -32,6 +44,16 @@ if TYPE_CHECKING:
 from ccproxy.config.core import ServerSettings
 from ccproxy.config.security import SecuritySettings
 from ccproxy.config.settings import Settings
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Configure pytest with custom settings."""
+    # Ensure async tests work properly
+    config.option.asyncio_mode = "auto"
+
+    # Reuse the application logging pipeline to ensure structlog processors
+    # (categories, exception handling, formatting) behave identically in tests.
+    setup_logging(json_logs=False, log_level_name="DEBUG")
 
 
 # Global fixture for task manager (needed by many async tests)
@@ -43,9 +65,14 @@ async def task_manager_fixture():
     tests that use managed tasks (like PermissionService, scheduler, etc.)
     and properly cleaned up afterwards.
     """
-    await start_task_manager()
-    yield
-    await stop_task_manager()
+    container = ServiceContainer.get_current(strict=False)
+    if container is None:
+        container = create_service_container()
+    await start_task_manager(container=container)
+    try:
+        yield
+    finally:
+        await stop_task_manager(container=container)
 
 
 # Plugin fixtures are declared in root-level conftest.py
@@ -55,6 +82,17 @@ async def task_manager_fixture():
 def get_test_settings(test_settings: Settings) -> Settings:
     """Get test settings - overrides the default settings provider."""
     return test_settings
+
+
+@pytest_asyncio.fixture(scope="session")
+def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """Provide a session-scoped asyncio event loop for async fixtures."""
+
+    loop = asyncio.new_event_loop()
+    try:
+        yield loop
+    finally:
+        loop.close()
 
 
 # Test data directory
@@ -412,21 +450,33 @@ def codex_responses() -> dict[str, Any]:
     """
     return {
         "standard_completion": {
-            "id": "codex_01234567890",
-            "object": "codex.response",
-            "created": 1234567890,
+            "id": "resp_01234567890",
+            "object": "response",
+            "created_at": 1234567890,
             "model": "gpt-5",
-            "choices": [
+            "status": "completed",
+            "parallel_tool_calls": False,
+            "output": [
                 {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "Hello! How can I help you with coding today?",
-                    },
-                    "finish_reason": "stop",
+                    "type": "message",
+                    "id": "msg_1",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Hello! How can I help you with coding today?",
+                        }
+                    ],
                 }
             ],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 12, "total_tokens": 22},
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 12,
+                "output_tokens_details": {"reasoning_tokens": 0},
+                "total_tokens": 22,
+            },
         },
         "error_response": {
             "error": {
@@ -468,11 +518,37 @@ def create_test_request_context(request_id: str, **metadata: Any) -> "RequestCon
     return context
 
 
-# Pytest configuration
-def pytest_configure(config: pytest.Config) -> None:
-    """Configure pytest with custom settings."""
-    # Ensure async tests work properly
-    config.option.asyncio_mode = "auto"
+# ---------------------------------------------------------------------------
+# Endpoint runner helpers
+# ---------------------------------------------------------------------------
+
+ENDPOINT_TEST_BASE_URL_ENV = "CCPROXY_ENDPOINT_TEST_BASE_URL"
+ENDPOINT_TEST_SELECTION_ENV = "CCPROXY_ENDPOINT_TEST_SELECTION"
+
+
+def get_selected_endpoint_indices(selection_param: str | None = None) -> list[int]:
+    """Resolve endpoint test selection into 0-based indices."""
+
+    resolved = resolve_selected_indices(selection_param)
+    if resolved is None:
+        return list(range(len(ENDPOINT_TESTS)))
+    return resolved
+
+
+async def run_single_endpoint_test(index: int) -> EndpointTestResult:
+    """Execute a single endpoint test and return its result."""
+
+    base_url = os.getenv(ENDPOINT_TEST_BASE_URL_ENV, "http://127.0.0.1:8000")
+
+    try:
+        httpx.get(base_url, timeout=2.0)
+    except (httpx.HTTPError, OSError) as exc:
+        pytest.skip(
+            f"Endpoint test server not reachable at {base_url} (set {ENDPOINT_TEST_BASE_URL_ENV}): {exc}"
+        )
+
+    async with TestEndpoint(base_url=base_url) as tester:
+        return await tester.run_endpoint_test(ENDPOINT_TESTS[index], index)
 
 
 # Test directory validation
@@ -481,8 +557,8 @@ def pytest_collection_modifyitems(
 ) -> None:
     """Modify test collection to add markers."""
     for item in items:
-        # Auto-mark async tests
-        if "async" in item.nodeid:
+        # Auto-mark async tests (only if function is actually async)
+        if "async" in item.nodeid and asyncio.iscoroutinefunction(item.function):
             item.add_marker(pytest.mark.asyncio)
 
         # Add unit marker to tests not marked as real_api

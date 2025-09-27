@@ -3,7 +3,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
-from ccproxy.llms.formatters.shared import LlmBaseModel
+from ccproxy.llms.formatters import LlmBaseModel
 
 
 # ===================================================================
@@ -175,7 +175,7 @@ class ToolResultBlock(ContentBlockBase):
 
     type: Literal["tool_result"] = Field(default="tool_result", alias="type")
     tool_use_id: str
-    content: str | list[TextBlock | ImageBlock]
+    content: str | list[TextBlock | ImageBlock] = ""
     is_error: bool = False
 
 

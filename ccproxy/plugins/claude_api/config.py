@@ -1,6 +1,12 @@
 """Claude API plugin configuration."""
 
-from ccproxy.models.provider import ProviderConfig
+from pydantic import Field
+
+from ccproxy.models.provider import ModelCard, ModelMappingRule, ProviderConfig
+from ccproxy.plugins.claude_shared.model_defaults import (
+    DEFAULT_CLAUDE_MODEL_CARDS,
+    DEFAULT_CLAUDE_MODEL_MAPPINGS,
+)
 
 
 class ClaudeAPISettings(ProviderConfig):
@@ -22,14 +28,16 @@ class ClaudeAPISettings(ProviderConfig):
     priority: int = 5  # Higher priority than SDK-based approach
     default_max_tokens: int = 4096
 
-    # Supported models
-    models: list[str] = [
-        "claude-3-5-sonnet-20241022",
-        "claude-3-5-haiku-20241022",
-        "claude-3-opus-20240229",
-        "claude-3-sonnet-20240229",
-        "claude-3-haiku-20240307",
-    ]
+    model_mappings: list[ModelMappingRule] = Field(
+        default_factory=lambda: [
+            rule.model_copy(deep=True) for rule in DEFAULT_CLAUDE_MODEL_MAPPINGS
+        ]
+    )
+    models_endpoint: list[ModelCard] = Field(
+        default_factory=lambda: [
+            card.model_copy(deep=True) for card in DEFAULT_CLAUDE_MODEL_CARDS
+        ]
+    )
 
     # Feature flags
     include_sdk_content_as_xml: bool = False

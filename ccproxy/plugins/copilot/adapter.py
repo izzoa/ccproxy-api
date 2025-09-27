@@ -5,12 +5,11 @@ from typing import Any
 
 import httpx
 from starlette.requests import Request
-from starlette.responses import Response, StreamingResponse
+from starlette.responses import Response
 
 from ccproxy.core.logging import get_plugin_logger
 from ccproxy.llms.models.openai import ResponseObject
 from ccproxy.services.adapters.http_adapter import BaseHTTPAdapter
-from ccproxy.streaming import DeferredStreaming
 from ccproxy.utils.headers import (
     extract_request_headers,
     extract_response_headers,
@@ -59,6 +58,15 @@ class CopilotAdapter(BaseHTTPAdapter):
         # Get auth token
         access_token = await self.auth_manager.ensure_copilot_token()
 
+        wants_stream = False
+        try:
+            parsed_body = json.loads(body.decode()) if body else {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            parsed_body = None
+        else:
+            if isinstance(parsed_body, dict):
+                wants_stream = bool(parsed_body.get("stream"))
+
         # Filter headers
         filtered_headers = filter_request_headers(headers, preserve_auth=False)
 
@@ -69,6 +77,9 @@ class CopilotAdapter(BaseHTTPAdapter):
 
         copilot_headers["authorization"] = f"Bearer {access_token}"
         copilot_headers["x-request-id"] = str(uuid.uuid4())
+
+        if wants_stream and "accept" not in filtered_headers:
+            copilot_headers.setdefault("accept", "text/event-stream")
 
         # Merge headers
         final_headers = {}
@@ -81,7 +92,7 @@ class CopilotAdapter(BaseHTTPAdapter):
 
     async def process_provider_response(
         self, response: httpx.Response, endpoint: str
-    ) -> Response | StreamingResponse | DeferredStreaming:
+    ) -> Response:
         """Process provider response with format conversion support."""
         # Streaming detection and handling is centralized in BaseHTTPAdapter.
         # Always return a plain Response for non-streaming flows.
@@ -140,13 +151,6 @@ class CopilotAdapter(BaseHTTPAdapter):
             media_type=response.headers.get("content-type"),
         )
 
-    async def _create_streaming_response(
-        self, response: httpx.Response, endpoint: str
-    ) -> DeferredStreaming:
-        # Deprecated: streaming is centrally handled by BaseHTTPAdapter/StreamingHandler
-        # Kept for compatibility; not used.
-        raise NotImplementedError
-
     async def handle_request_gh_api(self, request: Request) -> Response:
         """Forward request to GitHub API with proper authentication.
 
@@ -191,10 +195,6 @@ class CopilotAdapter(BaseHTTPAdapter):
                 "content-type", "application/json"
             ),
         )
-
-    def _needs_format_conversion(self, endpoint: str) -> bool:
-        # Deprecated: conversion handled via format chain in BaseHTTPAdapter
-        return False
 
     def _normalize_response_payload(self, payload: Any) -> dict[str, Any] | None:
         """Normalize Response API payloads to align with OpenAI schema expectations."""

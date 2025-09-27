@@ -59,7 +59,7 @@ class AnalyticsService:
                     limit
                 )
             results = session.exec(statement).all()
-            payload = [log.dict() for log in results]
+            payload = [log.model_dump() for log in results]
 
             # Compute next cursor from last item in current page
             next_cursor = None

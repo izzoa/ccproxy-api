@@ -61,4 +61,6 @@ printf "\n\033[1;34m=== Requests ===\033[0m\n"
 bat --paging never "${PATH_REQ}/"*"${LAST_UUID}"*.json
 printf "\n\033[1;34m=== Command ===\033[0m\n"
 fd ${LAST_UUID} "${COMMAND_REQ}" | xargs -I{} -- echo {}
+
 # bat --paging never "${COMMAND_REQ}/"*"${LAST_UUID}"*.txt
+cat "${PATH_REQ}/"*"${LAST_UUID}"*core_http.json | grep '^data: ' | sed 's/^data: //' | jq -r .

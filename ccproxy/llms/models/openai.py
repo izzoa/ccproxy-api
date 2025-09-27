@@ -14,9 +14,9 @@ The models are defined using modern Python 3.11 type hints and Pydantic V2 best 
 import uuid
 from typing import Any, Literal
 
-from pydantic import Field, RootModel, field_validator
+from pydantic import Field, RootModel, field_validator, model_validator
 
-from ccproxy.llms.formatters.shared import LlmBaseModel
+from ccproxy.llms.formatters import LlmBaseModel
 
 
 # ==============================================================================
@@ -250,12 +250,19 @@ class ChatCompletionRequest(LlmBaseModel):
 # --- Response Models (Non-streaming) ---
 
 
+class ResponseMessageReasoning(LlmBaseModel):
+    effort: Literal["minimal", "low", "medium", "high"] | None = None
+    summary: Literal["auto", "detailed", "concise"] | None = None
+
+
 class ResponseMessage(LlmBaseModel):
-    content: str | None = None
+    content: str | list[Any] | None = None
     tool_calls: list[ToolCall] | None = None
     role: Literal["assistant"] = Field(default="assistant")
-    refusal: str | None = None
+    refusal: str | dict[str, Any] | None = None
     annotations: list[Any] | None = None
+    audio: dict[str, Any] | None = None
+    reasoning: ResponseMessageReasoning | None = None
 
 
 class Choice(LlmBaseModel):
@@ -301,8 +308,10 @@ class ChatCompletionResponse(LlmBaseModel):
 
 class DeltaMessage(LlmBaseModel):
     role: Literal["assistant"] | None = None
-    content: str | None = None
+    content: str | list[Any] | None = None
     tool_calls: list[ToolCall] | None = None
+    audio: dict[str, Any] | None = None
+    reasoning: ResponseMessageReasoning | None = None
 
 
 class StreamingChoice(LlmBaseModel):
@@ -341,12 +350,34 @@ class StreamOptions(LlmBaseModel):
 class ToolFunction(LlmBaseModel):
     name: str
     description: str | None = None
-    parameters: dict[str, Any]
+    parameters: dict[str, Any] = Field(default_factory=dict)
 
 
 class FunctionTool(LlmBaseModel):
     type: Literal["function"] = Field(default="function")
-    function: ToolFunction
+    function: ToolFunction | None = None
+    name: str | None = None
+    description: str | None = None
+    parameters: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "FunctionTool":
+        fn = self.function
+        if fn is None:
+            if self.name is None:
+                raise ValueError("Function tool requires a name")
+            self.function = ToolFunction(
+                name=self.name,
+                description=self.description,
+                parameters=self.parameters or {},
+            )
+        else:
+            self.name = self.name or fn.name
+            if self.description is None:
+                self.description = fn.description
+            if self.parameters is None:
+                self.parameters = fn.parameters
+        return self
 
 
 # Valid include values for Responses API
@@ -426,6 +457,7 @@ class OutputTextContent(LlmBaseModel):
     type: Literal["output_text"]
     text: str
     annotations: list[Any] | None = None
+    logprobs: dict[str, Any] | None = None
 
 
 class MessageOutput(LlmBaseModel):
@@ -436,20 +468,44 @@ class MessageOutput(LlmBaseModel):
     content: list[OutputTextContent | dict[str, Any]]  # To handle various content types
 
 
+class ReasoningOutput(LlmBaseModel):
+    type: Literal["reasoning"]
+    id: str
+    status: str | None = None
+    summary: list[Any] | None = None
+
+
+class FunctionCallOutput(LlmBaseModel):
+    type: Literal["function_call"]
+    id: str
+    status: str | None = None
+    name: str | None = None
+    call_id: str | None = None
+    arguments: str | dict[str, Any] | None = None
+
+
 class InputTokensDetails(LlmBaseModel):
-    cached_tokens: int
+    cached_tokens: int = Field(
+        default=0, description="Number of tokens retrieved from cache"
+    )
 
 
 class OutputTokensDetails(LlmBaseModel):
-    reasoning_tokens: int
+    reasoning_tokens: int = Field(
+        default=0, description="Number of tokens used for reasoning"
+    )
 
 
 class ResponseUsage(LlmBaseModel):
-    input_tokens: int
-    input_tokens_details: InputTokensDetails
-    output_tokens: int
-    output_tokens_details: OutputTokensDetails
-    total_tokens: int
+    input_tokens: int = Field(default=0, description="Number of input tokens")
+    input_tokens_details: InputTokensDetails = Field(
+        default_factory=InputTokensDetails, description="Details about input tokens"
+    )
+    output_tokens: int = Field(default=0, description="Number of output tokens")
+    output_tokens_details: OutputTokensDetails = Field(
+        default_factory=OutputTokensDetails, description="Details about output tokens"
+    )
+    total_tokens: int = Field(default=0, description="Total number of tokens used")
 
 
 class IncompleteDetails(LlmBaseModel):
@@ -467,7 +523,7 @@ class ResponseObject(LlmBaseModel):
     created_at: int
     status: str
     model: str
-    output: list[MessageOutput]
+    output: list[MessageOutput | ReasoningOutput | FunctionCallOutput | dict[str, Any]]
     parallel_tool_calls: bool
     usage: ResponseUsage | None = None
     error: ErrorDetail | None = None
@@ -518,11 +574,26 @@ class ResponseIncompleteEvent(BaseStreamEvent):
 
 
 class OutputItem(LlmBaseModel):
+    """Normalized representation of a Responses API output item.
+
+    OpenAI currently emits different shapes for text, tool, and reasoning
+    items. Some omit fields like ``status`` or ``role`` entirely, while others
+    include extra metadata such as ``summary`` or ``call_id``. Keeping these
+    attributes optional lets us validate real-world payloads without fighting
+    the schema.
+    """
+
     id: str
-    status: str
     type: str
-    role: str
-    content: list[Any]
+    status: str | None = None
+    role: str | None = None
+    content: list[Any] | None = None
+    text: str | None = None
+    name: str | None = None
+    arguments: str | None = None
+    call_id: str | None = None
+    output_index: int | None = None
+    summary: list[Any] | None = None
 
 
 class ResponseOutputItemAddedEvent(BaseStreamEvent):
@@ -565,7 +636,7 @@ class ResponseOutputTextDeltaEvent(BaseStreamEvent):
     output_index: int
     content_index: int
     delta: str
-    logprobs: list[Any] | None = None
+    logprobs: dict[str, Any] | list[Any] | None = None
 
 
 class ResponseOutputTextDoneEvent(BaseStreamEvent):
@@ -574,7 +645,7 @@ class ResponseOutputTextDoneEvent(BaseStreamEvent):
     output_index: int
     content_index: int
     text: str
-    logprobs: list[Any] | None = None
+    logprobs: dict[str, Any] | list[Any] | None = None
 
 
 class ResponseRefusalDeltaEvent(BaseStreamEvent):

@@ -4,11 +4,10 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from ccproxy.llms.models.openai import ChatCompletionChunk
-from ccproxy.services.adapters.simple_converters import (
-    map_stream,
-)
+from ccproxy.services.adapters.simple_converters import map_stream
 
 
 async def _aiter(items: list[dict[str, Any]]) -> AsyncIterator[dict[str, Any]]:
@@ -50,10 +49,34 @@ class DummyConverter:
 
 @pytest.mark.asyncio
 async def test_map_stream_validates_and_maps() -> None:
-    # Minimal valid ChatCompletionChunk dict (only 'id' might be insufficient, use sensible minimal fields)
+    # Provide minimal-but-valid chunks so the validator succeeds without fallbacks
     chunks: list[dict[str, Any]] = [
-        {"id": "c1", "object": "chat.completion.chunk", "choices": []},
-        {"id": "c2", "object": "chat.completion.chunk", "choices": []},
+        {
+            "id": "c1",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "gpt-4o-mini",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": "hello"},
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {
+            "id": "c2",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "gpt-4o-mini",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": "world"},
+                    "finish_reason": None,
+                }
+            ],
+        },
     ]
 
     dummy = DummyConverter()
@@ -72,19 +95,17 @@ async def test_map_stream_validates_and_maps() -> None:
 
 
 @pytest.mark.asyncio
-async def test_map_stream_fallback_on_invalid_data() -> None:
-    # Invalid payloads should fallback via SimpleNamespace and still pass through
+async def test_map_stream_raises_on_invalid_data() -> None:
+    # Invalid payloads now bubble up as validation errors without dict fallbacks
     chunks = [
         {"unexpected": True},
     ]
     dummy = DummyConverter()
 
-    out: list[dict[str, Any]] = []
-    async for item in map_stream(
-        _aiter(chunks), validator_model=ChatCompletionChunk, converter=dummy
-    ):
-        out.append(item)
+    with pytest.raises(ValidationError):
+        async for _ in map_stream(
+            _aiter(chunks), validator_model=ChatCompletionChunk, converter=dummy
+        ):
+            pass
 
-    assert len(out) == 1
-    assert out[0].get("unexpected") is True
-    assert dummy.calls == 1
+    assert dummy.calls == 0

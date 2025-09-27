@@ -38,6 +38,10 @@ async def check_version_updates_startup(app: FastAPI, settings: Settings) -> Non
         settings: Application settings
     """
     # Skip version check if disabled by settings
+    if not settings.scheduler.enabled:
+        logger.debug("version_check_startup_skipped_scheduler_disabled")
+        return
+
     if not settings.scheduler.version_check_enabled:
         logger.debug("version_check_startup_disabled")
         return
@@ -103,7 +107,10 @@ async def setup_scheduler_startup(app: FastAPI, settings: Settings) -> None:
         container = app.state.service_container
         scheduler = await start_scheduler(settings, container)
         app.state.scheduler = scheduler
-        logger.debug("scheduler_initialized")
+        if scheduler:
+            logger.debug("scheduler_initialized")
+        else:
+            logger.debug("scheduler_skipped_initialization")
 
         # Add session pool stats task if session manager is available
         if (

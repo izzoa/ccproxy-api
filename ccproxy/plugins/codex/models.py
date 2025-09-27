@@ -6,9 +6,17 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Annotated, Any, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from ccproxy.llms.models import anthropic as anthropic_models
+from ccproxy.models.detection import DetectedHeaders, DetectedPrompts
 
 
 class CodexCliStatus(str, Enum):
@@ -88,7 +96,7 @@ class CodexInstructionsData(BaseModel):
         ),
     ]
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
 
 class CodexCacheData(BaseModel):
@@ -96,12 +104,23 @@ class CodexCacheData(BaseModel):
 
     codex_version: Annotated[str, Field(description="Codex CLI version")]
     headers: Annotated[
-        dict[str, str],
-        Field(description="Captured headers (lowercase keys) in insertion order"),
+        DetectedHeaders,
+        Field(
+            description="Captured headers (lowercase keys) in insertion order",
+            default_factory=DetectedHeaders,
+        ),
+    ]
+    prompts: Annotated[
+        DetectedPrompts,
+        Field(description="Captured prompt metadata", default_factory=DetectedPrompts),
     ]
     body_json: Annotated[
         dict[str, Any] | None,
-        Field(description="Captured request body as JSON if parseable", default=None),
+        Field(
+            description="Legacy captured request body (deprecated)",
+            default=None,
+            exclude=True,
+        ),
     ] = None
     method: Annotated[
         str | None, Field(description="Captured HTTP method", default=None)
@@ -125,6 +144,74 @@ class CodexCacheData(BaseModel):
     ] = None  # type: ignore # Pydantic handles this via default_factory
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_format(cls, values: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(values, dict):
+            return values
+
+        if "prompts" not in values:
+            legacy_body = values.get("body_json")
+            if legacy_body is not None:
+                values["prompts"] = DetectedPrompts.from_body(legacy_body)
+                cls._log_legacy_usage("body_json")
+
+        return values
+
+    @field_validator("headers", mode="before")
+    @classmethod
+    def _validate_headers(cls, value: Any) -> DetectedHeaders:
+        if isinstance(value, DetectedHeaders):
+            return value
+        if isinstance(value, dict):
+            return DetectedHeaders(value)
+        if value is None:
+            cls._log_legacy_usage("missing_headers")
+            return DetectedHeaders()
+        raise TypeError("headers must be a mapping of strings")
+
+    @field_validator("prompts", mode="before")
+    @classmethod
+    def _validate_prompts(cls, value: Any) -> DetectedPrompts:
+        if isinstance(value, DetectedPrompts):
+            return value
+        if isinstance(value, dict):
+            return DetectedPrompts.from_body(value)
+        if value is None:
+            return DetectedPrompts()
+        raise TypeError("prompts must be derived from a mapping")
+
+    @field_serializer("headers")
+    def _serialize_headers(self, headers: DetectedHeaders) -> dict[str, str]:
+        return headers.as_dict()
+
+    @field_serializer("prompts")
+    def _serialize_prompts(self, prompts: DetectedPrompts) -> dict[str, Any]:
+        raw = prompts.raw or {}
+        if not isinstance(raw, dict):
+            raw = {}
+        if prompts.instructions and "instructions" not in raw:
+            raw = dict(raw)
+            raw["instructions"] = prompts.instructions
+        if prompts.system is not None and "system" not in raw:
+            raw = dict(raw)
+            raw["system"] = prompts.system
+        return raw
+
+    @staticmethod
+    def _log_legacy_usage(reason: str) -> None:
+        try:
+            from ccproxy.core.logging import get_plugin_logger
+
+            logger = get_plugin_logger()
+            logger.debug(
+                "legacy_detection_cache_format",
+                plugin="codex",
+                reason=reason,
+            )
+        except Exception:  # pragma: no cover - logging best-effort only
+            pass
 
 
 class CodexMessage(BaseModel):

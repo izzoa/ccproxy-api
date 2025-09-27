@@ -15,7 +15,9 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from ccproxy.core.plugins.hooks import HookEvent, HookManager
 from ccproxy.core.plugins.hooks.base import HookContext
+from ccproxy.llms.streaming.accumulators import StreamAccumulator
 from ccproxy.streaming.sse import serialize_json_to_sse_stream
+from ccproxy.utils.model_mapper import restore_model_aliases
 
 
 if TYPE_CHECKING:
@@ -68,6 +70,7 @@ class DeferredStreaming(StreamingResponse):
         self.hook_manager = hook_manager
         self._close_client_on_finish = close_client_on_finish
         self.on_headers = on_headers
+        self._stream_accumulator: StreamAccumulator | None = None
 
         # Create an async generator for the streaming content
         async def generate_content() -> AsyncGenerator[bytes, None]:
@@ -86,6 +89,21 @@ class DeferredStreaming(StreamingResponse):
         if self.request_context and hasattr(self.request_context, "request_id"):
             request_id = self.request_context.request_id
             extensions["request_id"] = request_id
+
+        if self.request_context:
+            accumulator_cls = getattr(
+                self.request_context, "_tool_accumulator_class", None
+            )
+            if callable(accumulator_cls):
+                try:
+                    self._stream_accumulator = accumulator_cls()
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.debug(
+                        "stream_accumulator_init_failed",
+                        error=str(exc),
+                        request_id=request_id,
+                    )
+                    self._stream_accumulator = None
 
         # Start the streaming request
         async with self.client.stream(
@@ -149,7 +167,12 @@ class DeferredStreaming(StreamingResponse):
                 self.request_context.metadata["response_headers"] = upstream_headers
 
             # Remove hop-by-hop headers
-            for key in ["content-length", "transfer-encoding", "connection"]:
+            for key in [
+                "content-length",
+                "transfer-encoding",
+                "connection",
+                "content-encoding",
+            ]:
                 upstream_headers.pop(key, None)
 
             # Add headers; for errors, preserve provider content-type
@@ -200,7 +223,7 @@ class DeferredStreaming(StreamingResponse):
                     except Exception as e:
                         logger.debug(
                             "hook_emission_failed",
-                            event="PROVIDER_STREAM_START",
+                            event_type="PROVIDER_STREAM_START",
                             error=str(e),
                             category="hooks",
                         )
@@ -288,7 +311,7 @@ class DeferredStreaming(StreamingResponse):
                                 except Exception as e:
                                     logger.trace(
                                         "hook_emission_failed",
-                                        event="PROVIDER_STREAM_CHUNK",
+                                        event_type="PROVIDER_STREAM_CHUNK",
                                         error=str(e),
                                     )
 
@@ -361,15 +384,17 @@ class DeferredStreaming(StreamingResponse):
                                         except Exception as e:
                                             logger.trace(
                                                 "hook_emission_failed",
-                                                event="PROVIDER_STREAM_CHUNK",
+                                                event_type="PROVIDER_STREAM_CHUNK",
                                                 error=str(e),
                                             )
 
                                     # Yield the complete event
+                                    self._record_sse_bytes(event_data)
                                     yield event_data
 
                             # Yield any remaining data in buffer
                             if sse_buffer:
+                                self._record_sse_bytes(sse_buffer)
                                 yield sse_buffer
                         else:
                             # Stream the raw response without SSE parsing
@@ -408,10 +433,11 @@ class DeferredStreaming(StreamingResponse):
                                     except Exception as e:
                                         logger.trace(
                                             "hook_emission_failed",
-                                            event="PROVIDER_STREAM_CHUNK",
+                                            event_type="PROVIDER_STREAM_CHUNK",
                                             error=str(e),
                                         )
 
+                                self._record_sse_bytes(chunk)
                                 yield chunk
 
                     # Update metrics if available
@@ -465,7 +491,7 @@ class DeferredStreaming(StreamingResponse):
                         except Exception as e:
                             logger.error(
                                 "hook_emission_failed",
-                                event="PROVIDER_STREAM_END",
+                                event_type="PROVIDER_STREAM_END",
                                 error=str(e),
                                 category="hooks",
                                 exc_info=e,
@@ -554,6 +580,28 @@ class DeferredStreaming(StreamingResponse):
 
             # Delegate to the actual response
             await actual_response(scope, receive, send)
+
+        if self._stream_accumulator and self.request_context:
+            try:
+                # Store tool calls in metadata
+                tool_calls = self._stream_accumulator.get_complete_tool_calls()
+                if tool_calls:
+                    existing = self.request_context.metadata.get("tool_calls")
+                    if isinstance(existing, list):
+                        existing.extend(tool_calls)
+                    else:
+                        self.request_context.metadata["tool_calls"] = tool_calls
+
+                # Store accumulator for potential later use
+                self.request_context.metadata["stream_accumulator"] = (
+                    self._stream_accumulator
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.debug(
+                    "stream_accumulator_finalize_failed",
+                    error=str(exc),
+                    request_id=getattr(self.request_context, "request_id", None),
+                )
 
         # After the streaming context closes, optionally close the client we own
         if self._close_client_on_finish:
@@ -713,6 +761,18 @@ class DeferredStreaming(StreamingResponse):
 
                     try:
                         json_obj = json.loads(data)
+                        if self.request_context and isinstance(
+                            self.request_context.metadata, dict
+                        ):
+                            restore_model_aliases(
+                                json_obj, self.request_context.metadata
+                            )
+                            last_client_model = self.request_context.metadata.get(
+                                "_last_client_model"
+                            )
+                            if last_client_model and isinstance(json_obj, dict):
+                                self._override_model_alias(json_obj, last_client_model)
+                        self._record_tool_event(event_type or "", json_obj)
                         # Preserve event type for downstream adapters (if missing)
                         if (
                             event_type
@@ -742,3 +802,59 @@ class DeferredStreaming(StreamingResponse):
             request_context=self.request_context,
         ):
             yield chunk
+
+    def _record_tool_event(self, event_name: str, payload: Any) -> None:
+        if not self._stream_accumulator or not isinstance(payload, dict):
+            return
+
+        try:
+            self._stream_accumulator.accumulate(event_name or "", payload)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug(
+                "stream_accumulator_accumulate_failed",
+                error=str(exc),
+                event_name=event_name,
+                request_id=getattr(self.request_context, "request_id", None),
+            )
+
+    def _override_model_alias(self, payload: Any, model_value: str) -> None:
+        if isinstance(payload, dict):
+            for key, value in payload.items():
+                if key == "model" and isinstance(value, str) and value != model_value:
+                    payload[key] = model_value
+                else:
+                    self._override_model_alias(value, model_value)
+        elif isinstance(payload, list):
+            for item in payload:
+                self._override_model_alias(item, model_value)
+
+    def _record_sse_bytes(self, event_bytes: bytes) -> None:
+        if not self._stream_accumulator:
+            return
+
+        text = event_bytes.decode("utf-8", errors="ignore").strip()
+        if not text:
+            return
+
+        event_name = ""
+        data_lines: list[str] = []
+        for raw_line in text.split("\n"):
+            line = raw_line.strip()
+            if line.startswith("event:"):
+                event_name = line[6:].strip()
+            elif line.startswith("data:"):
+                payload = line[5:].lstrip()
+                if payload == "[DONE]":
+                    data_lines = []
+                    break
+                data_lines.append(payload)
+
+        if not data_lines:
+            return
+
+        try:
+            payload_obj = json.loads("\n".join(data_lines))
+        except json.JSONDecodeError:
+            return
+
+        self._record_tool_event(event_name, payload_obj)

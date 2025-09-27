@@ -48,16 +48,7 @@ class HTTPTracerHook(Hook):
         self.raw_formatter = raw_formatter
 
         if self.enabled:
-            # No app reference here; keep INFO by default when not summary-only aware
-            from ccproxy.core.logging import info_allowed
-
-            # We cannot access app at construction; default to INFO when uncertain
-            log_fn = logger.info
-            try:
-                log_fn = logger.info if info_allowed(None) else logger.debug
-            except Exception:
-                log_fn = logger.info
-            log_fn(
+            logger.info(
                 "core_http_tracer_hook_initialized",
                 json_logs=json_formatter is not None,
                 raw_http=raw_formatter is not None,

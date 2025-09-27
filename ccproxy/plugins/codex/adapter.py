@@ -1,18 +1,18 @@
 import contextlib
 import json
 import uuid
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import httpx
 from fastapi import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
-from ccproxy.core.constants import (
-    FORMAT_OPENAI_CHAT,
-    FORMAT_OPENAI_RESPONSES,
-)
 from ccproxy.core.logging import get_plugin_logger
+from ccproxy.core.plugins.interfaces import (
+    DetectionServiceProtocol,
+    ProfiledTokenManagerProtocol,
+)
 from ccproxy.services.adapters.chain_composer import compose_from_chain
 from ccproxy.services.adapters.http_adapter import BaseHTTPAdapter
 from ccproxy.services.handler_config import HandlerConfig
@@ -23,8 +23,7 @@ from ccproxy.utils.headers import (
     filter_request_headers,
     filter_response_headers,
 )
-
-from .detection_service import CodexDetectionService
+from ccproxy.utils.model_mapper import restore_model_aliases
 
 
 logger = get_plugin_logger()
@@ -35,12 +34,15 @@ class CodexAdapter(BaseHTTPAdapter):
 
     def __init__(
         self,
-        detection_service: CodexDetectionService,
+        detection_service: DetectionServiceProtocol,
         config: Any = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(config=config, **kwargs)
-        self.detection_service = detection_service
+        self.detection_service: DetectionServiceProtocol = detection_service
+        self.token_manager: ProfiledTokenManagerProtocol = cast(
+            ProfiledTokenManagerProtocol, self.auth_manager
+        )
         self.base_url = self.config.base_url.rstrip("/")
 
     async def handle_request(
@@ -53,8 +55,10 @@ class CodexAdapter(BaseHTTPAdapter):
         """
         # Context + request info
         ctx = request.state.context
+        self._ensure_tool_accumulator(ctx)
         endpoint = ctx.metadata.get("endpoint", "")
         body = await request.body()
+        body = self._map_request_model(ctx, body)
         headers = extract_request_headers(request)
 
         # Determine client streaming intent from body flag (fallback to False)
@@ -173,7 +177,9 @@ class CodexAdapter(BaseHTTPAdapter):
             logger.trace(
                 "codex_adapter_buffered_response_ready",
                 status_code=buffered_response.status_code,
+                buffer_respones_preview=buffered_response.body[:300],
                 category="streaming",
+                format_chain=getattr(ctx, "format_chain", []),
             )
 
             # 4) Apply reverse format chain on buffered body if needed
@@ -184,7 +190,6 @@ class CodexAdapter(BaseHTTPAdapter):
                     "error" if buffered_response.status_code >= 400 else "response"
                 )
                 try:
-                    # Ensure body is bytes for _decode_json_body
                     body_bytes = (
                         buffered_response.body
                         if isinstance(buffered_response.body, bytes)
@@ -198,6 +203,18 @@ class CodexAdapter(BaseHTTPAdapter):
                         format_chain=ctx.format_chain,
                         stage=mode,
                     )
+                    metadata = getattr(ctx, "metadata", None)
+                    alias_map = getattr(ctx, "_model_alias_map", None)
+                    if isinstance(metadata, dict):
+                        if (
+                            isinstance(alias_map, dict)
+                            and isinstance(response_payload, dict)
+                            and isinstance(response_payload.get("model"), str)
+                        ):
+                            response_payload["model"] = alias_map.get(
+                                response_payload["model"], response_payload["model"]
+                            )
+                        restore_model_aliases(response_payload, metadata)
                     converted_body = self._encode_json_body(response_payload)
                 except Exception as e:
                     logger.error(
@@ -218,7 +235,6 @@ class CodexAdapter(BaseHTTPAdapter):
                         },
                     )
 
-                # Filter headers and rebuild response; middleware will normalize headers
                 headers_out = filter_response_headers(dict(buffered_response.headers))
                 return Response(
                     content=converted_body,
@@ -234,20 +250,18 @@ class CodexAdapter(BaseHTTPAdapter):
         return await super().handle_request(request)
 
     async def get_target_url(self, endpoint: str) -> str:
-        # Old URL: https://chat.openai.com/backend-anon/responses (308 redirect)
         return f"{self.base_url}/responses"
 
     async def prepare_provider_request(
         self, body: bytes, headers: dict[str, str], endpoint: str
     ) -> tuple[bytes, dict[str, str]]:
-        # Get auth credentials and profile
-        auth_data = await self.auth_manager.load_credentials()
-        if not auth_data:
-            raise ValueError("No authentication credentials available")
+        token_value = await self._resolve_access_token()
 
         # Get profile to extract chatgpt_account_id
-        profile = await self.auth_manager.get_profile_quick()
-        chatgpt_account_id = profile.chatgpt_account_id if profile else None
+        profile = await self.token_manager.get_profile_quick()
+        chatgpt_account_id = (
+            getattr(profile, "chatgpt_account_id", None) if profile else None
+        )
 
         # Parse body (format conversion is now handled by format chain)
         body_data = json.loads(body.decode()) if body else {}
@@ -257,10 +271,12 @@ class CodexAdapter(BaseHTTPAdapter):
         # Fetch detected instructions from detection service
         instructions = self._get_instructions()
 
-        # if instructions is alreay set we will prepend the mandatory one
-        # TODO: verify that it's workin
-        if "instructions" in body_data:
-            instructions = instructions + "\n" + body_data["instructions"]
+        existing_instructions = body_data.get("instructions")
+        if isinstance(existing_instructions, str) and existing_instructions:
+            if instructions:
+                instructions = instructions + "\n" + existing_instructions
+            else:
+                instructions = existing_instructions
 
         body_data["instructions"] = instructions
 
@@ -280,42 +296,24 @@ class CodexAdapter(BaseHTTPAdapter):
 
         # Filter and add headers
         filtered_headers = filter_request_headers(headers, preserve_auth=False)
-        # fmt: off
+        session_id = filtered_headers.get("session_id") or str(uuid.uuid4())
+        conversation_id = filtered_headers.get("conversation_id") or str(uuid.uuid4())
+
         base_headers = {
-            "authorization": f"Bearer {auth_data.access_token}",
+            "authorization": f"Bearer {token_value}",
             "content-type": "application/json",
-
-            "session_id": filtered_headers["session_id"]
-            if "sessions_id" in filtered_headers
-            else str(uuid.uuid4()),
-
-            "conversation_id": filtered_headers["conversation_id"]
-            if "conversation_id" in filtered_headers
-            else str(uuid.uuid4()),
+            "session_id": session_id,
+            "conversation_id": conversation_id,
         }
 
-        # Add chatgpt-account-id only if available
         if chatgpt_account_id is not None:
             base_headers["chatgpt-account-id"] = chatgpt_account_id
 
         filtered_headers.update(base_headers)
 
-        # Add CLI headers (skip empty redacted values, ignored keys, and redacted headers)
-        if self.detection_service:
-            cached_data = self.detection_service.get_cached_data()
-            if cached_data and cached_data.headers:
-                cli_headers: dict[str, str] = cached_data.headers
-                ignores = set(
-                    getattr(self.detection_service, "ignores_header", []) or []
-                )
-                redacted = set(getattr(self.detection_service, "REDACTED_HEADERS", []))
-                for key, value in cli_headers.items():
-                    lk = key.lower()
-                    if lk in ignores or lk in redacted:
-                        continue
-                    if value is None or value == "":
-                        continue
-                    filtered_headers[lk] = value
+        cli_headers = self._collect_cli_headers()
+        if cli_headers:
+            filtered_headers.update(cli_headers)
 
         return json.dumps(body_data).encode(), filtered_headers
 
@@ -336,21 +334,43 @@ class CodexAdapter(BaseHTTPAdapter):
             media_type=response.headers.get("content-type"),
         )
 
-    async def _create_streaming_response(
-        self, response: httpx.Response, endpoint: str
-    ) -> DeferredStreaming:
-        """Create streaming response with format conversion support."""
-        # Deprecated: streaming is centrally handled by BaseHTTPAdapter/StreamingHandler
-        # Kept for compatibility; not used.
-        raise NotImplementedError
+    async def _resolve_access_token(self) -> str:
+        """Resolve an access token suitable for Codex requests."""
 
-    def _needs_format_conversion(self, endpoint: str) -> bool:
-        """Deprecated: format conversion handled via format chain in BaseHTTPAdapter."""
-        return False
+        token_manager = self.token_manager
 
-    def _get_response_format_conversion(self, endpoint: str) -> tuple[str, str]:
-        """Deprecated: conversion direction decided by format chain upstream."""
-        return (FORMAT_OPENAI_RESPONSES, FORMAT_OPENAI_CHAT)
+        token = await token_manager.get_access_token()
+        if token:
+            return token
+
+        refreshed = await token_manager.get_access_token_with_refresh()
+        if refreshed:
+            return refreshed
+
+        snapshot = await token_manager.get_token_snapshot()
+        if snapshot and snapshot.access_token:
+            return snapshot.access_token
+
+        raise ValueError("No authentication credentials available")
+
+    def _collect_cli_headers(self) -> dict[str, str]:
+        """Collect safe CLI headers from detection cache for forwarding."""
+
+        if not self.detection_service:
+            return {}
+
+        headers_data = self.detection_service.get_detected_headers()
+        if not headers_data:
+            return {}
+
+        ignores = {
+            header.lower() for header in self.detection_service.get_ignored_headers()
+        }
+        redacted = {
+            header.lower() for header in self.detection_service.get_redacted_headers()
+        }
+
+        return headers_data.filtered(ignores=ignores, redacted=redacted)
 
     async def handle_streaming(
         self, request: Request, endpoint: str, **kwargs: Any
@@ -367,10 +387,15 @@ class CodexAdapter(BaseHTTPAdapter):
 
         # Get context
         ctx = request.state.context
+        self._ensure_tool_accumulator(ctx)
 
         # Extract body and headers
         body = await request.body()
+        body = self._map_request_model(ctx, body)
         headers = extract_request_headers(request)
+
+        # Ensure format adapters are available when required
+        self._ensure_format_registry(ctx.format_chain, endpoint)
 
         # Apply request format conversion if a chain is defined
         if ctx.format_chain and len(ctx.format_chain) > 1:
@@ -383,6 +408,7 @@ class CodexAdapter(BaseHTTPAdapter):
                     format_chain=ctx.format_chain,
                     stage="request",
                 )
+                self._record_tool_definitions(ctx, request_payload)
                 body = self._encode_json_body(request_payload)
             except Exception as e:
                 logger.error(
@@ -487,14 +513,24 @@ class CodexAdapter(BaseHTTPAdapter):
         return cleaned_data
 
     def _get_instructions(self) -> str:
-        if self.detection_service:
-            injection = (
-                self.detection_service.get_system_prompt()
-            )  # returns {"instructions": str} or {}
-            if injection and isinstance(injection.get("instructions"), str):
-                instructions: str = injection["instructions"]
+        if not self.detection_service:
+            return ""
+
+        prompts = self.detection_service.get_detected_prompts()
+        if prompts.has_instructions():
+            return prompts.instructions or ""
+
+        injection = self.detection_service.get_system_prompt()
+        if isinstance(injection, dict):
+            instructions = injection.get("instructions")
+            if isinstance(instructions, str):
                 return instructions
-        raise ValueError("No instructions available from detection service")
+
+        fallback = getattr(self.detection_service, "instructions_value", None)
+        if isinstance(fallback, str):
+            return fallback
+
+        return ""
 
     def adapt_error(self, error_body: dict[str, Any]) -> dict[str, Any]:
         """Convert Codex error format to appropriate API error format.

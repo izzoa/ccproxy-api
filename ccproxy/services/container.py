@@ -4,9 +4,12 @@ This module provides a clean, testable dependency injection container that
 manages service lifecycles and dependencies without singleton anti-patterns.
 """
 
+from __future__ import annotations
+
 import inspect
 from collections.abc import Callable
-from typing import Any, TypeVar, cast
+from contextvars import ContextVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast
 
 import httpx
 import structlog
@@ -32,6 +35,10 @@ from ccproxy.streaming import StreamingHandler
 from ccproxy.utils.binary_resolver import BinaryResolver
 
 
+if TYPE_CHECKING:
+    from ccproxy.core.async_task_manager import AsyncTaskManager
+
+
 logger = structlog.get_logger(__name__)
 
 T = TypeVar("T")
@@ -39,6 +46,12 @@ T = TypeVar("T")
 
 class ServiceContainer:
     """Dependency injection container for all services."""
+
+    _current_container: ClassVar[ContextVar[ServiceContainer | None]] = ContextVar(
+        "ccproxy_service_container",
+        default=None,
+    )
+    _default_container: ClassVar[ServiceContainer | None] = None
 
     def __init__(self, settings: Settings) -> None:
         """Initialize the service container."""
@@ -56,6 +69,33 @@ class ServiceContainer:
         # Plugins may override this with a real tracer at runtime
         # Register a default tracer using the protocol as key
         self.register_service(IRequestTracer, instance=NullRequestTracer())
+
+        # Make this container available for modules that resolve services globally
+        self.activate()
+
+    def activate(self, *, set_default: bool = True) -> None:
+        """Mark this container as the current active container."""
+        self.__class__._current_container.set(self)
+        if set_default:
+            self.__class__._default_container = self
+
+    @classmethod
+    def get_current(cls, *, strict: bool = True) -> ServiceContainer | None:
+        """Return the currently active container.
+
+        Args:
+            strict: When True, raise an error if no container is active.
+
+        Returns:
+            Active service container or None.
+        """
+
+        container = cls._current_container.get()
+        if container is None:
+            container = cls._default_container
+        if container is None and strict:
+            raise RuntimeError("ServiceContainer is not available")
+        return container
 
     def register_service(
         self,
@@ -156,6 +196,12 @@ class ServiceContainer:
         """Get background hook thread manager instance."""
         return self.get_service(BackgroundHookThreadManager)
 
+    def get_async_task_manager(self) -> AsyncTaskManager:
+        """Get async task manager instance."""
+        from ccproxy.core.async_task_manager import AsyncTaskManager
+
+        return self.get_service(AsyncTaskManager)
+
     def get_adapter_dependencies(self, metrics: Any | None = None) -> dict[str, Any]:
         """Get all services an adapter might need."""
         return {
@@ -167,7 +213,6 @@ class ServiceContainer:
             "config": self.get_proxy_config(),
             "cli_detection_service": self.get_cli_detection_service(),
             "format_registry": self.get_format_registry(),
-            # Legacy formatter registry removed
         }
 
     async def close(self) -> None:
@@ -187,6 +232,10 @@ class ServiceContainer:
                     maybe_coro = service.close()
                     if inspect.isawaitable(maybe_coro):
                         await maybe_coro
+                elif hasattr(service, "stop") and callable(service.stop):
+                    stop_result = service.stop()
+                    if inspect.isawaitable(stop_result):
+                        await stop_result
                 # else: nothing to close
             except Exception as e:
                 logger.error(
@@ -202,3 +251,6 @@ class ServiceContainer:
     async def shutdown(self) -> None:
         """Shutdown all services in the container."""
         await self.close()
+        if self.__class__._default_container is self:
+            self.__class__._default_container = None
+            self.__class__._current_container.set(None)

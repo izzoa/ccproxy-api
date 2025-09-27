@@ -6,7 +6,10 @@ from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from ccproxy.api.decorators import with_format_chain
-from ccproxy.api.dependencies import get_plugin_adapter
+from ccproxy.api.dependencies import (
+    get_plugin_adapter,
+    get_provider_config_dependency,
+)
 from ccproxy.core.constants import (
     FORMAT_ANTHROPIC_MESSAGES,
     FORMAT_OPENAI_CHAT,
@@ -22,6 +25,7 @@ from ccproxy.llms.models import anthropic as anthropic_models
 from ccproxy.llms.models import openai as openai_models
 from ccproxy.streaming import DeferredStreaming
 
+from .config import CopilotProviderConfig
 from .models import (
     CopilotHealthResponse,
     CopilotTokenStatus,
@@ -35,6 +39,10 @@ if TYPE_CHECKING:
 logger = get_plugin_logger()
 
 CopilotAdapterDep = Annotated[Any, Depends(get_plugin_adapter("copilot"))]
+CopilotConfigDep = Annotated[
+    CopilotProviderConfig,
+    Depends(get_provider_config_dependency("copilot", CopilotProviderConfig)),
+]
 
 APIResponse = Response | StreamingResponse | DeferredStreaming
 OpenAIResponse = APIResponse | openai_models.ErrorResponse
@@ -161,10 +169,16 @@ async def create_embeddings(
 
 @router_v1.get("/models", response_model=openai_models.ModelList)
 async def list_models_v1(
-    request: Request, adapter: CopilotAdapterDep
+    request: Request,
+    adapter: CopilotAdapterDep,
+    config: CopilotConfigDep,
 ) -> OpenAIResponse:
     """List available Copilot models."""
-    # Forward request to upstream Copilot API
+    if config.models_endpoint:
+        models = [card.model_dump(mode="json") for card in config.models_endpoint]
+        return JSONResponse(content={"object": "list", "data": models})
+
+    # Forward request to upstream Copilot API when no override configured
     request.state.context.metadata["endpoint"] = UPSTREAM_ENDPOINT_OPENAI_MODELS
     return await _handle_adapter_request(request, adapter)
 

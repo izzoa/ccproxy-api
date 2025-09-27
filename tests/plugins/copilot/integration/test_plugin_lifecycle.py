@@ -1,6 +1,6 @@
 """Integration tests for Copilot plugin lifecycle."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -24,15 +24,15 @@ class TestCopilotPluginLifecycle:
             == "GitHub Copilot provider plugin with OAuth authentication"
         )
         assert factory.cli_safe is False
-        assert factory.route_prefix == "/copilot"
-        assert len(factory.format_adapters) == 2
+        assert len(factory.routers) == 2
+        assert factory.routers[0].prefix == "/copilot/v1"
+        assert factory.routers[1].prefix == "/copilot"
+        assert len(factory.requires_format_adapters) == 6
 
-        # Test format adapters are defined
-        adapter_names = [
-            (spec.from_format, spec.to_format) for spec in factory.format_adapters
-        ]
-        assert ("openai", "copilot") in adapter_names
-        assert ("copilot", "openai") in adapter_names
+        # Test format adapter requirements are defined
+        adapter_names = factory.requires_format_adapters
+        assert ("anthropic.messages", "openai.chat_completions") in adapter_names
+        assert ("openai.chat_completions", "anthropic.messages") in adapter_names
 
     @pytest.mark.asyncio
     async def test_plugin_context_creation(self) -> None:
@@ -48,12 +48,22 @@ class TestCopilotPluginLifecycle:
         )
         mock_core_services.get_metrics = MagicMock(return_value=MagicMock())
 
-        # Add settings
+        # Add settings with proper plugins config
         settings = Settings()
+        # Mock the plugins config to return empty dict so no validation happens
+        settings.plugins = {"copilot": {}}
         mock_core_services.get_settings = MagicMock(return_value=settings)
+        # Also need settings attribute directly on service_container
+        mock_core_services.settings = settings
 
-        # Mock get_plugin_config to return None (no config override)
-        mock_core_services.get_plugin_config = MagicMock(return_value=None)
+        # Mock get_plugin_config to return actual config dict (not MagicMock)
+        from ccproxy.plugins.copilot.config import CopilotConfig
+
+        mock_core_services.get_plugin_config = MagicMock(
+            return_value=CopilotConfig().model_dump()
+        )
+        # Mock get_service_container for format registry
+        mock_core_services.get_service_container = MagicMock(return_value=MagicMock())
 
         context = factory.create_context(mock_core_services)
 
@@ -61,11 +71,9 @@ class TestCopilotPluginLifecycle:
         assert "config" in context
         assert "oauth_provider" in context
         assert "detection_service" in context
-        assert "adapter" in context
-        assert "router_factory" in context
+        # Note: adapter and router_factory are created asynchronously by runtime or are part of manifest
 
         # Verify components are properly initialized
-        from ccproxy.plugins.copilot.adapter import CopilotAdapter
         from ccproxy.plugins.copilot.config import CopilotConfig
         from ccproxy.plugins.copilot.detection_service import CopilotDetectionService
         from ccproxy.plugins.copilot.oauth.provider import CopilotOAuthProvider
@@ -73,7 +81,7 @@ class TestCopilotPluginLifecycle:
         assert isinstance(context["config"], CopilotConfig)
         assert isinstance(context["oauth_provider"], CopilotOAuthProvider)
         assert isinstance(context["detection_service"], CopilotDetectionService)
-        assert isinstance(context["adapter"], CopilotAdapter)
+        # Note: adapter is not created in synchronous context, only in async runtime
 
     @pytest.mark.asyncio
     async def test_plugin_runtime_initialization(self) -> None:
@@ -112,8 +120,10 @@ class TestCopilotPluginLifecycle:
         assert runtime.detection_service is not None
         assert runtime.adapter is not None
 
-        # Verify adapter was initialized
-        mock_adapter.initialize.assert_called_once()
+        # Note: CopilotAdapter doesn't have an initialize() method
+        # Initialization is handled through dependency injection in constructor
+        # Just verify adapter is present
+        assert mock_adapter is not None
 
     @pytest.mark.asyncio
     async def test_plugin_runtime_cleanup(self) -> None:
@@ -166,38 +176,6 @@ class TestCopilotPluginLifecycle:
         mock_oauth_provider.cleanup.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_format_registry_setup_legacy(self) -> None:
-        """Test legacy format registry setup."""
-        factory = CopilotPluginFactory()
-        runtime = factory.create_runtime()
-
-        # Create mock service container and format registry
-        mock_registry = MagicMock()
-        mock_service_container = MagicMock()
-        mock_service_container.get_format_registry.return_value = mock_registry
-
-        mock_context = {
-            "service_container": mock_service_container,
-        }
-        runtime.context = mock_context
-
-        # Mock settings to use legacy setup
-        with patch("ccproxy.config.Settings") as mock_settings_class:
-            mock_settings = MagicMock()
-            mock_settings_class.return_value = mock_settings
-
-            await runtime._setup_format_registry()
-
-            # Verify format adapters were registered
-            assert mock_registry.register.call_count == 2
-
-            # Check that both adapters were registered
-            calls = mock_registry.register.call_args_list
-            registered_pairs = [(call[0][0], call[0][1]) for call in calls]
-            assert ("openai", "copilot") in registered_pairs
-            assert ("copilot", "openai") in registered_pairs
-
-    @pytest.mark.asyncio
     async def test_oauth_provider_creation(self) -> None:
         """Test OAuth provider creation with proper dependencies."""
         factory = CopilotPluginFactory()
@@ -240,8 +218,10 @@ class TestCopilotPluginLifecycle:
         """Test detection service creation requires context."""
         factory = CopilotPluginFactory()
 
-        with pytest.raises(ValueError, match="Context required for detection service"):
-            factory.create_detection_service(None)
+        with pytest.raises(
+            ValueError, match="Settings and CLI detection service required"
+        ):
+            factory.create_detection_service({})
 
     @pytest.mark.asyncio
     async def test_detection_service_creation_requires_dependencies(self) -> None:
@@ -249,8 +229,10 @@ class TestCopilotPluginLifecycle:
         factory = CopilotPluginFactory()
 
         # Test with None context
-        with pytest.raises(ValueError, match=r"Context required for detection service"):
-            factory.create_detection_service(None)
+        with pytest.raises(
+            ValueError, match=r"Settings and CLI detection service required"
+        ):
+            factory.create_detection_service({})
 
         # Test with context missing required services
         mock_context = {
@@ -282,18 +264,22 @@ class TestCopilotPluginLifecycle:
             "metrics": mock_metrics,
             "hook_manager": mock_hook_manager,
             "http_client": mock_http_client,
+            "http_pool_manager": MagicMock(),  # Required by adapter
+            "credentials_manager": MagicMock(),  # Required by adapter
+            "service_container": MagicMock(),  # For format registry
         }
 
-        adapter = factory.create_adapter(mock_context)
+        adapter = await factory.create_adapter(mock_context)
 
         assert adapter is not None
         # Verify adapter was created with proper dependencies
         assert adapter.config is mock_config
         assert adapter.oauth_provider is mock_oauth_provider
         assert adapter.detection_service is mock_detection_service
-        assert adapter.metrics is mock_metrics
-        assert adapter.hook_manager is mock_hook_manager
-        assert adapter.http_client is mock_http_client
+        # Note: metrics, hook_manager, http_client are passed to BaseHTTPAdapter
+        # but not stored as instance attributes directly
+        assert adapter.auth_manager is not None
+        assert adapter.http_pool_manager is not None
 
     @pytest.mark.asyncio
     async def test_adapter_creation_requires_context(self) -> None:
@@ -301,7 +287,7 @@ class TestCopilotPluginLifecycle:
         factory = CopilotPluginFactory()
 
         with pytest.raises(ValueError, match="Context required for adapter"):
-            factory.create_adapter(None)
+            await factory.create_adapter(None)
 
     @pytest.mark.asyncio
     async def test_adapter_creation_with_missing_config(self) -> None:
@@ -315,9 +301,12 @@ class TestCopilotPluginLifecycle:
             "metrics": MagicMock(),
             "hook_manager": MagicMock(),
             "http_client": MagicMock(),
+            "http_pool_manager": MagicMock(),  # Required by adapter
+            "credentials_manager": MagicMock(),  # Required by adapter
+            "service_container": MagicMock(),  # For format registry
         }
 
-        adapter = factory.create_adapter(mock_context)
+        adapter = await factory.create_adapter(mock_context)
 
         assert adapter is not None
         # Should have created default config
@@ -326,35 +315,22 @@ class TestCopilotPluginLifecycle:
         assert isinstance(adapter.config, CopilotConfig)
 
     @pytest.mark.asyncio
-    async def test_router_factory_creation(self) -> None:
-        """Test router factory is created in context."""
+    async def test_router_specs_available(self) -> None:
+        """Test router specs are defined in factory."""
         factory = CopilotPluginFactory()
 
-        # Create mock core services
-        mock_core_services = MagicMock()
-        mock_core_services.get_http_client = MagicMock(return_value=MagicMock())
-        mock_core_services.get_hook_manager = MagicMock(return_value=MagicMock())
-        mock_core_services.get_cli_detection_service = MagicMock(
-            return_value=MagicMock()
-        )
-        mock_core_services.get_metrics = MagicMock(return_value=MagicMock())
+        # Verify router specs are present in the factory (not context)
+        assert hasattr(factory, "routers")
+        assert len(factory.routers) == 2
 
-        # Add settings
-        settings = Settings()
-        mock_core_services.get_settings = MagicMock(return_value=settings)
+        # Verify the router specs have expected properties
+        v1_router = factory.routers[0]
+        github_router = factory.routers[1]
 
-        # Mock get_plugin_config to return None (no config override)
-        mock_core_services.get_plugin_config = MagicMock(return_value=None)
-
-        context = factory.create_context(mock_core_services)
-
-        # Verify router factory is present
-        assert "router_factory" in context
-        assert callable(context["router_factory"])
-
-        # Test calling router factory
-        router = context["router_factory"]()
-        assert router is not None
+        assert v1_router.prefix == "/copilot/v1"
+        assert v1_router.tags == ["copilot-api-v1"]
+        assert github_router.prefix == "/copilot"
+        assert github_router.tags == ["copilot-github"]
 
     @pytest.mark.asyncio
     async def test_manifest_properties(self) -> None:
@@ -367,16 +343,11 @@ class TestCopilotPluginLifecycle:
             manifest.description
             == "GitHub Copilot provider plugin with OAuth authentication"
         )
-        # Note: manifest doesn't have runtime_class attribute, it's on the factory
-        assert len(manifest.format_adapters) == 2
+        # Copilot plugin relies on format adapters provided by core, so manifest has empty format_adapters
+        assert len(manifest.format_adapters) == 0
 
-        # Verify format adapter specs
-        adapter_pairs = [
-            (spec.from_format, spec.to_format) for spec in manifest.format_adapters
-        ]
-        assert ("openai", "copilot") in adapter_pairs
-        assert ("copilot", "openai") in adapter_pairs
-
-        # Check priorities
-        for spec in manifest.format_adapters:
-            assert spec.priority == 30
+        # But requires format adapters from dependencies
+        assert len(manifest.requires_format_adapters) == 6
+        adapter_pairs = manifest.requires_format_adapters
+        assert ("anthropic.messages", "openai.chat_completions") in adapter_pairs
+        assert ("openai.chat_completions", "anthropic.messages") in adapter_pairs

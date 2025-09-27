@@ -1,6 +1,5 @@
 """Unit tests for analytics storage operations."""
 
-import asyncio
 import time
 from collections.abc import AsyncGenerator
 
@@ -73,8 +72,8 @@ class TestStorageOperations:
             success = await storage.store_request(log_data)
             assert success is True
 
-        # Give background worker minimal time to process (optimized for tests)
-        await asyncio.sleep(0.01)
+        # Wait for background worker to process all queued items
+        await storage.wait_for_queue_processing()
 
         # Verify data exists
         with Session(storage._engine) as session:
@@ -124,8 +123,8 @@ class TestStorageOperations:
         success = await storage.store_request(log_data)
         assert success is True
 
-        # Give background worker minimal time to process (optimized for tests)
-        await asyncio.sleep(0.01)
+        # Wait for background worker to process all queued items
+        await storage.wait_for_queue_processing()
 
         # Verify data was stored correctly
         with Session(storage._engine) as session:

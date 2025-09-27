@@ -1,9 +1,9 @@
 """OpenAI/Codex token manager implementation for the Codex plugin."""
 
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
 
 from ccproxy.auth.managers.base import BaseTokenManager
+from ccproxy.auth.managers.token_snapshot import TokenSnapshot
 from ccproxy.auth.storage.base import TokenStorage
 from ccproxy.core.logging import get_plugin_logger
 
@@ -47,13 +47,25 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
         """
         return cls(storage=storage)
 
+    def _build_token_snapshot(self, credentials: OpenAICredentials) -> TokenSnapshot:
+        """Construct a snapshot for OpenAI credentials."""
+        wrapper = OpenAITokenWrapper(credentials=credentials)
+        extras = {
+            "id_token_present": bool(wrapper.id_token),
+        }
+        return TokenSnapshot(
+            provider="codex",
+            account_id=wrapper.account_id,
+            access_token=str(wrapper.access_token_value),
+            refresh_token=wrapper.refresh_token_value,
+            expires_at=wrapper.expires_at_datetime,
+            extras=extras,
+        )
+
     # ==================== Abstract Method Implementations ====================
 
-    async def refresh_token(self, oauth_client: Any = None) -> OpenAICredentials | None:
+    async def refresh_token(self) -> OpenAICredentials | None:
         """Refresh the access token using the refresh token.
-
-        Args:
-            oauth_client: Deprecated - OAuth provider is now looked up from registry
 
         Returns:
             Updated credentials or None if refresh failed
@@ -107,8 +119,18 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
 
     def is_expired(self, credentials: OpenAICredentials) -> bool:
         """Check if credentials are expired using wrapper."""
-        wrapper = OpenAITokenWrapper(credentials=credentials)
-        return wrapper.is_expired
+        if isinstance(credentials, OpenAICredentials):
+            wrapper = OpenAITokenWrapper(credentials=credentials)
+            return bool(wrapper.is_expired)
+
+        expires_at = getattr(credentials, "expires_at", None)
+        if not expires_at:
+            return False
+
+        if isinstance(expires_at, datetime):
+            return expires_at <= datetime.now(UTC)
+
+        return False
 
     def get_account_id(self, credentials: OpenAICredentials) -> str | None:
         """Get account ID from credentials."""
@@ -156,13 +178,8 @@ class CodexTokenManager(BaseTokenManager[OpenAICredentials]):
         self._profile_cache = OpenAIProfileInfo.from_token(credentials)
         return self._profile_cache
 
-    async def get_access_token_with_refresh(
-        self, oauth_client: Any = None
-    ) -> str | None:
+    async def get_access_token_with_refresh(self) -> str | None:
         """Get valid access token, automatically refreshing if expired.
-
-        Args:
-            oauth_client: Optional OAuth client for token refresh
 
         Returns:
             Access token if available and valid, None otherwise

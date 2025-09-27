@@ -67,23 +67,12 @@ class MetricsRuntime(SystemPluginRuntime):
 
             if hook_registry and isinstance(hook_registry, HookRegistry):
                 hook_registry.register(self.hook)
-                # Only emit non-summary INFO when allowed
-                from ccproxy.core.logging import info_allowed
-
-                if info_allowed(self.context.get("app")):
-                    logger.info(
-                        "metrics_hook_registered",
-                        namespace=self.config.namespace,
-                        pushgateway_enabled=self.config.pushgateway_enabled,
-                        metrics_endpoint_enabled=self.config.metrics_endpoint_enabled,
-                    )
-                else:
-                    logger.debug(
-                        "metrics_hook_registered",
-                        namespace=self.config.namespace,
-                        pushgateway_enabled=self.config.pushgateway_enabled,
-                        metrics_endpoint_enabled=self.config.metrics_endpoint_enabled,
-                    )
+                logger.debug(
+                    "metrics_hook_registered",
+                    namespace=self.config.namespace,
+                    pushgateway_enabled=self.config.pushgateway_enabled,
+                    metrics_endpoint_enabled=self.config.metrics_endpoint_enabled,
+                )
             else:
                 logger.warning(
                     "hook_registry_not_available",

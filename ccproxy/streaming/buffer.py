@@ -4,17 +4,20 @@ This service handles the pattern where a non-streaming request needs to be conve
 internally to a streaming request, buffered, and then returned as a non-streaming response.
 """
 
+import contextlib
 import json
-import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
+from pydantic import ValidationError
 from starlette.responses import Response
 
 from ccproxy.core.plugins.hooks import HookEvent, HookManager
 from ccproxy.core.plugins.hooks.base import HookContext
+from ccproxy.llms.models import openai as openai_models
+from ccproxy.llms.streaming.accumulators import ResponsesAccumulator, StreamAccumulator
 
 
 if TYPE_CHECKING:
@@ -25,6 +28,31 @@ if TYPE_CHECKING:
 
 
 logger = structlog.get_logger(__name__)
+
+
+MAX_BODY_LOG_CHARS = 2048
+
+
+def _stringify_payload(payload: Any) -> tuple[str | None, int, bool]:
+    """Return a safe preview of request or response payloads."""
+
+    if payload is None:
+        return None, 0, False
+
+    try:
+        if isinstance(payload, bytes | bytearray | memoryview):
+            text = bytes(payload).decode("utf-8", errors="replace")
+        elif isinstance(payload, str):
+            text = payload
+        else:
+            text = json.dumps(payload, ensure_ascii=False)
+    except Exception:
+        text = str(payload)
+
+    length = len(text)
+    truncated = length > MAX_BODY_LOG_CHARS
+    preview = f"{text[:MAX_BODY_LOG_CHARS]}...[truncated]" if truncated else text
+    return preview, length, truncated
 
 
 class StreamingBufferService:
@@ -103,8 +131,45 @@ class StreamingBufferService:
             HTTPException: If streaming fails or parsing fails
         """
         try:
+            request_preview, request_size, request_truncated = _stringify_payload(body)
+            logger.info(
+                "streaming_buffer_request_received",
+                provider=provider_name,
+                method=method,
+                url=url,
+                request_id=getattr(request_context, "request_id", None),
+                body_preview=request_preview,
+                body_size=request_size,
+                body_truncated=request_truncated,
+                category="streaming",
+            )
+
             # Step 1: Transform request to enable streaming
             streaming_body = await self._transform_to_streaming_request(body)
+            transformed_preview, transformed_size, transformed_truncated = (
+                _stringify_payload(streaming_body)
+            )
+            logger.info(
+                "streaming_buffer_request_transformed",
+                provider=provider_name,
+                method=method,
+                url=url,
+                request_id=getattr(request_context, "request_id", None),
+                body_preview=transformed_preview,
+                body_size=transformed_size,
+                body_truncated=transformed_truncated,
+                body_changed=streaming_body != body,
+                category="streaming",
+            )
+
+            if handler_config.response_adapter:
+                logger.info(
+                    "streaming_buffer_response_adapter_detected",
+                    provider=provider_name,
+                    adapter_type=type(handler_config.response_adapter).__name__,
+                    request_id=getattr(request_context, "request_id", None),
+                    category="format",
+                )
 
             # Step 2: Collect and parse the stream
             (
@@ -127,6 +192,7 @@ class StreamingBufferService:
                 status_code=status_code,
                 response_headers=response_headers,
                 request_context=request_context,
+                provider_name=provider_name,
             )
 
         except Exception as e:
@@ -236,6 +302,19 @@ class StreamingBufferService:
         if request_id:
             extensions["request_id"] = request_id
 
+        body_preview, body_size, body_truncated = _stringify_payload(body)
+        logger.info(
+            "streaming_buffer_upstream_request",
+            provider=provider_name,
+            method=method,
+            url=url,
+            request_id=request_id,
+            body_preview=body_preview,
+            body_size=body_size,
+            body_truncated=body_truncated,
+            category="streaming",
+        )
+
         # Emit PROVIDER_STREAM_START hook
         if self.hook_manager:
             try:
@@ -271,6 +350,9 @@ class StreamingBufferService:
         # Get HTTP client from pool manager if available for hook-enabled client
         http_client = await self._get_http_client()
 
+        recent_buffer = bytearray()
+        completion_detected = False
+
         async with http_client.stream(
             method=method,
             url=url,
@@ -286,11 +368,20 @@ class StreamingBufferService:
             # If error status, read error body and return it
             if status_code >= 400:
                 error_body = await response.aread()
-                logger.warning(
-                    "streaming_request_error_status",
-                    status_code=status_code,
+                error_preview, error_size, error_truncated = _stringify_payload(
+                    error_body
+                )
+                logger.error(
+                    "streaming_buffer_upstream_error",
+                    provider=provider_name,
+                    method=method,
                     url=url,
-                    error_body=error_body[:500].decode("utf-8", errors="ignore"),
+                    status_code=status_code,
+                    body_preview=error_preview,
+                    body_size=error_size,
+                    body_truncated=error_truncated,
+                    request_id=request_id,
+                    category="streaming",
                 )
                 try:
                     error_data = json.loads(error_body)
@@ -303,6 +394,9 @@ class StreamingBufferService:
                 chunks.append(chunk)
                 total_chunks += 1
                 total_bytes += len(chunk)
+                recent_buffer.extend(chunk)
+                if len(recent_buffer) > 8192:
+                    del recent_buffer[:-8192]
 
                 # Emit PROVIDER_STREAM_CHUNK hook
                 if self.hook_manager:
@@ -327,6 +421,34 @@ class StreamingBufferService:
                             event="PROVIDER_STREAM_CHUNK",
                             error=str(e),
                         )
+
+                if not completion_detected and (
+                    b"response.completed" in recent_buffer
+                    or b"response.failed" in recent_buffer
+                    or b"response.incomplete" in recent_buffer
+                ):
+                    completion_detected = True
+                    logger.debug(
+                        "streaming_buffer_completion_detected",
+                        provider=provider_name,
+                        request_id=request_id,
+                        total_chunks=total_chunks,
+                        total_bytes=total_bytes,
+                        category="streaming",
+                    )
+                    break
+
+        logger.info(
+            "streaming_buffer_upstream_response",
+            provider=provider_name,
+            method=method,
+            url=url,
+            request_id=request_id,
+            status_code=status_code,
+            total_chunks=total_chunks,
+            total_bytes=total_bytes,
+            category="streaming",
+        )
 
         # Emit PROVIDER_STREAM_END hook
         if self.hook_manager:
@@ -362,14 +484,6 @@ class StreamingBufferService:
             request_context.metrics["stream_chunks"] = total_chunks
             request_context.metrics["stream_bytes"] = total_bytes
 
-        logger.debug(
-            "stream_collection_completed",
-            total_chunks=total_chunks,
-            total_bytes=total_bytes,
-            status_code=status_code,
-            request_id=request_id,
-        )
-
         # Parse the collected stream using SSE parser if available
         parsed_data = await self._parse_collected_stream(
             chunks=chunks,
@@ -377,30 +491,8 @@ class StreamingBufferService:
             request_context=request_context,
         )
 
-        # Attempt to extract usage tokens from collected SSE and merge into parsed data
-        try:
-            usage = self._extract_usage_from_chunks(chunks)
-            if usage and isinstance(parsed_data, dict):
-                # Only inject if missing or zero values
-                existing = parsed_data.get("usage") or {}
-
-                def _is_zero(v: Any) -> bool:
-                    try:
-                        return int(v) == 0
-                    except Exception:
-                        return False
-
-                if not existing or (
-                    _is_zero(existing.get("input_tokens", 0))
-                    and _is_zero(existing.get("output_tokens", 0))
-                ):
-                    parsed_data["usage"] = usage
-        except Exception as e:
-            logger.debug(
-                "usage_extraction_failed",
-                error=str(e),
-                request_id=getattr(request_context, "request_id", None),
-            )
+        if parsed_data is None:
+            raise RuntimeError("Parsed streaming response is empty")
 
         return parsed_data, status_code, response_headers
 
@@ -421,32 +513,186 @@ class StreamingBufferService:
             Parsed final response data or None if parsing fails
         """
         if not chunks:
-            logger.warning("no_chunks_collected_for_parsing")
-            return None
+            logger.error("no_chunks_collected_for_parsing")
+            raise RuntimeError("No streaming chunks were collected")
 
         # Combine all chunks into a single string
         full_content = b"".join(chunks).decode("utf-8", errors="replace")
+        content_preview, content_size, content_truncated = _stringify_payload(
+            full_content
+        )
+        logger.debug(
+            "streaming_buffer_collected_content",
+            request_id=getattr(request_context, "request_id", None),
+            content_preview=content_preview,
+            content_size=content_size,
+            content_truncated=content_truncated,
+            category="streaming",
+        )
+
+        stream_accumulator: StreamAccumulator | None = None
+        accumulator_cls = getattr(request_context, "_tool_accumulator_class", None)
+        if callable(accumulator_cls):
+            try:
+                stream_accumulator = accumulator_cls()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.debug(
+                    "stream_accumulator_init_failed",
+                    error=str(exc),
+                    request_id=getattr(request_context, "request_id", None),
+                )
+                stream_accumulator = None
+
+        if stream_accumulator:
+            self._accumulate_stream_events(
+                full_content, stream_accumulator, request_context
+            )
+
+        # Attempt to reconstruct a Responses API payload from the SSE stream
+        payloads = self._extract_sse_payloads(full_content)
+        base_response: dict[str, Any] | None = None
+        reasoning_signature: str | None = None
+        for payload in payloads:
+            if not isinstance(payload, dict):
+                continue
+            event_type = payload.get("type")
+            if isinstance(event_type, str) and stream_accumulator is not None:
+                with contextlib.suppress(Exception):
+                    stream_accumulator.accumulate(event_type, payload)
+            if event_type == "response.reasoning_summary_part.added":
+                part = payload.get("part")
+                if isinstance(part, dict):
+                    signature = part.get("text") or part.get("signature")
+                    if isinstance(signature, str):
+                        reasoning_signature = signature
+            if isinstance(payload.get("response"), dict):
+                base_response = payload["response"]
+
+        if base_response is None and payloads:
+            # Fallback to first response created event
+            for payload in payloads:
+                resp = payload.get("response") if isinstance(payload, dict) else None
+                if isinstance(resp, dict):
+                    base_response = resp
+                    break
+
+        if base_response is not None:
+            response_obj = dict(base_response)
+            response_obj.setdefault("created_at", 0)
+            response_obj.setdefault("status", "completed")
+            response_obj.setdefault("model", response_obj.get("model") or "")
+            response_obj.setdefault("output", response_obj.get("output") or {})
+            response_obj.setdefault(
+                "parallel_tool_calls", response_obj.get("parallel_tool_calls", False)
+            )
+
+            if reasoning_signature and isinstance(response_obj.get("reasoning"), dict):
+                response_obj["reasoning"].setdefault("summary", [])
+
+            accumulator_for_rebuild: ResponsesAccumulator | None = None
+            if isinstance(stream_accumulator, ResponsesAccumulator):
+                accumulator_for_rebuild = stream_accumulator
+            else:
+                accumulator_for_rebuild = ResponsesAccumulator()
+                for payload in payloads:
+                    if not isinstance(payload, dict):
+                        continue
+                    event_type = payload.get("type")
+                    if isinstance(event_type, str):
+                        with contextlib.suppress(Exception):
+                            accumulator_for_rebuild.accumulate(event_type, payload)
+
+            if accumulator_for_rebuild is not None:
+                completed_payload = accumulator_for_rebuild.get_completed_response()
+                logger.debug(
+                    "streaming_buffer_accumulator_rebuild_attempt",
+                    completed=bool(completed_payload),
+                )
+                if completed_payload is not None:
+                    response_obj = completed_payload
+                    return response_obj
+                try:
+                    response_obj = accumulator_for_rebuild.rebuild_response_object(
+                        response_obj
+                    )
+                    logger.info(
+                        "streaming_buffer_parser_strategy",
+                        strategy="accumulator_rebuild",
+                        request_id=getattr(request_context, "request_id", None),
+                        category="streaming",
+                    )
+                    with contextlib.suppress(ValidationError):
+                        typed_payload = openai_models.ResponseObject.model_validate(
+                            response_obj
+                        )
+                        logger.debug(
+                            "streaming_buffer_rebuilt_response",
+                            response=typed_payload.model_dump(),
+                            category="streaming",
+                            request_id=getattr(request_context, "request_id", None),
+                        )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.debug(
+                        "response_rebuild_failed",
+                        error=str(exc),
+                        request_id=getattr(request_context, "request_id", None),
+                    )
+
+            if not response_obj.get("usage"):
+                usage = self._extract_usage_from_chunks(chunks)
+                if usage:
+                    response_obj["usage"] = {
+                        "input_tokens": usage.get("input_tokens", 0),
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": usage.get("output_tokens", 0),
+                        "output_tokens_details": {"reasoning_tokens": 0},
+                        "total_tokens": usage.get("total_tokens", 0),
+                    }
+
+            return response_obj
 
         # Try using the configured SSE parser first
+        logger.debug(
+            "parsing_collected_stream",
+            content_preview=full_content[:200],
+            request_id=getattr(request_context, "request_id", None),
+        )
+
         if handler_config.sse_parser:
             try:
                 parsed_data = handler_config.sse_parser(full_content)
                 if parsed_data is not None:
-                    normalized_data = self._normalize_response_payload(parsed_data)
-                    if isinstance(normalized_data, dict):
-                        logger.debug(
-                            "sse_parser_success",
-                            parsed_keys=list(normalized_data.keys()),
-                            request_id=getattr(request_context, "request_id", None),
-                        )
-                        return normalized_data
-                    else:
-                        logger.warning(
-                            "sse_parser_normalized_to_non_dict",
-                            type_received=type(normalized_data).__name__,
-                            request_id=getattr(request_context, "request_id", None),
-                        )
-                        return None
+                    logger.debug(
+                        "sse_parser_success",
+                        parsed_type=type(parsed_data).__name__,
+                        request_id=getattr(request_context, "request_id", None),
+                    )
+                    logger.info(
+                        "streaming_buffer_parser_strategy",
+                        strategy="sse_parser",
+                        request_id=getattr(request_context, "request_id", None),
+                        category="streaming",
+                    )
+
+                    # Rebuild response with stream accumulator if available
+                    if stream_accumulator and isinstance(parsed_data, dict):
+                        try:
+                            parsed_data = stream_accumulator.rebuild_response_object(
+                                parsed_data
+                            )
+                            logger.debug(
+                                "response_object_rebuilt",
+                                request_id=getattr(request_context, "request_id", None),
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "response_rebuild_failed",
+                                error=str(e),
+                                request_id=getattr(request_context, "request_id", None),
+                                exc_info=e,
+                            )
+
+                    return parsed_data
                 else:
                     logger.warning(
                         "sse_parser_returned_none",
@@ -465,13 +711,21 @@ class StreamingBufferService:
         try:
             parsed_json = json.loads(full_content.strip())
             if isinstance(parsed_json, dict):
-                normalized_json = self._normalize_response_payload(parsed_json)
-                if isinstance(normalized_json, dict):
-                    return normalized_json
-                else:
-                    return {"data": parsed_json}
+                logger.info(
+                    "streaming_buffer_parser_strategy",
+                    strategy="direct_json",
+                    request_id=getattr(request_context, "request_id", None),
+                    category="streaming",
+                )
+                return parsed_json
             else:
                 # If it's not a dict, wrap it
+                logger.info(
+                    "streaming_buffer_parser_strategy",
+                    strategy="direct_json_wrapped",
+                    request_id=getattr(request_context, "request_id", None),
+                    category="streaming",
+                )
                 return {"data": parsed_json}
         except json.JSONDecodeError:
             pass
@@ -480,13 +734,13 @@ class StreamingBufferService:
         try:
             parsed_data = self._extract_from_generic_sse(full_content)
             if parsed_data is not None:
-                normalized_data = self._normalize_response_payload(parsed_data)
-                if isinstance(normalized_data, dict):
-                    logger.debug(
-                        "generic_sse_parsing_success",
-                        request_id=getattr(request_context, "request_id", None),
-                    )
-                    return normalized_data
+                logger.info(
+                    "streaming_buffer_parser_strategy",
+                    strategy="generic_sse",
+                    request_id=getattr(request_context, "request_id", None),
+                    category="streaming",
+                )
+                return parsed_data
         except Exception as e:
             logger.debug(
                 "generic_sse_parsing_failed",
@@ -494,17 +748,35 @@ class StreamingBufferService:
                 request_id=getattr(request_context, "request_id", None),
             )
 
-        # If all parsing fails, return the raw content as error
-        logger.warning(
-            "stream_parsing_failed_returning_raw",
+        logger.error(
+            "stream_parsing_failed",
             content_preview=full_content[:200],
             request_id=getattr(request_context, "request_id", None),
+            category="streaming",
         )
+        raise RuntimeError("Failed to parse streaming response")
 
-        return {
-            "error": "Failed to parse streaming response",
-            "raw_content": full_content[:1000],  # Truncate for safety
-        }
+    @staticmethod
+    def _extract_sse_payloads(content: str) -> list[dict[str, Any]]:
+        """Extract JSON payloads from a raw SSE buffer."""
+
+        payloads: list[dict[str, Any]] = []
+        current: list[str] = []
+        for line in content.splitlines():
+            if line.startswith("data: "):
+                current.append(line[6:])
+            elif line.strip() == "" and current:
+                payload = "".join(current)
+                if payload and payload != "[DONE]":
+                    with contextlib.suppress(json.JSONDecodeError):
+                        payloads.append(json.loads(payload))
+                current = []
+        if current:
+            payload = "".join(current)
+            if payload and payload != "[DONE]":
+                with contextlib.suppress(json.JSONDecodeError):
+                    payloads.append(json.loads(payload))
+        return payloads
 
     def _extract_from_generic_sse(self, content: str) -> dict[str, Any] | None:
         """Extract final JSON from generic SSE format.
@@ -541,15 +813,76 @@ class StreamingBufferService:
         if isinstance(last_json_data, dict) and "response" in last_json_data:
             response_payload = last_json_data["response"]
             if isinstance(response_payload, dict):
-                normalized_payload = self._normalize_response_payload(response_payload)
-                if isinstance(normalized_payload, dict):
-                    return normalized_payload
+                return response_payload
 
-        normalized_data = self._normalize_response_payload(last_json_data)
-        if isinstance(normalized_data, dict):
-            return normalized_data
+        if isinstance(last_json_data, dict):
+            return last_json_data
 
         return None
+
+    @staticmethod
+    def _accumulate_stream_events(
+        full_content: str,
+        accumulator: StreamAccumulator,
+        request_context: "RequestContext",
+    ) -> None:
+        """Feed SSE events from the buffered content into the stream accumulator."""
+
+        events = full_content.split("\n\n")
+        for event in events:
+            event = event.strip()
+            if not event:
+                continue
+
+            event_name = ""
+            data_lines: list[str] = []
+            for raw_line in event.split("\n"):
+                line = raw_line.strip()
+                if line.startswith("event:"):
+                    event_name = line[6:].strip()
+                elif line.startswith("data:"):
+                    payload = line[5:].lstrip()
+                    if payload == "[DONE]":
+                        data_lines = []
+                        break
+                    data_lines.append(payload)
+
+            if not data_lines:
+                continue
+
+            try:
+                event_data = json.loads("\n".join(data_lines))
+            except json.JSONDecodeError:
+                continue
+
+            try:
+                accumulator.accumulate(event_name, event_data)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.debug(
+                    "tool_accumulator_accumulate_failed",
+                    error=str(exc),
+                    event_name=event_name,
+                    request_id=getattr(request_context, "request_id", None),
+                )
+
+        try:
+            # Store tool calls in request context metadata
+            tool_calls = accumulator.get_complete_tool_calls()
+            if tool_calls:
+                existing = request_context.metadata.get("tool_calls")
+                if isinstance(existing, list):
+                    existing.extend(tool_calls)
+                else:
+                    request_context.metadata["tool_calls"] = tool_calls
+
+            # Also store the accumulator itself for potential later use
+            request_context.metadata["stream_accumulator"] = accumulator
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug(
+                "tool_accumulator_finalize_failed",
+                error=str(exc),
+                request_id=getattr(request_context, "request_id", None),
+            )
 
     def _extract_usage_from_chunks(self, chunks: list[bytes]) -> dict[str, int] | None:
         """Extract token usage from SSE chunks and normalize to Response API shape.
@@ -620,139 +953,13 @@ class StreamingBufferService:
             or ((input_tokens or 0) + (output_tokens or 0)),
         }
 
-    def _normalize_response_payload(self, data: Any) -> Any:
-        """Normalize Response API style payloads for downstream adapters.
-
-        Ensures the structure conforms to `ResponseObject` expectations by
-        filtering/transforming output items and filling required usage fields.
-        """
-        if not isinstance(data, dict):
-            return data
-
-        target = data
-        if "response" in data and isinstance(data["response"], dict):
-            target = data["response"]
-
-        outputs = target.get("output")
-        normalized_outputs: list[dict[str, Any]] = []
-        if isinstance(outputs, list):
-            for item in outputs:
-                if not isinstance(item, dict):
-                    continue
-
-                item_type = item.get("type")
-                if item_type == "message":
-                    normalized_outputs.append(self._normalize_message_output(item))
-                elif item_type == "reasoning":
-                    summary = item.get("summary") or []
-                    texts: list[str] = []
-                    for part in summary:
-                        if isinstance(part, dict):
-                            text = part.get("text") or ""
-                            if text:
-                                texts.append(text)
-                    if texts:
-                        normalized_outputs.append(
-                            {
-                                "type": "message",
-                                "id": item.get("id", "msg_reasoning"),
-                                "status": item.get("status", "completed"),
-                                "role": "assistant",
-                                "content": [
-                                    {
-                                        "type": "output_text",
-                                        "text": " ".join(texts),
-                                    }
-                                ],
-                            }
-                        )
-
-        if normalized_outputs:
-            target["output"] = normalized_outputs
-        elif isinstance(outputs, list) and outputs:
-            # Fallback: ensure at least one assistant message exists
-            target["output"] = [
-                {
-                    "type": "message",
-                    "id": target.get("id", "msg_unnormalized"),
-                    "status": "completed",
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "output_text",
-                            "text": "",
-                        }
-                    ],
-                }
-            ]
-
-        # Ensure required top-level fields exist
-        target.setdefault("object", "response")
-        target.setdefault("status", "completed")
-        target.setdefault("parallel_tool_calls", False)
-        target.setdefault("created_at", int(time.time()))
-        target.setdefault("id", data.get("id", target.get("id", "resp-buffered")))
-        target.setdefault("model", data.get("model", target.get("model", "")))
-
-        usage = target.get("usage")
-        if isinstance(usage, dict):
-            if "input_tokens" not in usage:
-                usage["input_tokens"] = int(usage.get("prompt_tokens", 0) or 0)
-            if "output_tokens" not in usage:
-                usage["output_tokens"] = int(usage.get("completion_tokens", 0) or 0)
-            usage.setdefault(
-                "total_tokens",
-                usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
-            )
-            usage.setdefault("input_tokens_details", {"cached_tokens": 0})
-            usage.setdefault("output_tokens_details", {"reasoning_tokens": 0})
-        else:
-            target.setdefault(
-                "usage",
-                {
-                    "input_tokens": 0,
-                    "input_tokens_details": {"cached_tokens": 0},
-                    "output_tokens": 0,
-                    "output_tokens_details": {"reasoning_tokens": 0},
-                    "total_tokens": 0,
-                },
-            )
-
-        return target
-
-    def _normalize_message_output(self, item: dict[str, Any]) -> dict[str, Any]:
-        """Normalize a message output item to Response API expectations."""
-        normalized = dict(item)
-        normalized["type"] = "message"
-        normalized.setdefault("status", "completed")
-        normalized.setdefault("role", "assistant")
-
-        content = normalized.get("content")
-        if isinstance(content, list):
-            fixed_content = []
-            for part in content:
-                if isinstance(part, dict) and part.get("type") == "output_text":
-                    text = part.get("text") or ""
-                    fixed_content.append({"type": "output_text", "text": text})
-                elif isinstance(part, str):
-                    fixed_content.append({"type": "output_text", "text": part})
-            normalized["content"] = fixed_content or [
-                {"type": "output_text", "text": ""}
-            ]
-        elif isinstance(content, str):
-            normalized["content"] = [{"type": "output_text", "text": content}]
-        else:
-            normalized["content"] = [{"type": "output_text", "text": ""}]
-
-        normalized.setdefault("id", item.get("id", "msg_assistant"))
-        return normalized
-
     async def _build_non_streaming_response(
         self,
         final_data: dict[str, Any] | None,
         status_code: int,
         response_headers: dict[str, str],
         request_context: "RequestContext",
+        provider_name: str,
     ) -> Response:
         """Build the final non-streaming response.
 
@@ -769,10 +976,18 @@ class StreamingBufferService:
         """
         # Prepare response content
         if final_data is None:
-            final_data = {"error": "No data could be extracted from streaming response"}
-            status_code = status_code if status_code >= 400 else 500
+            logger.error(
+                "streaming_buffer_empty_final_data",
+                provider=provider_name,
+                request_id=getattr(request_context, "request_id", None),
+                category="streaming",
+            )
+            raise RuntimeError("No data could be extracted from streaming response")
 
         response_content = json.dumps(final_data).encode("utf-8")
+        response_preview, response_size, response_truncated = _stringify_payload(
+            final_data
+        )
 
         # Prepare response headers
         final_headers = {}
@@ -807,6 +1022,17 @@ class StreamingBufferService:
             content_length=len(response_content),
             data_keys=list(final_data.keys()) if isinstance(final_data, dict) else None,
             request_id=request_id,
+        )
+
+        logger.info(
+            "streaming_buffer_response_ready",
+            provider=provider_name,
+            status_code=status_code,
+            request_id=request_id,
+            body_preview=response_preview,
+            body_size=response_size,
+            body_truncated=response_truncated,
+            category="streaming",
         )
 
         # Create response - Starlette will automatically add Content-Length

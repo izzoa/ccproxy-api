@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request, Response
 from ccproxy.config.settings import Settings
 from ccproxy.config.utils import get_ccproxy_cache_dir
 from ccproxy.core.logging import get_plugin_logger
+from ccproxy.models.detection import DetectedHeaders, DetectedPrompts
 from ccproxy.services.cli_detection import CLIDetectionService
 from ccproxy.utils.caching import async_ttl_cache
 from ccproxy.utils.headers import extract_request_headers
@@ -120,6 +121,32 @@ class ClaudeAPIDetectionService:
     def get_cached_data(self) -> ClaudeCacheData | None:
         """Get currently cached detection data."""
         return self._cached_data
+
+    def get_detected_headers(self) -> DetectedHeaders:
+        """Return cached headers as structured data."""
+
+        data = self.get_cached_data()
+        if not data:
+            return DetectedHeaders()
+        return data.headers
+
+    def get_detected_prompts(self) -> DetectedPrompts:
+        """Return cached prompt metadata as structured data."""
+
+        data = self.get_cached_data()
+        if not data:
+            return DetectedPrompts()
+        return data.prompts
+
+    def get_ignored_headers(self) -> list[str]:
+        """Headers that should be ignored when injecting CLI values."""
+
+        return list(self.ignores_header)
+
+    def get_redacted_headers(self) -> list[str]:
+        """Headers that must never be forwarded from detection cache."""
+
+        return list(self.redact_headers)
 
     def get_cli_health_info(self) -> ClaudeCliInfo:
         """Get lightweight CLI health info using centralized detection, cached locally.
@@ -287,9 +314,12 @@ class ClaudeAPIDetectionService:
                 else captured_data.get("body_json")
             )
 
+            prompts = DetectedPrompts.from_body(body_json)
+
             return ClaudeCacheData(
                 claude_version=version,
-                headers=headers_dict,
+                headers=DetectedHeaders(headers_dict),
+                prompts=prompts,
                 body_json=body_json,
                 method=captured_data.get("method"),
                 url=captured_data.get("url"),
@@ -380,22 +410,11 @@ class ClaudeAPIDetectionService:
         # For Claude, no specific fields to redact currently; return as-is
         return body
 
-    def get_system_prompt(self, mode: str = "minimal") -> dict[str, Any]:
-        """Return a system prompt dict for injection based on cached body_json.
+    def get_system_prompt(self, mode: str | None = "minimal") -> dict[str, Any]:
+        """Return a system prompt dict for injection based on cached prompts.
 
         mode: "none", "minimal", or "full"
         """
-        data = self.get_cached_data()
-        if not data or not data.body_json:
-            return {}
-        system_value = data.body_json.get("system")
-        if system_value is None:
-            return {}
-        if mode == "none":
-            return {}
-        if mode == "minimal" and isinstance(system_value, list):
-            if len(system_value) > 0:
-                return {"system": [system_value[0]]}
-            return {}
-        # full or non-list
-        return {"system": system_value}
+        prompts = self.get_detected_prompts()
+        mode_value = "full" if mode is None else mode
+        return prompts.system_payload(mode=mode_value)

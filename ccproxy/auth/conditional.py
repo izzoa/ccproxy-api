@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from ccproxy.api.dependencies import SettingsDep
+from ccproxy.api.dependencies import OptionalSettingsDep
 from ccproxy.auth.bearer import BearerTokenAuthManager
 from ccproxy.auth.exceptions import AuthenticationError
 from ccproxy.auth.manager import AuthManager
@@ -17,7 +17,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 async def get_conditional_auth_manager(
     request: Request,
-    settings: SettingsDep,
+    settings: OptionalSettingsDep,
     credentials: Annotated[
         HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
     ] = None,

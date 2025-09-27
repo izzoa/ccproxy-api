@@ -12,7 +12,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     pass
 
-from ccproxy.api.dependencies import SettingsDep
+from ccproxy.api.dependencies import OptionalSettingsDep
 from ccproxy.auth.conditional import ConditionalAuthDep
 from ccproxy.core.errors import (
     PermissionAlreadyResolvedError,
@@ -111,7 +111,7 @@ async def event_generator(
 @router.get("/stream")
 async def stream_permissions(
     request: Request,
-    settings: SettingsDep,
+    settings: OptionalSettingsDep,
     auth: ConditionalAuthDep,
 ) -> Any:
     """Stream permission requests via Server-Sent Events.
@@ -133,7 +133,7 @@ async def stream_permissions(
 @router.get("/{permission_id}")
 async def get_permission(
     permission_id: str,
-    settings: SettingsDep,
+    settings: OptionalSettingsDep,
     auth: ConditionalAuthDep,
 ) -> PermissionRequestInfo:
     """Get information about a specific permission request.
@@ -172,7 +172,7 @@ async def get_permission(
 async def respond_to_permission(
     permission_id: str,
     response: PermissionResponse,
-    settings: SettingsDep,
+    settings: OptionalSettingsDep,
     auth: ConditionalAuthDep,
 ) -> dict[str, str | bool]:
     """Submit a response to a permission request.

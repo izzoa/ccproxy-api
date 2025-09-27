@@ -6,19 +6,22 @@ and dynamically load their factories.
 
 import importlib
 import importlib.util
+import logging
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 
 import structlog
 
+from ccproxy.config import Settings
+
 
 try:
     # Python 3.10+
     from importlib.metadata import EntryPoint, entry_points
-except Exception:  # pragma: no cover
-    # Fallback for very old environments
-    entry_points = None  # type: ignore
-    EntryPoint = Any  # type: ignore
+except ImportError:  # pragma: no cover
+    entry_points = None  # type: ignore[assignment]
+    EntryPoint = Any  # type: ignore[misc,assignment]
 
 from .interfaces import PluginFactory
 
@@ -26,16 +29,54 @@ from .interfaces import PluginFactory
 logger = structlog.get_logger(__name__)
 
 
+def _get_logger(context: str, plugin_name: str | None = None) -> Any:
+    """Return a structlog logger bound with shared plugin metadata."""
+
+    bound = logger.bind(type=context, category="plugin")
+    if plugin_name:
+        bound = bound.bind(name=plugin_name)
+    return bound
+
+
+def _log_missing_dependency(
+    *, plugin_name: str, error: ModuleNotFoundError, context: str
+) -> None:
+    """Log a structured warning for a missing plugin dependency."""
+
+    missing_dependency = getattr(error, "name", None)
+    if not missing_dependency:
+        missing_dependency = str(error).removeprefix("No module named ").strip("'\"")
+
+    event_name = "plugin_dependency_missing"
+    log_payload = {"dependency": missing_dependency, "details": context}
+
+    _get_logger(context=context, plugin_name=plugin_name).warning(
+        event_name,
+        **log_payload,
+    )
+
+    logging.warning("%s %s", event_name, log_payload)
+
+
 class PluginDiscovery:
     """Discovers and loads plugins from the filesystem."""
 
-    def __init__(self, plugins_dir: Path):
+    def __init__(self, plugins_dirs: Iterable[Path]):
         """Initialize plugin discovery.
 
         Args:
-            plugins_dir: Directory containing plugin packages
+            plugins_dirs: Ordered directories containing plugin packages
         """
-        self.plugins_dir = plugins_dir
+        seen: set[Path] = set()
+        ordered: list[Path] = []
+        for directory in plugins_dirs:
+            path = Path(directory)
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            ordered.append(path)
+        self.plugin_dirs = ordered
         self.discovered_plugins: dict[str, Path] = {}
 
     def discover_plugins(self) -> dict[str, Path]:
@@ -46,38 +87,53 @@ class PluginDiscovery:
         """
         self.discovered_plugins.clear()
 
-        if not self.plugins_dir.exists():
-            logger.warning(
-                "plugins_directory_not_found",
-                path=str(self.plugins_dir),
-                category="plugin",
-            )
-            return {}
+        logger_fs = _get_logger("filesystem")
+        discovered: list[str] = []
+        missing_dirs: list[str] = []
 
-        # Collect all plugin discoveries first
-        discovered = []
-        for item in self.plugins_dir.iterdir():
-            if item.is_dir() and not item.name.startswith("_"):
-                # Check for plugin.py file
+        for base_dir in self.plugin_dirs:
+            if not base_dir.exists():
+                missing_dirs.append(str(base_dir))
+                continue
+
+            for item in sorted(base_dir.iterdir()):
+                if not item.is_dir() or item.name.startswith("_"):
+                    continue
+
                 plugin_file = item / "plugin.py"
-                if plugin_file.exists():
-                    self.discovered_plugins[item.name] = plugin_file
-                    discovered.append(item.name)
-                    # Log individual discoveries at TRACE level
-                    if hasattr(logger, "trace"):
-                        logger.trace(
-                            "plugin_found",
-                            name=item.name,
-                            path=str(plugin_file),
-                            category="plugin",
-                        )
+                if not plugin_file.exists():
+                    continue
+
+                if item.name in self.discovered_plugins:
+                    _get_logger("filesystem", item.name).debug(
+                        "plugin_duplicate_ignored",
+                        original=str(self.discovered_plugins[item.name]),
+                        ignored=str(plugin_file),
+                    )
+                    continue
+
+                self.discovered_plugins[item.name] = plugin_file
+                discovered.append(item.name)
+
+                plugin_logger = _get_logger("filesystem", item.name)
+                plugin_trace = getattr(plugin_logger, "trace", plugin_logger.debug)
+                plugin_trace(
+                    "plugin_found",
+                    path=str(plugin_file),
+                )
+
+        if missing_dirs:
+            logger_fs.warning(
+                "plugins_directories_missing",
+                paths=missing_dirs,
+            )
 
         # Single consolidated log for all discoveries
-        logger.info(
+        logger_fs.info(
             "plugins_discovered",
             count=len(discovered),
             names=discovered if discovered else [],
-            category="plugin",
+            directories=[str(path) for path in self.plugin_dirs],
         )
         return self.discovered_plugins
 
@@ -90,8 +146,9 @@ class PluginDiscovery:
         Returns:
             Plugin factory or None if not found or failed to load
         """
+        logger_fs = _get_logger("filesystem", name)
         if name not in self.discovered_plugins:
-            logger.warning("plugin_not_discovered", name=name, category="plugin")
+            logger_fs.warning("plugin_not_discovered")
             return None
 
         plugin_path = self.discovered_plugins[name]
@@ -103,9 +160,7 @@ class PluginDiscovery:
             )
 
             if not spec or not spec.loader:
-                logger.error(
-                    "plugin_spec_creation_failed", name=name, category="plugin"
-                )
+                logger_fs.error("plugin_spec_creation_failed")
                 return None
 
             module = importlib.util.module_from_spec(spec)
@@ -113,68 +168,80 @@ class PluginDiscovery:
 
             # Get the factory from the module
             if not hasattr(module, "factory"):
-                logger.error(
+                logger_fs.error(
                     "plugin_factory_not_found",
-                    name=name,
                     msg="Module must export 'factory' variable",
-                    category="plugin",
                 )
                 return None
 
             factory = module.factory
 
             if not isinstance(factory, PluginFactory):
-                logger.error(
+                logger_fs.error(
                     "plugin_factory_invalid_type",
-                    name=name,
                     type=type(factory).__name__,
-                    category="plugin",
                 )
                 return None
 
-            # logger.debug(
-            #     "plugin_factory_loaded",
-            #     name=name,
-            #     version=factory.get_manifest().version,
-            #     category="plugin",
-            # )
+            trace_logger = getattr(logger_fs, "trace", logger_fs.debug)
+            trace_logger(
+                "plugin_factory_loaded",
+                version=factory.get_manifest().version,
+            )
 
             return factory
 
+        except ModuleNotFoundError as exc:
+            _log_missing_dependency(
+                plugin_name=name,
+                error=exc,
+                context="filesystem",
+            )
+            return None
         except Exception as e:
-            logger.error(
+            logger_fs.error(
                 "plugin_load_failed",
-                name=name,
                 error=str(e),
                 exc_info=e,
-                category="plugin",
             )
             return None
 
-    def load_all_factories(self) -> dict[str, PluginFactory]:
+    def load_all_factories(
+        self, plugin_filter: "PluginFilter | None" = None
+    ) -> dict[str, PluginFactory]:
         """Load all discovered plugin factories.
 
         Returns:
             Dictionary mapping plugin names to their factories
         """
+        logger_fs = _get_logger("filesystem")
         factories: dict[str, PluginFactory] = {}
 
+        skipped_names: list[str] = []
+
         for name in self.discovered_plugins:
+            if plugin_filter and not plugin_filter.is_enabled(name):
+                skipped_names.append(name)
+                continue
             factory = self.load_plugin_factory(name)
             if factory:
                 factories[name] = factory
 
-        logger.info(
+        if skipped_names:
+            logger_fs.info("plugin_skipped_before_load", names=skipped_names)
+
+        logger_fs.info(
             "plugin_factories_loaded",
             count=len(factories),
             names=list(factories.keys()),
-            category="plugin",
         )
 
         return factories
 
     def load_entry_point_factories(
-        self, skip_names: set[str] | None = None
+        self,
+        skip_names: set[str] | None = None,
+        plugin_filter: "PluginFilter | None" = None,
     ) -> dict[str, PluginFactory]:
         """Load plugin factories from installed entry points.
 
@@ -182,8 +249,9 @@ class PluginDiscovery:
             Dictionary mapping plugin names to their factories
         """
         factories: dict[str, PluginFactory] = {}
+        logger_ep = _get_logger("entrypoint")
         if entry_points is None:
-            logger.debug("entry_points_not_available", category="plugin")
+            logger_ep.debug("entry_points_not_available")
             return factories
 
         try:
@@ -196,36 +264,41 @@ class PluginDiscovery:
                 eps = list(groups.get("ccproxy.plugins", []))
 
             skip_logged: set[str] = set()
+            filtered_skipped: list[str] = []
             for ep in eps:
                 name = ep.name
                 # Skip entry points that collide with existing filesystem plugins
                 if skip_names and name in skip_names:
                     if name not in skip_logged:
-                        logger.debug(
-                            "entry_point_skipped_preexisting_filesystem",
-                            name=name,
-                            category="plugin",
+                        _get_logger("entrypoint", name).debug(
+                            "entry_point_skipped_preexisting_filesystem"
                         )
                         skip_logged.add(name)
                     continue
                 # Skip duplicates within entry points themselves
                 if name in factories:
                     if name not in skip_logged:
-                        logger.debug(
-                            "entry_point_duplicate_ignored",
-                            name=name,
-                            category="plugin",
+                        _get_logger("entrypoint", name).debug(
+                            "entry_point_duplicate_ignored"
                         )
                         skip_logged.add(name)
+                    continue
+                if plugin_filter and not plugin_filter.is_enabled(name):
+                    filtered_skipped.append(name)
                     continue
                 try:
                     # Primary load
                     obj = ep.load()
+                except ModuleNotFoundError as exc:
+                    _log_missing_dependency(
+                        plugin_name=name,
+                        error=exc,
+                        context="entrypoint",
+                    )
+                    continue
                 except Exception as e:
                     # Fallback: import module and get 'factory'
                     try:
-                        import importlib
-
                         module_name = getattr(ep, "module", None)
                         if not module_name:
                             value = getattr(ep, "value", "")
@@ -237,13 +310,16 @@ class PluginDiscovery:
                             obj = mod.factory
                         else:
                             raise e
+                    except ModuleNotFoundError as exc2:
+                        _log_missing_dependency(
+                            plugin_name=name,
+                            error=exc2,
+                            context="entrypoint_fallback",
+                        )
+                        continue
                     except Exception as e2:
-                        logger.error(
-                            "entry_point_load_failed",
-                            name=name,
-                            error=str(e2),
-                            exc_info=e2,
-                            category="plugin",
+                        _get_logger("entrypoint", name).error(
+                            "entry_point_load_failed", error=str(e2), exc_info=e2
                         )
                         continue
 
@@ -264,11 +340,8 @@ class PluginDiscovery:
                         factory = None
 
                 if not factory:
-                    logger.warning(
-                        "entry_point_not_factory",
-                        name=name,
-                        obj_type=type(obj).__name__,
-                        category="plugin",
+                    _get_logger("entrypoint", name).warning(
+                        "entry_point_not_factory", obj_type=type(obj).__name__
                     )
                     continue
 
@@ -279,8 +352,11 @@ class PluginDiscovery:
                 #     version=factory.get_manifest().version,
                 #     category="plugin",
                 # )
+
+            if filtered_skipped:
+                logger_ep.info("plugin_skipped_before_load", names=filtered_skipped)
         except Exception as e:  # pragma: no cover
-            logger.error("entry_points_enumeration_failed", error=str(e), exc_info=e)
+            logger_ep.error("entry_points_enumeration_failed", error=str(e), exc_info=e)
         return factories
 
 
@@ -356,18 +432,19 @@ class PluginFilter:
         Returns:
             Filtered factories
         """
+        logger_filter = _get_logger("filter")
         filtered = {}
 
         for name, factory in factories.items():
             if self.is_enabled(name):
                 filtered[name] = factory
             else:
-                logger.info("plugin_disabled", name=name, category="plugin")
+                _get_logger("filter", name).info("plugin_disabled")
 
         return filtered
 
 
-def discover_and_load_plugins(settings: Any) -> dict[str, PluginFactory]:
+def discover_and_load_plugins(settings: Settings) -> dict[str, PluginFactory]:
     """Discover and load all configured plugins.
 
     Args:
@@ -376,58 +453,56 @@ def discover_and_load_plugins(settings: Any) -> dict[str, PluginFactory]:
     Returns:
         Dictionary of loaded plugin factories
     """
-    # Get plugins directory - go up to project root then to ccproxy/plugins/
-    plugins_dir = Path(__file__).parent.parent.parent / "plugins"
+    plugin_dirs: list[Path]
+    # if len(settings.plugin_discovery.directories) > 0:
+    plugin_dirs = [Path(path) for path in settings.plugin_discovery.directories]
+    # else:
+    # plugin_dirs = [Path(__file__).parent.parent.parent / "plugins"]
+
+    logger_mgr = _get_logger("manager")
+
+    logger_mgr.debug(
+        "plugin_filesystem_directories",
+        directories=[str(path) for path in plugin_dirs],
+    )
 
     # Discover plugins
-    discovery = PluginDiscovery(plugins_dir)
+    discovery = PluginDiscovery(plugin_dirs)
 
-    # Determine whether to use local filesystem discovery
-    disable_local = bool(getattr(settings, "plugins_disable_local_discovery", False))
-    if disable_local:
-        logger.info(
-            "plugins_local_discovery_disabled",
-            category="plugin",
-            reason="settings.plugins_disable_local_discovery",
-        )
-
-    all_factories: dict[str, PluginFactory] = {}
-    if not disable_local:
-        discovery.discover_plugins()
-        # Load factories from local filesystem
-        all_factories = discovery.load_all_factories()
-
-    # Load factories from installed entry points and merge. If local discovery
-    # is disabled, do not skip any names.
-    ep_factories = discovery.load_entry_point_factories(
-        skip_names=set(all_factories.keys()) if not disable_local else None
-    )
-    for name, factory in ep_factories.items():
-        if name in all_factories:
-            logger.debug(
-                "entry_point_factory_ignored",
-                name=name,
-                reason="filesystem_plugin_with_same_name",
-                category="plugin",
-            )
-            continue
-        all_factories[name] = factory
-
-    # Filter based on settings
     filter_config = PluginFilter(
         enabled_plugins=getattr(settings, "enabled_plugins", None),
         disabled_plugins=getattr(settings, "disabled_plugins", None),
         settings=settings,
     )
 
+    # Determine whether to use local filesystem discovery
+    if settings.plugins_disable_local_discovery:
+        logger_mgr.info(
+            "plugins_local_discovery_disabled",
+            reason="settings.plugins_disable_local_discovery",
+        )
+
+    # Load entry point plugins first so filesystem plugins can override them.
+    all_factories: dict[str, PluginFactory] = discovery.load_entry_point_factories(
+        plugin_filter=filter_config
+    )
+
+    if not settings.plugins_disable_local_discovery:
+        discovery.discover_plugins()
+        filesystem_factories = discovery.load_all_factories(plugin_filter=filter_config)
+
+        for name, factory in filesystem_factories.items():
+            if name in all_factories:
+                _get_logger("manager", name).debug("plugin_filesystem_override")
+            all_factories[name] = factory
+
     filtered_factories = filter_config.filter_factories(all_factories)
 
-    logger.info(
+    logger_mgr.info(
         "plugins_ready",
         discovered=len(all_factories),
         enabled=len(filtered_factories),
         names=list(filtered_factories.keys()),
-        category="plugin",
     )
 
     return filtered_factories

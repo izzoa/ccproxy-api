@@ -93,24 +93,3 @@ class PricingData(RootModel[dict[str, ModelPricing]]):
     def model_names(self) -> list[str]:
         """Get list of all model names."""
         return list(self.root.keys())
-
-    def to_dict(self) -> dict[str, dict[str, Decimal]]:
-        """Convert to legacy dict format for backward compatibility."""
-        return {
-            model_name: {
-                "input": pricing.input,
-                "output": pricing.output,
-                "cache_read": pricing.cache_read,
-                "cache_write": pricing.cache_write,
-            }
-            for model_name, pricing in self.root.items()
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, dict[str, Any]]) -> "PricingData":
-        """Create PricingData from legacy dict format."""
-        models = {
-            model_name: ModelPricing(**pricing_dict)
-            for model_name, pricing_dict in data.items()
-        }
-        return cls(root=models)

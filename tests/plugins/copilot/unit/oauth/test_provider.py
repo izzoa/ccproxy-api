@@ -282,26 +282,53 @@ class TestCopilotOAuthProvider:
         """Test successful user profile retrieval."""
         oauth_provider.storage.load_credentials.return_value = mock_credentials
 
-        mock_profile = CopilotProfileInfo(
+        mock_profile = StandardProfileFields(
             account_id="12345",
             provider_type="copilot",
-            login="testuser",
-            name="Test User",
             email="test@example.com",
+            display_name="Test User",
         )
 
         with patch.object(
-            oauth_provider.client, "get_user_profile", new_callable=AsyncMock
+            oauth_provider.client, "get_standard_profile", new_callable=AsyncMock
         ) as mock_client:
             mock_client.return_value = mock_profile
 
-            result = await oauth_provider.get_user_profile("test-token")
+            result = await oauth_provider.get_user_profile()
 
             assert isinstance(result, StandardProfileFields)
             assert result.account_id == "12345"
             assert result.provider_type == "copilot"
             assert result.email == "test@example.com"
             assert result.display_name == "Test User"
+            mock_client.assert_awaited_once_with(mock_credentials.oauth_token)
+
+    async def test_get_user_profile_with_access_token(
+        self,
+        oauth_provider: CopilotOAuthProvider,
+    ) -> None:
+        """Test that providing an explicit access token bypasses storage."""
+
+        mock_profile = StandardProfileFields(
+            account_id="abc",
+            provider_type="copilot",
+            email="user@example.com",
+            display_name="Test User",
+        )
+
+        with patch.object(
+            oauth_provider.client, "get_standard_profile", new_callable=AsyncMock
+        ) as mock_client:
+            mock_client.return_value = mock_profile
+
+            result = await oauth_provider.get_user_profile("explicit-token")
+
+            assert result is mock_profile
+            mock_client.assert_awaited_once()
+            args, _ = mock_client.await_args
+            assert isinstance(args[0], CopilotOAuthToken)
+            assert args[0].access_token.get_secret_value() == "explicit-token"
+            oauth_provider.storage.load_credentials.assert_not_awaited()
 
     async def test_get_user_profile_no_credentials(
         self, oauth_provider: CopilotOAuthProvider
@@ -310,7 +337,7 @@ class TestCopilotOAuthProvider:
         oauth_provider.storage.load_credentials.return_value = None
 
         with pytest.raises(ValueError, match="No credentials found"):
-            await oauth_provider.get_user_profile("test-token")
+            await oauth_provider.get_user_profile()
 
     async def test_get_token_info_success(
         self,

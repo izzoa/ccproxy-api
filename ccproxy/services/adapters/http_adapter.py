@@ -1,6 +1,7 @@
 import contextlib
 import json
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
@@ -16,6 +17,11 @@ from ccproxy.services.handler_config import HandlerConfig
 from ccproxy.streaming import DeferredStreaming
 from ccproxy.streaming.handler import StreamingHandler
 from ccproxy.utils.headers import extract_request_headers, filter_response_headers
+from ccproxy.utils.model_mapper import (
+    ModelMapper,
+    add_model_alias,
+    restore_model_aliases,
+)
 
 
 logger = get_plugin_logger()
@@ -39,6 +45,7 @@ class BaseHTTPAdapter(BaseAdapter):
         self.streaming_handler = streaming_handler
         self.format_registry = kwargs.get("format_registry")
         self.context = kwargs.get("context")
+        self.model_mapper = kwargs.get("model_mapper")
 
         logger.debug(
             "base_http_adapter_initialized",
@@ -53,12 +60,17 @@ class BaseHTTPAdapter(BaseAdapter):
 
         # Get context from middleware (already initialized)
         ctx = request.state.context
+        self._ensure_tool_accumulator(ctx)
 
         # Step 1: Extract request data
         body = await request.body()
+        body = self._map_request_model(ctx, body)
         headers = extract_request_headers(request)
         method = request.method
         endpoint = ctx.metadata.get("endpoint", "")
+
+        # Fail fast if a format chain is configured without a registry
+        self._ensure_format_registry(ctx.format_chain, endpoint)
 
         # Extra debug breadcrumbs to confirm code path and detection inputs
         logger.debug(
@@ -81,9 +93,10 @@ class BaseHTTPAdapter(BaseAdapter):
             )
             # Detect streaming via Accept header and/or body flag stream:true
             body_wants_stream = False
+            parsed_payload: dict[str, Any] | None = None
             try:
-                parsed = json.loads(body.decode()) if body else {}
-                body_wants_stream = bool(parsed.get("stream", False))
+                parsed_payload = json.loads(body.decode()) if body else {}
+                body_wants_stream = bool(parsed_payload.get("stream", False))
             except Exception:
                 body_wants_stream = False
             header_wants_stream = self.streaming_handler.should_stream_response(headers)
@@ -105,6 +118,8 @@ class BaseHTTPAdapter(BaseAdapter):
                     ),
                     category="stream_detection",
                 )
+                if isinstance(parsed_payload, dict):
+                    self._record_tool_definitions(ctx, parsed_payload)
                 return await self.handle_streaming(request, endpoint)
             else:
                 logger.debug(
@@ -136,6 +151,8 @@ class BaseHTTPAdapter(BaseAdapter):
                     },
                 )
 
+            self._record_tool_definitions(ctx, request_payload)
+
             try:
                 logger.debug(
                     "format_chain_request_about_to_convert",
@@ -156,6 +173,14 @@ class BaseHTTPAdapter(BaseAdapter):
                     keys=list(request_payload.keys()),
                     size_bytes=len(body),
                     category="transform",
+                )
+                logger.info(
+                    "format_chain_applied",
+                    stage="request",
+                    endpoint=endpoint,
+                    chain=ctx.format_chain,
+                    steps=len(ctx.format_chain) - 1,
+                    category="format",
                 )
             except Exception as e:
                 logger.error(
@@ -219,6 +244,13 @@ class BaseHTTPAdapter(BaseAdapter):
             )
         elif isinstance(response, Response):
             logger.debug("process_provider_response")
+            response = self._restore_model_response(response, ctx)
+
+            # httpx has already decoded provider payloads, so strip encoding
+            # headers that no longer match the body we forward to clients.
+            for header in ("content-encoding", "transfer-encoding", "content-length"):
+                with contextlib.suppress(KeyError):
+                    del response.headers[header]
             if ctx.format_chain and len(ctx.format_chain) > 1:
                 stage: Literal["response", "error"] = (
                     "error" if provider_response.status_code >= 400 else "response"
@@ -243,8 +275,33 @@ class BaseHTTPAdapter(BaseAdapter):
                         format_chain=ctx.format_chain,
                         stage=stage,
                     )
+                    metadata = getattr(ctx, "metadata", None)
+                    if isinstance(metadata, dict):
+                        alias_map = metadata.get("_model_alias_map")
+                    else:
+                        alias_map = None
+                    if not alias_map:
+                        alias_map = getattr(ctx, "_model_alias_map", None)
+                    if isinstance(metadata, dict):
+                        if (
+                            isinstance(payload, dict)
+                            and isinstance(alias_map, Mapping)
+                            and isinstance(payload.get("model"), str)
+                        ):
+                            payload["model"] = alias_map.get(
+                                payload["model"], payload["model"]
+                            )
+                        restore_model_aliases(payload, metadata)
                     body_bytes = self._encode_json_body(payload)
-                    return Response(
+                    logger.info(
+                        "format_chain_applied",
+                        stage=stage,
+                        endpoint=endpoint,
+                        chain=ctx.format_chain,
+                        steps=len(ctx.format_chain) - 1,
+                        category="format",
+                    )
+                    restored = Response(
                         content=body_bytes,
                         status_code=provider_response.status_code,
                         headers=headers,
@@ -252,6 +309,7 @@ class BaseHTTPAdapter(BaseAdapter):
                             "content-type", "application/json"
                         ),
                     )
+                    return self._restore_model_response(restored, ctx)
                 except Exception as e:
                     logger.error(
                         "format_chain_response_failed",
@@ -274,17 +332,18 @@ class BaseHTTPAdapter(BaseAdapter):
                     )
             else:
                 logger.debug("format_chain_skipped", reason="no forward chain")
-                return response
+                return self._restore_model_response(response, ctx)
         else:
             logger.warning(
                 "unexpected_provider_response_type", type=type(response).__name__
             )
-        return Response(
+        restored = Response(
             content=provider_response.content,
             status_code=provider_response.status_code,
             headers=headers,
             media_type=headers.get("content-type", "application/json"),
         )
+        return self._restore_model_response(restored, ctx)
         # raise ValueError(
         #     "process_provider_response must return httpx.Response for non-streaming",
         # )
@@ -297,21 +356,35 @@ class BaseHTTPAdapter(BaseAdapter):
         logger.debug("handle_streaming_called", endpoint=endpoint)
 
         if not self.streaming_handler:
-            logger.error("streaming_handler_missing")
-            # Fallback to regular request handling
-            response = await self.handle_request(request)
-            if isinstance(response, StreamingResponse | DeferredStreaming):
-                return response
-            else:
-                logger.warning("non_streaming_fallback", endpoint=endpoint)
-                return response  # type: ignore[return-value]
+            logger.error(
+                "streaming_handler_missing",
+                endpoint=endpoint,
+                category="streaming",
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "type": "configuration_error",
+                        "message": "Streaming handler is not configured for this provider.",
+                        "details": {
+                            "endpoint": endpoint,
+                        },
+                    }
+                },
+            )
 
         # Get context from middleware
         ctx = request.state.context
+        self._ensure_tool_accumulator(ctx)
 
         # Extract request data
         body = await request.body()
+        body = self._map_request_model(ctx, body)
         headers = extract_request_headers(request)
+
+        # Fail fast on missing format registry if chain configured
+        self._ensure_format_registry(ctx.format_chain, endpoint)
 
         # Step 1: Execute request-side format chain if specified (streaming)
         if ctx.format_chain and len(ctx.format_chain) > 1:
@@ -322,6 +395,7 @@ class BaseHTTPAdapter(BaseAdapter):
                     format_chain=ctx.format_chain,
                     stage="request",
                 )
+                self._record_tool_definitions(ctx, stream_payload)
                 body = self._encode_json_body(stream_payload)
                 logger.trace(
                     "format_chain_stream_request_converted",
@@ -330,6 +404,14 @@ class BaseHTTPAdapter(BaseAdapter):
                     keys=list(stream_payload.keys()),
                     size_bytes=len(body),
                     category="transform",
+                )
+                logger.info(
+                    "format_chain_applied",
+                    stage="stream_request",
+                    endpoint=endpoint,
+                    chain=ctx.format_chain,
+                    steps=len(ctx.format_chain) - 1,
+                    category="format",
                 )
             except Exception as e:
                 logger.error(
@@ -354,6 +436,12 @@ class BaseHTTPAdapter(BaseAdapter):
         prepared_body, prepared_headers = await self.prepare_provider_request(
             body, headers, endpoint
         )
+        try:
+            original_payload = json.loads(body.decode()) if body else {}
+            if isinstance(original_payload, dict):
+                self._record_tool_definitions(ctx, original_payload)
+        except Exception:
+            pass
 
         # Get format adapter for streaming if format chain exists
         # Important: Do NOT reverse the chain. Adapters are defined for the
@@ -389,6 +477,36 @@ class BaseHTTPAdapter(BaseAdapter):
             if self.format_registry and ctx.format_chain
             else streaming_format_adapter
         )
+
+        if ctx.format_chain and len(ctx.format_chain) > 1 and composed_adapter is None:
+            logger.error(
+                "streaming_adapter_missing",
+                endpoint=endpoint,
+                chain=ctx.format_chain,
+                category="format",
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "type": "configuration_error",
+                        "message": "No streaming format adapter available for configured format chain.",
+                        "details": {
+                            "endpoint": endpoint,
+                            "format_chain": ctx.format_chain,
+                        },
+                    }
+                },
+            )
+
+        if composed_adapter is not None and ctx.format_chain:
+            logger.info(
+                "streaming_format_adapter_selected",
+                endpoint=endpoint,
+                chain=ctx.format_chain,
+                adapter_type=type(composed_adapter).__name__,
+                category="format",
+            )
 
         handler_config = HandlerConfig(
             supports_streaming=True,
@@ -427,6 +545,108 @@ class BaseHTTPAdapter(BaseAdapter):
             reason="complex_sse_parsing_disabled",
             format_chain=format_chain,
         )
+        return response
+
+    def _map_request_model(self, ctx: Any, body: bytes) -> bytes:
+        """Apply provider model mapping to request payload if configured."""
+
+        mapper = getattr(self, "model_mapper", None)
+        if mapper is None and hasattr(self, "config"):
+            config_rules = getattr(self.config, "model_mappings", None)
+            if config_rules:
+                mapper = ModelMapper(config_rules)
+                self.model_mapper = mapper
+        if mapper is None or not getattr(mapper, "has_rules", False) or not body:
+            if body:
+                model_value = None
+                try:
+                    parsed = json.loads(body.decode())
+                    if isinstance(parsed, dict):
+                        model_value = parsed.get("model")
+                except Exception:
+                    model_value = None
+                logger.warning(
+                    "model_mapper_missing",
+                    has_mapper=bool(mapper),
+                    has_rules=getattr(mapper, "has_rules", False),
+                    request_id=getattr(ctx, "request_id", None),
+                    client_model=model_value,
+                )
+            return body
+
+        try:
+            payload = json.loads(body.decode())
+        except Exception:
+            return body
+
+        if not isinstance(payload, dict):
+            return body
+
+        model_value = payload.get("model")
+        if not isinstance(model_value, str):
+            return body
+
+        match = mapper.map(model_value)
+        if match.mapped == match.original:
+            return body
+
+        metadata = getattr(ctx, "metadata", None)
+        if metadata is None or not isinstance(metadata, dict):
+            metadata = {}
+            ctx.metadata = metadata
+            logger.debug(
+                "model_mapping_metadata_initialized",
+                context_type=type(ctx).__name__,
+            )
+
+        add_model_alias(metadata, original=match.original, mapped=match.mapped)
+        alias_map_ctx = getattr(ctx, "_model_alias_map", None)
+        if not isinstance(alias_map_ctx, dict):
+            alias_map_ctx = {}
+            ctx._model_alias_map = alias_map_ctx
+        alias_map_ctx[match.mapped] = match.original
+        metadata["_last_client_model"] = match.original
+        metadata["_last_provider_model"] = match.mapped
+        payload["model"] = match.mapped
+
+        logger.debug(
+            "model_mapping_applied",
+            original_model=match.original,
+            mapped_model=match.mapped,
+            alias_map=alias_map_ctx,
+            category="model_mapping",
+        )
+
+        return self._encode_json_body(payload)
+
+    def _restore_model_response(self, response: Response, ctx: Any) -> Response:
+        """Restore original model identifiers in JSON responses."""
+
+        metadata = getattr(ctx, "metadata", None)
+        if not isinstance(metadata, dict) or "_model_alias_map" not in metadata:
+            return response
+
+        try:
+            payload = self._decode_json_body(
+                cast(bytes, response.body), context="restore"
+            )
+        except ValueError:
+            return response
+
+        alias_map = (
+            metadata.get("_model_alias_map") if isinstance(metadata, dict) else None
+        )
+        if not alias_map:
+            alias_map = getattr(ctx, "_model_alias_map", None)
+        if (
+            isinstance(payload, dict)
+            and isinstance(alias_map, Mapping)
+            and isinstance(payload.get("model"), str)
+        ):
+            payload["model"] = alias_map.get(payload["model"], payload["model"])
+
+        restore_model_aliases(payload, metadata)
+        response.body = self._encode_json_body(payload)
         return response
 
     @abstractmethod
@@ -506,6 +726,32 @@ class BaseHTTPAdapter(BaseAdapter):
         return [
             (format_chain[i], format_chain[i + 1]) for i in range(len(format_chain) - 1)
         ]
+
+    def _ensure_format_registry(
+        self, format_chain: list[str] | None, endpoint: str
+    ) -> None:
+        """Ensure format registry is available when a format chain is provided."""
+
+        if format_chain and len(format_chain) > 1 and self.format_registry is None:
+            logger.error(
+                "format_registry_missing_for_chain",
+                endpoint=endpoint,
+                chain=format_chain,
+                category="format",
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "type": "configuration_error",
+                        "message": "Format registry is not configured but a format chain was requested.",
+                        "details": {
+                            "endpoint": endpoint,
+                            "format_chain": format_chain,
+                        },
+                    }
+                },
+            )
 
     def _decode_json_body(self, body: bytes, *, context: str) -> dict[str, Any]:
         if not body:

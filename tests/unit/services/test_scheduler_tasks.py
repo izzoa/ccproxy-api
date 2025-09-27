@@ -4,10 +4,11 @@ import asyncio
 from collections.abc import AsyncGenerator
 from datetime import UTC
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from ccproxy.api.bootstrap import create_service_container
 from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
 from ccproxy.scheduler.tasks import (
     BaseScheduledTask,
@@ -15,6 +16,7 @@ from ccproxy.scheduler.tasks import (
     # StatsPrintingTask removed - functionality moved to metrics plugin
     VersionUpdateCheckTask,
 )
+from ccproxy.services.container import ServiceContainer
 
 
 class TestBaseScheduledTask:
@@ -23,11 +25,14 @@ class TestBaseScheduledTask:
     @pytest.fixture
     async def task_manager_lifecycle(self) -> AsyncGenerator[None, None]:
         """Start and stop the task manager for tests that need it."""
-        await start_task_manager()
+        container = ServiceContainer.get_current(strict=False)
+        if container is None:
+            container = create_service_container()
+        await start_task_manager(container=container)
         try:
             yield
         finally:
-            await stop_task_manager()
+            await stop_task_manager(container=container)
 
     class ConcreteTask(BaseScheduledTask):
         """Concrete implementation for testing."""
@@ -70,11 +75,14 @@ class TestBaseScheduledTask:
         # Verify setup was called during start
         assert task.setup_called  # type: ignore[unreachable]
 
-        # Let it run briefly
-        await asyncio.sleep(0.15)
+        # Wait a short moment to let the task run at least once
+        # Since we have a very short interval (0.1s), the task should run immediately
+        while task.run_count == 0:
+            await asyncio.sleep(0.01)  # Very short sleep to yield control
+
         assert task.run_count > 0
 
-        # Stop the task
+        # Stop the task - now waits deterministically for completion
         await task.stop()
         assert not task.is_running
         assert task.cleanup_called
@@ -330,12 +338,18 @@ class TestVersionUpdateCheckTask:
         """Test version check task when update is available."""
         with (
             patch(
-                "ccproxy.utils.version_checker.fetch_latest_github_version"
+                "ccproxy.scheduler.tasks.fetch_latest_github_version",
+                new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("ccproxy.utils.version_checker.get_current_version") as mock_current,
-            patch("ccproxy.utils.version_checker.compare_versions") as mock_compare,
-            patch("ccproxy.utils.version_checker.save_check_state") as mock_save,
-            patch("ccproxy.utils.version_checker.load_check_state") as mock_load,
+            patch("ccproxy.scheduler.tasks.get_current_version") as mock_current,
+            patch("ccproxy.scheduler.tasks.compare_versions") as mock_compare,
+            patch(
+                "ccproxy.scheduler.tasks.save_check_state", new_callable=AsyncMock
+            ) as mock_save,
+            patch(
+                "ccproxy.scheduler.tasks.load_check_state", new_callable=AsyncMock
+            ) as mock_load,
+            patch("ccproxy.scheduler.tasks.get_version_check_state_path") as mock_path,
         ):
             # Mock successful fetch with newer version
             mock_fetch.return_value = "1.5.0"
@@ -343,6 +357,7 @@ class TestVersionUpdateCheckTask:
             mock_compare.return_value = True  # Update available
             mock_load.return_value = None  # No previous state
             mock_save.return_value = None
+            mock_path.return_value = "/tmp/version_check.json"
 
             task = VersionUpdateCheckTask(
                 name="version_update_test",
@@ -365,12 +380,18 @@ class TestVersionUpdateCheckTask:
         """Test version check task when no update is available."""
         with (
             patch(
-                "ccproxy.utils.version_checker.fetch_latest_github_version"
+                "ccproxy.scheduler.tasks.fetch_latest_github_version",
+                new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("ccproxy.utils.version_checker.get_current_version") as mock_current,
-            patch("ccproxy.utils.version_checker.compare_versions") as mock_compare,
-            patch("ccproxy.utils.version_checker.save_check_state") as mock_save,
-            patch("ccproxy.utils.version_checker.load_check_state") as mock_load,
+            patch("ccproxy.scheduler.tasks.get_current_version") as mock_current,
+            patch("ccproxy.scheduler.tasks.compare_versions") as mock_compare,
+            patch(
+                "ccproxy.scheduler.tasks.save_check_state", new_callable=AsyncMock
+            ) as mock_save,
+            patch(
+                "ccproxy.scheduler.tasks.load_check_state", new_callable=AsyncMock
+            ) as mock_load,
+            patch("ccproxy.scheduler.tasks.get_version_check_state_path") as mock_path,
         ):
             # Mock successful fetch with same version
             mock_fetch.return_value = "1.0.0"
@@ -378,6 +399,7 @@ class TestVersionUpdateCheckTask:
             mock_compare.return_value = False  # No update available
             mock_load.return_value = None  # No previous state
             mock_save.return_value = None
+            mock_path.return_value = "/tmp/version_check.json"
 
             task = VersionUpdateCheckTask(
                 name="version_no_update_test",
@@ -400,13 +422,18 @@ class TestVersionUpdateCheckTask:
         """Test version check task when GitHub fetch fails."""
         with (
             patch(
-                "ccproxy.utils.version_checker.fetch_latest_github_version"
+                "ccproxy.scheduler.tasks.fetch_latest_github_version",
+                new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("ccproxy.utils.version_checker.load_check_state") as mock_load,
+            patch(
+                "ccproxy.scheduler.tasks.load_check_state", new_callable=AsyncMock
+            ) as mock_load,
+            patch("ccproxy.scheduler.tasks.get_version_check_state_path") as mock_path,
         ):
             # Mock failed fetch
             mock_fetch.return_value = None
             mock_load.return_value = None  # No previous state
+            mock_path.return_value = "/tmp/version_check.json"
 
             task = VersionUpdateCheckTask(
                 name="version_fetch_fail_test",
@@ -436,12 +463,17 @@ class TestVersionUpdateCheckTask:
         )
 
         with (
-            patch("ccproxy.utils.version_checker.load_check_state") as mock_load,
             patch(
-                "ccproxy.utils.version_checker.fetch_latest_github_version"
+                "ccproxy.scheduler.tasks.load_check_state", new_callable=AsyncMock
+            ) as mock_load,
+            patch(
+                "ccproxy.scheduler.tasks.fetch_latest_github_version",
+                new_callable=AsyncMock,
             ) as mock_fetch,
+            patch("ccproxy.scheduler.tasks.get_version_check_state_path") as mock_path,
         ):
             mock_load.return_value = recent_state
+            mock_path.return_value = "/tmp/version_check.json"
 
             task = VersionUpdateCheckTask(
                 name="version_skip_test",
@@ -473,19 +505,26 @@ class TestVersionUpdateCheckTask:
         )
 
         with (
-            patch("ccproxy.utils.version_checker.load_check_state") as mock_load,
             patch(
-                "ccproxy.utils.version_checker.fetch_latest_github_version"
+                "ccproxy.scheduler.tasks.load_check_state", new_callable=AsyncMock
+            ) as mock_load,
+            patch(
+                "ccproxy.scheduler.tasks.fetch_latest_github_version",
+                new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("ccproxy.utils.version_checker.get_current_version") as mock_current,
-            patch("ccproxy.utils.version_checker.compare_versions") as mock_compare,
-            patch("ccproxy.utils.version_checker.save_check_state") as mock_save,
+            patch("ccproxy.scheduler.tasks.get_current_version") as mock_current,
+            patch("ccproxy.scheduler.tasks.compare_versions") as mock_compare,
+            patch(
+                "ccproxy.scheduler.tasks.save_check_state", new_callable=AsyncMock
+            ) as mock_save,
+            patch("ccproxy.scheduler.tasks.get_version_check_state_path") as mock_path,
         ):
             mock_load.return_value = old_state
             mock_fetch.return_value = "1.1.0"
             mock_current.return_value = "1.0.0"
             mock_compare.return_value = True
             mock_save.return_value = None
+            mock_path.return_value = "/tmp/version_check.json"
 
             task = VersionUpdateCheckTask(
                 name="version_old_test",
@@ -506,19 +545,26 @@ class TestVersionUpdateCheckTask:
     async def test_version_check_task_second_run_normal(self) -> None:
         """Test version check task second run behavior (non-startup)."""
         with (
-            patch("ccproxy.utils.version_checker.load_check_state") as mock_load,
             patch(
-                "ccproxy.utils.version_checker.fetch_latest_github_version"
+                "ccproxy.scheduler.tasks.load_check_state", new_callable=AsyncMock
+            ) as mock_load,
+            patch(
+                "ccproxy.scheduler.tasks.fetch_latest_github_version",
+                new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("ccproxy.utils.version_checker.get_current_version") as mock_current,
-            patch("ccproxy.utils.version_checker.compare_versions") as mock_compare,
-            patch("ccproxy.utils.version_checker.save_check_state") as mock_save,
+            patch("ccproxy.scheduler.tasks.get_current_version") as mock_current,
+            patch("ccproxy.scheduler.tasks.compare_versions") as mock_compare,
+            patch(
+                "ccproxy.scheduler.tasks.save_check_state", new_callable=AsyncMock
+            ) as mock_save,
+            patch("ccproxy.scheduler.tasks.get_version_check_state_path") as mock_path,
         ):
             mock_load.return_value = None  # No previous state
             mock_fetch.return_value = "1.1.0"
             mock_current.return_value = "1.0.0"
             mock_compare.return_value = True
             mock_save.return_value = None
+            mock_path.return_value = "/tmp/version_check.json"
 
             task = VersionUpdateCheckTask(
                 name="version_second_run_test",
@@ -544,10 +590,14 @@ class TestVersionUpdateCheckTask:
     async def test_version_check_task_error_handling(self) -> None:
         """Test version check task error handling."""
         with (
-            patch("ccproxy.utils.version_checker.load_check_state") as mock_load,
+            patch(
+                "ccproxy.scheduler.tasks.load_check_state", new_callable=AsyncMock
+            ) as mock_load,
+            patch("ccproxy.scheduler.tasks.get_version_check_state_path") as mock_path,
         ):
             # Mock exception during load
             mock_load.side_effect = Exception("File system error")
+            mock_path.return_value = "/tmp/version_check.json"
 
             task = VersionUpdateCheckTask(
                 name="version_error_test",

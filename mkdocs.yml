@@ -66,6 +66,7 @@ nav:
     - MCP Integration: user-guide/mcp-integration.md
     - Authentication: user-guide/authentication.md
   - Development:
+    - Auth Providers: development/auth-providers.md
     - Debugging Guide: development/debugging-with-proxy.md
   - Deployment:
     - SystemD Setup: systemd-setup.md

@@ -10,9 +10,13 @@ import contextlib
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, Optional, TypeVar
 
 from ccproxy.core.logging import TraceBoundLogger, get_logger
+
+
+if TYPE_CHECKING:  # pragma: no cover - import for type checking only
+    from ccproxy.services.container import ServiceContainer
 
 
 T = TypeVar("T")
@@ -366,22 +370,48 @@ class AsyncTaskManager:
         return self._started
 
 
-# Global task manager instance
-_global_task_manager: AsyncTaskManager | None = None
+# Dependency-injected access helpers
 
 
-def get_task_manager() -> AsyncTaskManager:
-    """Get or create the global task manager instance.
+def _resolve_task_manager(
+    *,
+    container: Optional["ServiceContainer"] = None,
+    task_manager: Optional["AsyncTaskManager"] = None,
+) -> "AsyncTaskManager":
+    """Resolve the async task manager instance using dependency injection.
+
+    Args:
+        container: Optional service container to resolve the manager from
+        task_manager: Optional explicit manager instance (takes precedence)
 
     Returns:
-        Global AsyncTaskManager instance
+        AsyncTaskManager instance
+
+    Raises:
+        RuntimeError: If the manager cannot be resolved
     """
-    global _global_task_manager
 
-    if _global_task_manager is None:
-        _global_task_manager = AsyncTaskManager()
+    if task_manager is not None:
+        return task_manager
 
-    return _global_task_manager
+    from ccproxy.services.container import ServiceContainer as _ServiceContainer
+
+    if container is not None:
+        resolved_container: _ServiceContainer = container
+    else:
+        resolved_container_maybe = _ServiceContainer.get_current(strict=False)
+        if resolved_container_maybe is None:
+            raise RuntimeError(
+                "ServiceContainer is not available; provide a container or task manager"
+            )
+        resolved_container = resolved_container_maybe
+
+    try:
+        return resolved_container.get_async_task_manager()
+    except Exception as exc:
+        raise RuntimeError(
+            "AsyncTaskManager is not registered in the provided ServiceContainer"
+        ) from exc
 
 
 async def create_managed_task(
@@ -390,37 +420,49 @@ async def create_managed_task(
     name: str | None = None,
     creator: str | None = None,
     cleanup_callback: Callable[[], None] | None = None,
+    container: Optional["ServiceContainer"] = None,
+    task_manager: Optional["AsyncTaskManager"] = None,
 ) -> asyncio.Task[T]:
-    """Create a managed task using the global task manager.
+    """Create a managed task using the dependency-injected task manager.
 
     Args:
         coro: Coroutine to execute
         name: Optional name for the task
         creator: Optional creator identifier
         cleanup_callback: Optional cleanup callback
+        container: Optional service container for resolving the task manager
+        task_manager: Optional explicit task manager instance
 
     Returns:
         The created managed task
     """
-    task_manager = get_task_manager()
-    return await task_manager.create_task(
+
+    manager = _resolve_task_manager(container=container, task_manager=task_manager)
+    return await manager.create_task(
         coro, name=name, creator=creator, cleanup_callback=cleanup_callback
     )
 
 
-async def start_task_manager() -> None:
-    """Start the global task manager."""
-    task_manager = get_task_manager()
-    await task_manager.start()
+async def start_task_manager(
+    *,
+    container: Optional["ServiceContainer"] = None,
+    task_manager: Optional["AsyncTaskManager"] = None,
+) -> None:
+    """Start the dependency-injected task manager."""
+
+    manager = _resolve_task_manager(container=container, task_manager=task_manager)
+    await manager.start()
 
 
-async def stop_task_manager() -> None:
-    """Stop the global task manager."""
-    global _global_task_manager
+async def stop_task_manager(
+    *,
+    container: Optional["ServiceContainer"] = None,
+    task_manager: Optional["AsyncTaskManager"] = None,
+) -> None:
+    """Stop the dependency-injected task manager."""
 
-    if _global_task_manager:
-        await _global_task_manager.stop()
-        _global_task_manager = None
+    manager = _resolve_task_manager(container=container, task_manager=task_manager)
+    await manager.stop()
 
 
 def create_fire_and_forget_task(
@@ -428,6 +470,8 @@ def create_fire_and_forget_task(
     *,
     name: str | None = None,
     creator: str | None = None,
+    container: Optional["ServiceContainer"] = None,
+    task_manager: Optional["AsyncTaskManager"] = None,
 ) -> None:
     """Create a fire-and-forget managed task from a synchronous context.
 
@@ -439,10 +483,13 @@ def create_fire_and_forget_task(
         coro: Coroutine to execute
         name: Optional name for the task
         creator: Optional creator identifier
+        container: Optional service container to resolve the task manager
+        task_manager: Optional explicit task manager instance
     """
-    task_manager = get_task_manager()
 
-    if not task_manager.is_started:
+    manager = _resolve_task_manager(container=container, task_manager=task_manager)
+
+    if not manager.is_started:
         # If task manager isn't started, fall back to regular asyncio.create_task
         logger.warning(
             "task_manager_not_started_fire_and_forget",
@@ -455,7 +502,7 @@ def create_fire_and_forget_task(
     # Schedule the task creation as a fire-and-forget operation
     async def _create_managed_task() -> None:
         try:
-            await task_manager.create_task(coro, name=name, creator=creator)
+            await manager.create_task(coro, name=name, creator=creator)
         except Exception as e:
             logger.error(
                 "fire_and_forget_task_creation_failed",

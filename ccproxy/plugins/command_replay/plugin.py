@@ -45,17 +45,8 @@ class CommandReplayRuntime(SystemPluginRuntime):
             logger.debug("plugin_using_default_config")
         self.config = config
 
-        # Debug log the configuration being used (respect summaries-only flag)
-        info_summaries_only = False
-        try:
-            app = self.context.get("app") if self.context else None
-            info_summaries_only = (
-                bool(getattr(app.state, "info_summaries_only", False)) if app else False
-            )
-        except Exception:
-            info_summaries_only = False
-
-        (logger.debug if info_summaries_only else logger.info)(
+        # Debug log the configuration being used
+        logger.debug(
             "plugin_configuration_loaded",
             enabled=config.enabled,
             generate_curl=config.generate_curl,
@@ -75,7 +66,7 @@ class CommandReplayRuntime(SystemPluginRuntime):
                     enabled=True,
                     separate_files_per_command=self.config.separate_files_per_command,
                 )
-                (logger.debug if info_summaries_only else logger.info)(
+                logger.debug(
                     "command_replay_file_formatter_initialized",
                     log_dir=self.config.log_dir,
                     separate_files=self.config.separate_files_per_command,
@@ -98,7 +89,7 @@ class CommandReplayRuntime(SystemPluginRuntime):
 
             if hook_registry and isinstance(hook_registry, HookRegistry):
                 hook_registry.register(self.hook)
-                (logger.debug if info_summaries_only else logger.info)(
+                logger.debug(
                     "command_replay_hook_registered",
                     events=self.hook.events,
                     priority=self.hook.priority,
@@ -113,9 +104,7 @@ class CommandReplayRuntime(SystemPluginRuntime):
                     fallback="disabled",
                 )
         else:
-            (logger.debug if info_summaries_only else logger.info)(
-                "command_replay_plugin_disabled"
-            )
+            logger.debug("command_replay_plugin_disabled")
 
     async def _on_shutdown(self) -> None:
         """Clean up plugin resources."""
@@ -156,12 +145,6 @@ class CommandReplayFactory(SystemPluginFactory):
 
         # Initialize with manifest
         super().__init__(manifest)
-
-        logger.info(
-            "command_replay_manifest_created",
-            version="1.0.0",
-            description="Generates curl and xh commands for provider requests",
-        )
 
     def create_runtime(self) -> CommandReplayRuntime:
         """Create runtime instance."""

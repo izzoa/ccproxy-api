@@ -12,6 +12,7 @@ from typing import Any
 
 import structlog
 
+from ccproxy.config.settings import Settings
 from ccproxy.core.plugins.discovery import discover_and_load_plugins
 from ccproxy.core.plugins.factories import PluginRegistry
 from ccproxy.core.plugins.interfaces import (
@@ -24,7 +25,7 @@ from ccproxy.core.plugins.middleware import MiddlewareManager
 logger = structlog.get_logger(__name__)
 
 
-def load_plugin_system(settings: Any) -> tuple[PluginRegistry, MiddlewareManager]:
+def load_plugin_system(settings: Settings) -> tuple[PluginRegistry, MiddlewareManager]:
     """Discover plugins and build a registry + middleware manager.
 
     This function is the single entry point to set up the plugin layer for

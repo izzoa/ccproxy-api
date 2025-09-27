@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from pydantic import SecretStr
 
+from ccproxy.auth.oauth.protocol import StandardProfileFields
 from ccproxy.core.logging import get_plugin_logger
 
 from ..config import CopilotOAuthConfig
@@ -331,7 +332,7 @@ class CopilotOAuthClient:
                 elif copilot_response.status_code == 404:
                     # Try individual plan
                     individual_response = await client.get(
-                        "https://api.github.com/user/copilot",
+                        "https://api.github.com/copilot_internal/user",
                         headers={
                             "Authorization": f"Bearer {oauth_token.access_token.get_secret_value()}",
                             "Accept": "application/vnd.github.v3+json",
@@ -375,6 +376,40 @@ class CopilotOAuthClient:
                 exc_info=e,
             )
             raise
+
+    def to_standard_profile(self, profile: CopilotProfileInfo) -> StandardProfileFields:
+        """Convert Copilot profile info into `StandardProfileFields`."""
+
+        display_name = getattr(profile, "computed_display_name", None) or (
+            profile.display_name or profile.name or profile.login
+        )
+
+        features: dict[str, Any] = {
+            "copilot_access": profile.copilot_access,
+            "login": profile.login,
+        }
+        if profile.copilot_plan:
+            features["copilot_plan"] = profile.copilot_plan
+
+        raw_profile = {"copilot_profile": profile.model_dump()}
+
+        return StandardProfileFields(
+            account_id=profile.account_id,
+            provider_type="copilot",
+            email=profile.email or None,
+            display_name=display_name,
+            subscription_type=profile.copilot_plan,
+            features=features,
+            raw_profile_data=raw_profile,
+        )
+
+    async def get_standard_profile(
+        self, oauth_token: CopilotOAuthToken
+    ) -> StandardProfileFields:
+        """Fetch profile info and normalize it for generic consumers."""
+
+        profile = await self.get_user_profile(oauth_token)
+        return self.to_standard_profile(profile)
 
     async def complete_authorization(
         self, device_code: str, interval: int, expires_in: int

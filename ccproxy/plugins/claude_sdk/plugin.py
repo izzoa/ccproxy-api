@@ -1,6 +1,6 @@
 """Claude SDK plugin v2 implementation."""
 
-from typing import Any
+from typing import Any, cast
 
 from ccproxy.core.logging import get_plugin_logger
 from ccproxy.core.plugins import (
@@ -13,6 +13,8 @@ from ccproxy.core.plugins import (
     TaskSpec,
 )
 from ccproxy.core.plugins.declaration import RouterSpec
+from ccproxy.core.plugins.interfaces import DetectionServiceProtocol
+from ccproxy.llms.streaming.accumulators import ClaudeAccumulator
 from ccproxy.services.adapters.base import BaseAdapter
 
 from .adapter import ClaudeSDKAdapter
@@ -37,8 +39,6 @@ class ClaudeSDKRuntime(ProviderPluginRuntime):
         """Initialize the Claude SDK plugin."""
         # Call parent initialization to set up adapter, detection_service, etc.
         await super()._on_initialize()
-
-        await self._setup_format_registry()
 
         if not self.context:
             raise RuntimeError("Context not set")
@@ -70,16 +70,7 @@ class ClaudeSDKRuntime(ProviderPluginRuntime):
 
             if cli_path:
                 # Single consolidated log message with both CLI detection and plugin initialization status
-                from ccproxy.core.logging import info_allowed
-
-                log_fn = (
-                    logger.info
-                    if info_allowed(
-                        self.context.get("app") if hasattr(self, "context") else None
-                    )
-                    else logger.debug
-                )
-                log_fn(
+                logger.debug(
                     "plugin_initialized",
                     plugin="claude_sdk",
                     version="1.0.0",
@@ -134,13 +125,6 @@ class ClaudeSDKRuntime(ProviderPluginRuntime):
 
         return details
 
-    async def _setup_format_registry(self) -> None:
-        """No-op; manifest-based format adapters are always used."""
-        logger.debug(
-            "claude_sdk_format_registry_setup_skipped_using_manifest",
-            category="format",
-        )
-
 
 class ClaudeSDKFactory(BaseProviderPluginFactory):
     """Factory for Claude SDK plugin."""
@@ -175,6 +159,7 @@ class ClaudeSDKFactory(BaseProviderPluginFactory):
             kwargs={"skip_initial_run": True},
         )
     ]
+    tool_accumulator_class = ClaudeAccumulator
 
     async def create_adapter(self, context: PluginContext) -> BaseAdapter:
         """Create the Claude SDK adapter.
@@ -234,7 +219,7 @@ class ClaudeSDKFactory(BaseProviderPluginFactory):
 
     def create_detection_service(
         self, context: PluginContext
-    ) -> ClaudeSDKDetectionService:
+    ) -> DetectionServiceProtocol:
         """Create the Claude SDK detection service with validation.
 
         Args:
@@ -248,7 +233,8 @@ class ClaudeSDKFactory(BaseProviderPluginFactory):
             raise RuntimeError("No settings provided for Claude SDK detection service")
 
         cli_service = context.get("cli_detection_service")
-        return ClaudeSDKDetectionService(settings, cli_service)
+        service = ClaudeSDKDetectionService(settings, cli_service)
+        return cast(DetectionServiceProtocol, service)
 
     async def create_credentials_manager(self, context: PluginContext) -> None:
         """Create the credentials manager for Claude SDK.

@@ -1,9 +1,11 @@
-"""Core configuration settings - server, HTTP, CORS, and logging."""
+"""Core configuration settings - server, HTTP, CORS, logging, and plugins."""
+
+from pathlib import Path
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field, field_validator
 
-
-# === Server Configuration ===
+from ccproxy.core.system import get_xdg_config_home
 
 
 class ServerSettings(BaseModel):
@@ -33,18 +35,10 @@ class ServerSettings(BaseModel):
         description="Enable auto-reload for development",
     )
 
-    use_terminal_permission_handler: bool = Field(
-        default=False,
-        description="Enable terminal UI for permission prompts. Set to False to use external handler via SSE (not implemented)",
-    )
-
     bypass_mode: bool = Field(
         default=False,
         description="Enable bypass mode for testing (uses mock responses instead of real API calls)",
     )
-
-
-# === HTTP Configuration ===
 
 
 class HTTPSettings(BaseModel):
@@ -63,25 +57,17 @@ class HTTPSettings(BaseModel):
         description="Accept-Encoding header value when compression is enabled",
     )
 
-    # Future HTTP settings can be added here:
-    # - Connection pooling parameters
-    # - Retry policies
-    # - Custom headers
-    # - Proxy settings
-
-
-# === CORS Configuration ===
-
 
 class CORSSettings(BaseModel):
     """CORS-specific configuration settings."""
 
     origins: list[str] = Field(
         default_factory=lambda: [
-            "http://localhost:3000",
-            "http://localhost:8080",
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:8080",
+            "vscode-file://vscode-app",
+            "http://localhost/*",
+            "http://localhost:*/*",
+            "http://127.0.0.1:*/*",
+            "http://127.0.0.1:/*",
         ],
         description="CORS allowed origins (avoid using '*' for security)",
     )
@@ -123,112 +109,37 @@ class CORSSettings(BaseModel):
         ge=0,
     )
 
-    @field_validator("origins", mode="before")
-    @classmethod
-    def validate_cors_origins(cls, v: str | list[str]) -> list[str]:
-        """Parse CORS origins from string or list."""
-        if isinstance(v, str):
-            # Split comma-separated string
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
-
-    @field_validator("methods", mode="before")
-    @classmethod
-    def validate_cors_methods(cls, v: str | list[str]) -> list[str]:
-        """Parse CORS methods from string or list."""
-        if isinstance(v, str):
-            # Split comma-separated string
-            return [method.strip().upper() for method in v.split(",") if method.strip()]
-        return [method.upper() for method in v]
-
-    @field_validator("headers", mode="before")
-    @classmethod
-    def validate_cors_headers(cls, v: str | list[str]) -> list[str]:
-        """Parse CORS headers from string or list."""
-        if isinstance(v, str):
-            # Split comma-separated string
-            return [header.strip() for header in v.split(",") if header.strip()]
-        return v
-
-    @field_validator("expose_headers", mode="before")
-    @classmethod
-    def validate_cors_expose_headers(cls, v: str | list[str]) -> list[str]:
-        """Parse CORS expose headers from string or list."""
-        if isinstance(v, str):
-            # Split comma-separated string
-            return [header.strip() for header in v.split(",") if header.strip()]
-        return v
-
-    def is_origin_allowed(self, origin: str | None) -> bool:
-        """Check if an origin is allowed by the CORS policy.
-
-        Args:
-            origin: The origin to check (from request Origin header)
-
-        Returns:
-            bool: True if origin is allowed, False otherwise
-        """
-        if not origin:
-            return False
-
-        # Check against explicit origins list
-        if origin in self.origins:
-            return True
-
-        # Check if wildcard is explicitly configured
-        if "*" in self.origins:
-            return True
-
-        # Check against regex pattern if configured
-        if self.origin_regex:
-            import re
-
-            try:
-                return bool(re.match(self.origin_regex, origin))
-            except re.error:
-                return False
-
-        return False
-
-    def get_allowed_origin(self, request_origin: str | None) -> str | None:
-        """Get the appropriate CORS origin value for response headers.
-
-        Args:
-            request_origin: The origin from the request
-
-        Returns:
-            str | None: The origin to set in Access-Control-Allow-Origin header,
-                       or None if origin is not allowed
-        """
-        if not request_origin:
-            return None
-
-        if self.is_origin_allowed(request_origin):
-            # Return specific origin instead of wildcard for security
-            # Only return "*" if explicitly configured and credentials are False
-            if "*" in self.origins and not self.credentials:
-                return "*"
-            else:
-                return request_origin
-
-        return None
-
 
 # === Logging Configuration ===
+
+
+LogLevelName = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", "TRACE"]
+LOG_LEVEL_OPTIONS: tuple[str, ...] = (
+    "DEBUG",
+    "INFO",
+    "WARNING",
+    "ERROR",
+    "CRITICAL",
+    "TRACE",
+)
+
+LogFormatName = Literal["auto", "rich", "json", "plain"]
+LOG_FORMAT_OPTIONS: tuple[str, ...] = ("auto", "rich", "json", "plain")
+
+LOG_FORMAT_DESCRIPTION = "Logging format: 'rich', 'json', 'plain', or 'auto' (auto-selects based on environment)"
 
 
 class LoggingSettings(BaseModel):
     """Centralized logging configuration - core app only."""
 
-    # === Core Application Logging ===
-    level: str = Field(
+    level: LogLevelName = Field(
         default="INFO",
         description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL, TRACE)",
     )
 
-    format: str = Field(
+    format: LogFormatName = Field(
         default="auto",
-        description="Logging output format: 'rich' for development, 'json' for production, 'auto' for automatic selection",
+        description=LOG_FORMAT_DESCRIPTION,
     )
 
     file: str | None = Field(
@@ -236,22 +147,6 @@ class LoggingSettings(BaseModel):
         description="Path to JSON log file. If specified, logs will be written to this file in JSON format",
     )
 
-    show_path: bool = Field(
-        default=False,
-        description="Whether to show module path in logs (automatically enabled for DEBUG level)",
-    )
-
-    show_time: bool = Field(
-        default=True,
-        description="Whether to show timestamps in logs",
-    )
-
-    console_width: int | None = Field(
-        default=None,
-        description="Optional console width override for Rich output",
-    )
-
-    # === API Request/Response Logging ===
     verbose_api: bool = Field(
         default=False,
         description="Enable verbose API request/response logging",
@@ -262,92 +157,69 @@ class LoggingSettings(BaseModel):
         description="Directory to save individual request/response logs when verbose_api is enabled",
     )
 
-    # === Hook System Logging ===
-    use_hook_logging: bool = Field(
-        default=True,
-        description="Enable logging through the hook system",
-    )
-
-    enable_access_logging: bool = Field(
-        default=True,
-        description="Enable access logging for middleware",
-    )
-
-    enable_streaming_logging: bool = Field(
-        default=True,
-        description="Enable logging for streaming events",
-    )
-
-    parallel_run_mode: bool = Field(
-        default=False,
-        description="Enable parallel run mode for hooks",
-    )
-
-    disable_middleware_during_parallel: bool = Field(
-        default=False,
-        description="Disable middleware during parallel hook execution",
-    )
-
-    # === Observability Integration ===
-    pipeline_enabled: bool = Field(
-        default=True,
-        description="Enable structlog pipeline integration for observability",
-    )
-
-    observability_format: str = Field(
-        default="auto",
-        description="Logging format for observability: 'rich', 'json', 'auto' (auto-detects based on environment)",
-    )
-
-    # === Plugin Logging Master Controls (Plugin-Agnostic) ===
-    enable_plugin_logging: bool = Field(
-        default=True,
-        description="Global kill switch for ALL plugin logging features",
-    )
-
     plugin_log_base_dir: str = Field(
         default="/tmp/ccproxy",
         description="Shared base directory for all plugin log outputs",
     )
 
-    plugin_log_retention_days: int = Field(
-        default=7,
-        description="How long to keep plugin-generated logs (in days)",
-    )
-
-    # Scalable per-plugin control
-    plugin_overrides: dict[str, bool] = Field(
-        default_factory=dict,
-        description="Per-plugin enable/disable overrides. Key=plugin_name, Value=enabled. "
-        "A plugin is enabled if not in dict or if value is True",
-    )
-
-    # === Noise Reduction Flags ===
-    reduce_startup_info: bool = Field(
-        default=True,
-        description="Reduce startup INFO noise by demoting initializer logs to DEBUG",
-    )
-    info_summaries_only: bool = Field(
-        default=True,
-        description="At INFO level, show only consolidated summaries (server_ready, plugins_initialized, hooks_registered, metrics_ready, access_log_ready)",
-    )
-
-    @field_validator("level")
+    @field_validator("level", mode="before")
     @classmethod
-    def validate_log_level(cls, v: str) -> str:
+    def validate_log_level(cls, value: LogLevelName | str) -> LogLevelName:
         """Validate and normalize log level."""
-        upper_v = v.upper()
-        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", "TRACE"]
-        if upper_v not in valid_levels:
-            raise ValueError(f"Invalid log level: {v}. Must be one of {valid_levels}")
-        return upper_v
+        if isinstance(value, str):
+            candidate = value.upper()
+        else:
+            candidate = value
 
-    @field_validator("format", "observability_format")
+        if candidate not in LOG_LEVEL_OPTIONS:
+            raise ValueError(
+                f"Invalid log level: {value}. Must be one of {list(LOG_LEVEL_OPTIONS)}"
+            )
+
+        return cast(LogLevelName, candidate)
+
+    @field_validator("format", mode="before")
     @classmethod
-    def validate_log_format(cls, v: str) -> str:
+    def validate_log_format(cls, value: LogFormatName | str) -> LogFormatName:
         """Validate and normalize log format."""
-        lower_v = v.lower()
-        valid_formats = ["auto", "rich", "json", "plain"]
-        if lower_v not in valid_formats:
-            raise ValueError(f"Invalid log format: {v}. Must be one of {valid_formats}")
-        return lower_v
+        if isinstance(value, str):
+            candidate = value.lower()
+        else:
+            candidate = value
+
+        if candidate not in LOG_FORMAT_OPTIONS:
+            raise ValueError(
+                f"Invalid log format: {value}. Must be one of {list(LOG_FORMAT_OPTIONS)}"
+            )
+
+        return cast(LogFormatName, candidate)
+
+
+def _default_plugin_directories() -> list[Path]:
+    """Default directories scanned for filesystem plugins."""
+
+    package_plugins = Path(__file__).resolve().parent.parent / "plugins"
+    user_plugins = get_xdg_config_home() / "ccproxy" / "plugins"
+
+    seen: set[Path] = set()
+    ordered: list[Path] = []
+    for candidate in (package_plugins, user_plugins):
+        normalized = candidate.resolve()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(candidate)
+    return ordered
+
+
+class PluginDiscoverySettings(BaseModel):
+    """Configuration for filesystem plugin discovery."""
+
+    directories: list[Path] = Field(
+        default_factory=_default_plugin_directories,
+        description=(
+            "Ordered directories scanned for local plugins."
+            " Defaults to the bundled ccproxy/plugins directory and"
+            " ${XDG_CONFIG_HOME}/ccproxy/plugins."
+        ),
+    )

@@ -37,6 +37,10 @@ default_retry_delay = 60.0
 # Plugin system settings
 enable_plugins = true
 
+# Filesystem plugin discovery (override defaults if needed)
+[plugin_discovery]
+# directories = ["/opt/ccproxy/plugins", "${HOME}/.config/ccproxy/custom"]
+
 # Plugin configurations
 # Each plugin can have its own configuration section under [plugins.PLUGIN_NAME].
 # Below are examples for common bundled plugins; uncomment and adjust as needed.
@@ -62,6 +66,55 @@ log_dir = "/tmp/ccproxy/traces"
 # name = "another_plugin"
 # base_url = "https://api.example.com"
 # api_key = "your-api-key"
+
+# Claude API provider configuration with model mapping overrides
+[plugins.claude_api]
+enabled = true
+# Configure ordered model mapping rules (exact, prefix, suffix, regex)
+model_mappings = [
+  { match = "gpt-4o", target = "claude-3-7-sonnet-20250219", kind = "prefix" },
+  { match = "claude-3-5-sonnet-latest", target = "claude-3-5-sonnet-20241022" }
+]
+
+# Plain list of model dictionaries served at /claude/v1/models
+[[plugins.claude_api.models_endpoint]]
+id = "claude-3-5-sonnet-20241022"
+object = "model"
+created = 1696000000
+owned_by = "anthropic"
+root = "claude-3-5-sonnet-20241022"
+permission = []
+
+[[plugins.claude_api.models_endpoint]]
+id = "claude-3-5-haiku-20241022"
+object = "model"
+created = 1696000000
+owned_by = "anthropic"
+root = "claude-3-5-haiku-20241022"
+permission = []
+
+# Codex provider model mappings and /models override
+[plugins.codex]
+model_mappings = [
+  { match = "gpt-5-nano", target = "gpt-5" },
+  { match = "gpt-5-nano-2025-08-07", target = "gpt-5-2025-08-07" }
+]
+
+[[plugins.codex.models_endpoint]]
+id = "gpt-5"
+object = "model"
+created = 1704000000
+owned_by = "openai"
+root = "gpt-5"
+permission = []
+
+[[plugins.codex.models_endpoint]]
+id = "gpt-5-nano"
+object = "model"
+created = 1704000000
+owned_by = "openai"
+root = "gpt-5-nano"
+permission = []
 
 # DuckDB storage plugin configuration (replaces observability.duckdb_path/backends)
 [plugins.duckdb_storage]

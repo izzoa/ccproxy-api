@@ -44,16 +44,7 @@ class RequestTracerRuntime(SystemPluginRuntime):
         self.config = config
 
         # Debug log the actual configuration being used
-        info_summaries_only = False
-        try:
-            app = self.context.get("app") if self.context else None
-            info_summaries_only = (
-                bool(getattr(app.state, "info_summaries_only", False)) if app else False
-            )
-        except Exception:
-            info_summaries_only = False
-
-        (logger.debug if info_summaries_only else logger.info)(
+        logger.debug(
             "plugin_configuration_loaded",
             enabled=config.enabled,
             json_logs_enabled=config.json_logs_enabled,
@@ -93,7 +84,7 @@ class RequestTracerRuntime(SystemPluginRuntime):
 
             if hook_registry and isinstance(hook_registry, HookRegistry):
                 hook_registry.register(self.hook)
-                (logger.debug if info_summaries_only else logger.info)(
+                logger.debug(
                     "request_tracer_hook_registered",
                     mode="hooks",
                     json_logs=self.config.json_logs_enabled,
@@ -107,7 +98,7 @@ class RequestTracerRuntime(SystemPluginRuntime):
                     fallback="disabled",
                 )
 
-            (logger.debug if info_summaries_only else logger.info)(
+            logger.debug(
                 "request_tracer_enabled",
                 log_dir=self.config.log_dir,
                 json_logs=self.config.json_logs_enabled,
@@ -115,9 +106,7 @@ class RequestTracerRuntime(SystemPluginRuntime):
                 architecture="hooks_only",
             )
         else:
-            (logger.debug if info_summaries_only else logger.info)(
-                "request_tracer_disabled"
-            )
+            logger.debug("request_tracer_disabled")
 
     def _validate_config(self, config: RequestTracerConfig) -> list[str]:
         """Validate plugin configuration.

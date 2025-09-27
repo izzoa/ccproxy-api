@@ -16,6 +16,7 @@ from ccproxy.core.plugins import (
     ProviderPluginRuntime,
 )
 from ccproxy.core.plugins.declaration import RouterSpec
+from ccproxy.llms.streaming.accumulators import OpenAIAccumulator
 from ccproxy.plugins.oauth_codex.manager import CodexTokenManager
 
 from .adapter import CodexAdapter
@@ -64,8 +65,6 @@ class CodexRuntime(ProviderPluginRuntime):
         # Call parent to initialize adapter and detection service
         await super()._on_initialize()
 
-        await self._setup_format_registry()
-
         # Register streaming metrics hook
         await self._register_streaming_metrics_hook()
 
@@ -95,16 +94,7 @@ class CodexRuntime(ProviderPluginRuntime):
                 }
             )
 
-        from ccproxy.core.logging import info_allowed
-
-        log_fn = (
-            logger.info
-            if info_allowed(
-                self.context.get("app") if hasattr(self, "context") else None
-            )
-            else logger.debug
-        )
-        log_fn(
+        logger.debug(
             "plugin_initialized",
             plugin="codex",
             version="1.0.0",
@@ -114,102 +104,6 @@ class CodexRuntime(ProviderPluginRuntime):
             has_detection=self.detection_service is not None,
             **cli_info,
         )
-
-    async def get_profile_info(self) -> dict[str, Any] | None:
-        """Get Codex-specific profile information from stored credentials."""
-        try:
-            import base64
-            import json
-
-            # Get access token from stored credentials
-            if not self.credential_manager:
-                return None
-
-            access_token = await self.credential_manager.get_access_token()
-            if not access_token:
-                return None
-
-            # For OpenAI/Codex, extract info from JWT token
-            parts = access_token.split(".")
-            if len(parts) != 3:
-                return None
-
-            # Decode JWT payload
-            payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
-            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-
-            profile_info = {}
-
-            # Extract OpenAI-specific information
-            openai_auth = payload.get("https://api.openai.com/auth", {})
-            if openai_auth:
-                if "email" in payload:
-                    profile_info["email"] = payload["email"]
-                    profile_info["email_verified"] = payload.get(
-                        "email_verified", False
-                    )
-
-                if openai_auth.get("chatgpt_plan_type"):
-                    profile_info["plan_type"] = openai_auth["chatgpt_plan_type"].upper()
-
-                if openai_auth.get("chatgpt_user_id"):
-                    profile_info["user_id"] = openai_auth["chatgpt_user_id"]
-
-                # Subscription info
-                if openai_auth.get("chatgpt_subscription_active_start"):
-                    profile_info["subscription_start"] = openai_auth[
-                        "chatgpt_subscription_active_start"
-                    ]
-                if openai_auth.get("chatgpt_subscription_active_until"):
-                    profile_info["subscription_until"] = openai_auth[
-                        "chatgpt_subscription_active_until"
-                    ]
-
-                # Organizations
-                orgs = openai_auth.get("organizations", [])
-                if orgs:
-                    for org in orgs:
-                        if org.get("is_default"):
-                            profile_info["organization"] = org.get("title", "Unknown")
-                            profile_info["organization_role"] = org.get(
-                                "role", "member"
-                            )
-                            profile_info["organization_id"] = org.get("id", "Unknown")
-                            break
-
-            return profile_info if profile_info else None
-
-        except Exception as e:
-            logger.debug(f"Failed to get Codex profile info: {e}")
-            return None
-
-    async def get_auth_summary(self) -> dict[str, Any]:
-        """Get detailed authentication status."""
-        if not self.credential_manager:
-            return {"auth": "not_configured"}
-
-        try:
-            auth_status = await self.credential_manager.get_auth_status()
-            summary = {"auth": "not_configured"}
-
-            if auth_status.get("auth_configured"):
-                if auth_status.get("token_available"):
-                    summary["auth"] = "authenticated"
-                    if "time_remaining" in auth_status:
-                        summary["auth_expires"] = auth_status["time_remaining"]
-                    if "token_expired" in auth_status:
-                        summary["auth_expired"] = auth_status["token_expired"]
-                else:
-                    summary["auth"] = "no_token"
-            else:
-                summary["auth"] = "not_configured"
-
-            return summary
-        except Exception as e:
-            logger.warning(
-                "codex_auth_status_error", error=str(e), exc_info=e, category="auth"
-            )
-            return {"auth": "status_error"}
 
     async def _get_health_details(self) -> dict[str, Any]:
         """Get health check details."""
@@ -221,7 +115,7 @@ class CodexRuntime(ProviderPluginRuntime):
                 {
                     "base_url": self.config.base_url,
                     "supports_streaming": self.config.supports_streaming,
-                    "models": self.config.models,
+                    "models": [card.id for card in self.config.models_endpoint],
                 }
             )
 
@@ -252,12 +146,6 @@ class CodexRuntime(ProviderPluginRuntime):
             details["health_check_error"] = str(e)
 
         return details
-
-    async def _setup_format_registry(self) -> None:
-        """No-op; manifest-based format adapters are always used."""
-        logger.debug(
-            "codex_format_registry_setup_skipped_using_manifest", category="format"
-        )
 
     async def _register_streaming_metrics_hook(self) -> None:
         """Register the streaming metrics extraction hook."""
@@ -310,26 +198,13 @@ class CodexRuntime(ProviderPluginRuntime):
             )
             hook_registry.register(metrics_hook)
 
-            from ccproxy.core.logging import info_allowed
-
-            if info_allowed(
-                self.context.get("app") if hasattr(self, "context") else None
-            ):
-                logger.info(
-                    "streaming_metrics_hook_registered",
-                    plugin="codex",
-                    hook_name=metrics_hook.name,
-                    priority=metrics_hook.priority,
-                    has_pricing=pricing_service is not None,
-                )
-            else:
-                logger.debug(
-                    "streaming_metrics_hook_registered",
-                    plugin="codex",
-                    hook_name=metrics_hook.name,
-                    priority=metrics_hook.priority,
-                    has_pricing=pricing_service is not None,
-                )
+            logger.debug(
+                "streaming_metrics_hook_registered",
+                plugin="codex",
+                hook_name=metrics_hook.name,
+                priority=metrics_hook.priority,
+                has_pricing=pricing_service is not None,
+            )
 
         except Exception as e:
             logger.error(
@@ -371,6 +246,7 @@ class CodexFactory(BaseProviderPluginFactory):
         # Codex can leverage core-provided OpenAI chat ↔ responses conversion
         (FORMAT_OPENAI_CHAT, FORMAT_OPENAI_RESPONSES),
     ]
+    tool_accumulator_class = OpenAIAccumulator
 
     def create_detection_service(self, context: PluginContext) -> CodexDetectionService:
         """Create the Codex detection service with validation."""

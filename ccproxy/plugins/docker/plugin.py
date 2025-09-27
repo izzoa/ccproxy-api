@@ -47,16 +47,7 @@ class DockerRuntime(ProviderPluginRuntime):
             config.docker_image if config and isinstance(config, DockerConfig) else None
         )
 
-        from ccproxy.core.logging import info_allowed
-
-        log_fn = (
-            logger.info
-            if info_allowed(
-                self.context.get("app") if hasattr(self, "context") else None
-            )
-            else logger.debug
-        )
-        log_fn(
+        logger.debug(
             "plugin_initialized",
             plugin="docker",
             version="1.0.0",

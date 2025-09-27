@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 
+from ccproxy.models.detection import DetectedHeaders, DetectedPrompts
 from ccproxy.plugins.claude_api.adapter import ClaudeAPIAdapter
 from ccproxy.plugins.claude_api.detection_service import ClaudeAPIDetectionService
+from ccproxy.plugins.oauth_claude.manager import ClaudeApiTokenManager
 
 
 class TestClaudeAPIAdapter:
@@ -18,16 +20,33 @@ class TestClaudeAPIAdapter:
         """Create mock detection service."""
         service = Mock(spec=ClaudeAPIDetectionService)
         service.get_cached_data.return_value = None
+        service.get_detected_headers.return_value = DetectedHeaders({})
+        service.get_detected_prompts.return_value = DetectedPrompts()
+        service.get_system_prompt.return_value = {}
+        service.get_ignored_headers.return_value = (
+            ClaudeAPIDetectionService.ignores_header
+        )
+        service.get_redacted_headers.return_value = (
+            ClaudeAPIDetectionService.redact_headers
+        )
         return service
 
     @pytest.fixture
     def mock_auth_manager(self):
         """Create mock auth manager."""
-        auth_manager = Mock()
-        auth_data = Mock()
-        auth_data.claude_ai_oauth = Mock()
-        auth_data.claude_ai_oauth.access_token = "test-token"
-        auth_manager.load_credentials = AsyncMock(return_value=auth_data)
+        auth_manager = Mock(spec=ClaudeApiTokenManager)
+        auth_manager.get_access_token = AsyncMock(return_value="test-token")
+        auth_manager.get_access_token_with_refresh = AsyncMock(
+            return_value="test-token"
+        )
+
+        token_secret = Mock()
+        token_secret.get_secret_value.return_value = "test-token"
+        oauth = Mock()
+        oauth.access_token = token_secret
+        credentials = Mock()
+        credentials.claude_ai_oauth = oauth
+        auth_manager.load_credentials = AsyncMock(return_value=credentials)
         return auth_manager
 
     @pytest.fixture
@@ -98,11 +117,11 @@ class TestClaudeAPIAdapter:
     ) -> None:
         """Test request preparation with system prompt injection."""
         # Setup detection service with system prompt
-        cached_data = Mock()
-        cached_data.system_prompt = Mock()
-        cached_data.system_prompt.system_field = "You are a helpful assistant."
-        cached_data.headers = None
-        mock_detection_service.get_cached_data.return_value = cached_data
+        prompts = DetectedPrompts.from_body(
+            {"system": [{"type": "text", "text": "You are a helpful assistant."}]}
+        )
+        mock_detection_service.get_detected_prompts.return_value = prompts
+        mock_detection_service.get_system_prompt.return_value = prompts.system_payload()
 
         adapter = ClaudeAPIAdapter(
             detection_service=mock_detection_service,
@@ -128,7 +147,8 @@ class TestClaudeAPIAdapter:
         assert isinstance(result_data["system"], list)
         assert result_data["system"][0]["type"] == "text"
         assert result_data["system"][0]["text"] == "You are a helpful assistant."
-        assert result_data["system"][0]["_ccproxy_injected"] is True
+        # No longer check for _ccproxy_injected since it should be removed before sending to API
+        assert "_ccproxy_injected" not in result_data["system"][0]
 
     @pytest.mark.asyncio
     async def test_prepare_provider_request_openai_conversion(
@@ -221,11 +241,11 @@ class TestClaudeAPIAdapter:
     ) -> None:
         """Test system prompt injection when request already has system prompt."""
         # Setup detection service with system prompt
-        cached_data = Mock()
-        cached_data.system_prompt = Mock()
-        cached_data.system_prompt.system_field = "You are a helpful assistant."
-        cached_data.headers = None
-        mock_detection_service.get_cached_data.return_value = cached_data
+        prompts = DetectedPrompts.from_body(
+            {"system": [{"type": "text", "text": "You are a helpful assistant."}]}
+        )
+        mock_detection_service.get_detected_prompts.return_value = prompts
+        mock_detection_service.get_system_prompt.return_value = prompts.system_payload()
 
         adapter = ClaudeAPIAdapter(
             detection_service=mock_detection_service,
@@ -250,11 +270,65 @@ class TestClaudeAPIAdapter:
         result_data = json.loads(result_body.decode())
         assert "system" in result_data
         assert isinstance(result_data["system"], list)
-        # Should have injected prompt first, then existing
+        # Should have both prompts (injected first, then existing)
         assert len(result_data["system"]) == 2
-        assert result_data["system"][0]["_ccproxy_injected"] is True
+        # But _ccproxy_injected field should be removed before sending to the API
+        assert "_ccproxy_injected" not in result_data["system"][0]
         assert result_data["system"][0]["text"] == "You are a helpful assistant."
         assert result_data["system"][1]["text"] == "You are a coding assistant."
+
+    @pytest.mark.asyncio
+    async def test_prepare_provider_request_removes_metadata(
+        self,
+        mock_detection_service: ClaudeAPIDetectionService,
+        mock_auth_manager,
+        mock_http_pool_manager,
+    ) -> None:
+        """Test metadata fields are removed when preparing the provider request."""
+        # Setup detection service with system prompt
+        prompts = DetectedPrompts.from_body(
+            {"system": [{"type": "text", "text": "You are a helpful assistant."}]}
+        )
+        mock_detection_service.get_detected_prompts.return_value = prompts
+        mock_detection_service.get_system_prompt.return_value = prompts.system_payload()
+
+        adapter = ClaudeAPIAdapter(
+            detection_service=mock_detection_service,
+            auth_manager=mock_auth_manager,
+            http_pool_manager=mock_http_pool_manager,
+        )
+
+        # Create a body with _ccproxy_injected fields
+        body_dict = {
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Hello", "_ccproxy_injected": True}
+                    ],
+                }
+            ],
+            "system": [
+                {"type": "text", "text": "System prompt", "_ccproxy_injected": True}
+            ],
+            "tools": [{"name": "tool1", "_ccproxy_injected": True}],
+            "max_tokens": 100,
+        }
+        body = json.dumps(body_dict).encode()
+        headers = {"content-type": "application/json"}
+
+        result_body, result_headers = await adapter.prepare_provider_request(
+            body, headers, "/v1/messages"
+        )
+
+        # Parse the resulting body
+        result_data = json.loads(result_body.decode())
+
+        # Verify all _ccproxy_injected fields are removed
+        assert "_ccproxy_injected" not in result_data["system"][0]
+        assert "_ccproxy_injected" not in result_data["messages"][0]["content"][0]
+        assert "_ccproxy_injected" not in result_data["tools"][0]
 
     def test_mark_injected_system_prompts_string(
         self, adapter: ClaudeAPIAdapter
@@ -283,6 +357,45 @@ class TestClaudeAPIAdapter:
             assert block["_ccproxy_injected"] is True
         assert result[0]["text"] == "You are helpful."
         assert result[1]["text"] == "Be concise."
+
+    def test_remove_metadata_fields(self, adapter: ClaudeAPIAdapter) -> None:
+        """Test removing metadata fields from request data."""
+        # Create test data with _ccproxy_injected in various locations
+        data = {
+            "system": [
+                {"type": "text", "text": "System prompt", "_ccproxy_injected": True},
+                {"type": "text", "text": "More instructions"},
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "User message"},
+                        {
+                            "type": "text",
+                            "text": "With metadata",
+                            "_ccproxy_injected": True,
+                        },
+                    ],
+                }
+            ],
+            "tools": [{"name": "tool1", "_ccproxy_injected": True}, {"name": "tool2"}],
+        }
+
+        # Remove metadata fields
+        clean_data = adapter._remove_metadata_fields(data)
+
+        # Verify _ccproxy_injected is removed from system blocks
+        assert "_ccproxy_injected" not in clean_data["system"][0]
+
+        # Verify message content blocks have _ccproxy_injected removed
+        assert "_ccproxy_injected" not in clean_data["messages"][0]["content"][1]
+
+        # Verify tool blocks have _ccproxy_injected removed
+        assert "_ccproxy_injected" not in clean_data["tools"][0]
+
+        # Original data should be untouched (deep copy in the method)
+        assert "_ccproxy_injected" in data["system"][0]
 
     def test_needs_openai_conversion(self, adapter: ClaudeAPIAdapter) -> None:
         """Test OpenAI conversion detection."""

@@ -1,7 +1,7 @@
 """Claude API token manager implementation for the Claude API plugin."""
 
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, Protocol
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Protocol, cast
 
 import httpx
 
@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     pass
 
 from ccproxy.auth.managers.base_enhanced import EnhancedTokenManager
+from ccproxy.auth.managers.token_snapshot import TokenSnapshot
 from ccproxy.auth.storage.base import TokenStorage
 from ccproxy.core.logging import get_plugin_logger
 
@@ -130,6 +131,22 @@ class ClaudeApiTokenManager(EnhancedTokenManager[ClaudeCredentials]):
         await manager.preload_profile_cache()
         return manager
 
+    def _build_token_snapshot(self, credentials: ClaudeCredentials) -> TokenSnapshot:
+        """Construct a token snapshot for Claude credentials."""
+        wrapper = ClaudeTokenWrapper(credentials=credentials)
+        scopes = tuple(wrapper.scopes)
+        extras = {
+            "subscription_type": wrapper.subscription_type,
+        }
+        return TokenSnapshot(
+            provider="claude-api",
+            access_token=str(wrapper.access_token_value),
+            refresh_token=wrapper.refresh_token_value,
+            expires_at=wrapper.expires_at_datetime,
+            scopes=scopes,
+            extras=extras,
+        )
+
     async def preload_profile_cache(self) -> None:
         """Load profile from storage asynchronously if available."""
         try:
@@ -158,9 +175,7 @@ class ClaudeApiTokenManager(EnhancedTokenManager[ClaudeCredentials]):
 
     async def get_access_token(self) -> str:
         """Get access token using enhanced base with automatic refresh."""
-        token = await self.get_access_token_with_refresh(
-            oauth_client=self.oauth_provider
-        )
+        token = await self.get_access_token_with_refresh()
         if not token:
             from ccproxy.auth.exceptions import CredentialsInvalidError
 
@@ -169,17 +184,14 @@ class ClaudeApiTokenManager(EnhancedTokenManager[ClaudeCredentials]):
 
     async def refresh_token_if_needed(self) -> ClaudeCredentials | None:
         """Use enhanced base's automatic refresh capability."""
-        if await self.ensure_valid_token(oauth_client=self.oauth_provider):
+        if await self.ensure_valid_token():
             return await self.load_credentials()
         return None
 
     # ==================== Abstract Method Implementations ====================
 
-    async def refresh_token(self, oauth_client: Any = None) -> ClaudeCredentials | None:
+    async def refresh_token(self) -> ClaudeCredentials | None:
         """Refresh the access token using the refresh token.
-
-        Args:
-            oauth_client: Deprecated - OAuth provider is now looked up from registry
 
         Returns:
             Updated credentials or None if refresh failed
@@ -232,8 +244,27 @@ class ClaudeApiTokenManager(EnhancedTokenManager[ClaudeCredentials]):
 
     def is_expired(self, credentials: ClaudeCredentials) -> bool:
         """Check if credentials are expired using wrapper."""
-        wrapper = ClaudeTokenWrapper(credentials=credentials)
-        return wrapper.is_expired
+        if isinstance(credentials, ClaudeCredentials):
+            wrapper = ClaudeTokenWrapper(credentials=credentials)
+            return bool(wrapper.is_expired)
+
+        expires_at = getattr(credentials, "expires_at", None)
+        if expires_at is None:
+            expires_at = getattr(credentials, "claude_ai_oauth", None)
+            if expires_at is not None:
+                expires_at = getattr(expires_at, "expires_at", None)
+
+        if expires_at is None:
+            return False
+
+        if isinstance(expires_at, datetime):
+            return expires_at <= datetime.now(UTC)
+        if isinstance(expires_at, int | float):
+            return datetime.fromtimestamp(expires_at / 1000, tz=UTC) <= datetime.now(
+                UTC
+            )
+
+        return False
 
     # ==================== Targeted overrides ====================
 
@@ -324,7 +355,7 @@ class ClaudeApiTokenManager(EnhancedTokenManager[ClaudeCredentials]):
             return None
 
         wrapper = ClaudeTokenWrapper(credentials=credentials)
-        return wrapper.access_token_value
+        return cast(str, wrapper.access_token_value)
 
     async def get_profile(self) -> ClaudeProfileInfo | None:
         """Get user profile from cache or API.
@@ -352,7 +383,7 @@ class ClaudeApiTokenManager(EnhancedTokenManager[ClaudeCredentials]):
 
         # Get access token
         wrapper = ClaudeTokenWrapper(credentials=credentials)
-        access_token = wrapper.access_token_value
+        access_token = cast(str, wrapper.access_token_value)
         if not access_token:
             return None
 

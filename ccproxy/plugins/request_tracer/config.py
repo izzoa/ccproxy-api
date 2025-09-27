@@ -96,7 +96,6 @@ class RequestTracerConfig(BaseModel):
         default=False, description="Log individual streaming chunks (verbose)"
     )
 
-    # BaseModel's ConfigDict does not support case_sensitive; remove for mypy compatibility
     model_config = ConfigDict()
 
     def get_json_log_dir(self) -> str:

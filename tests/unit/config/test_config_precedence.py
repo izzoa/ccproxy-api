@@ -44,3 +44,35 @@ def test_cli_overrides_toml(tmp_path):
 
     settings = Settings.from_config(config_path=cfg, server={"port": 9002})
     assert settings.server.port == 9002  # cli > toml
+
+
+@pytest.mark.unit
+def test_scheduler_disabled_via_toml(tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        """
+    [scheduler]
+    enabled = false
+    """,
+        encoding="utf-8",
+    )
+
+    settings = Settings.from_config(config_path=cfg)
+    assert settings.scheduler.enabled is False
+
+
+@pytest.mark.unit
+def test_scheduler_env_overrides_toml(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        """
+    [scheduler]
+    enabled = false
+    """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("SCHEDULER__ENABLED", "true")
+
+    settings = Settings.from_config(config_path=cfg)
+    assert settings.scheduler.enabled is True  # env > toml

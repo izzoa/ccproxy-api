@@ -211,6 +211,7 @@ class PluginManifest:
 
     # Configuration
     config_class: type[BaseModel] | None = None
+    tool_accumulator_class: type | None = None
 
     # OAuth support (for provider plugins)
     oauth_client_factory: Callable[[], "OAuthClientProtocol"] | None = (
@@ -312,6 +313,7 @@ class PluginContext:
         self.storage: Any = None
 
         self.format_registry: Any = None
+        self.model_mapper: Any = None
 
         # Testing/utilities
         self.proxy_service: Any = None
@@ -450,13 +452,4 @@ class PluginRuntimeProtocol(Protocol):
 
     async def health_check(self) -> dict[str, Any]:
         """Perform health check."""
-        ...
-
-    # Provider plugin methods
-    async def get_profile_info(self) -> dict[str, Any] | None:
-        """Get provider profile information."""
-        ...
-
-    async def get_auth_summary(self) -> dict[str, Any]:
-        """Get authentication summary."""
         ...

@@ -8,12 +8,14 @@ from typing import Any
 import httpx
 
 from ccproxy.auth.managers.base import BaseTokenManager
+from ccproxy.auth.managers.token_snapshot import TokenSnapshot
+from ccproxy.auth.oauth.protocol import StandardProfileFields
 from ccproxy.auth.storage.base import TokenStorage
 from ccproxy.core.logging import get_plugin_logger
 
 from .config import CopilotOAuthConfig
 from .oauth.client import CopilotOAuthClient
-from .oauth.models import CopilotCredentials, CopilotProfileInfo
+from .oauth.models import CopilotCredentials
 from .oauth.storage import CopilotOAuthStorage
 
 
@@ -44,7 +46,7 @@ class CopilotTokenManager(BaseTokenManager[CopilotCredentials]):
             hook_manager=hook_manager,
             detection_service=detection_service,
         )
-        self._profile_cache: CopilotProfileInfo | None = None
+        self._profile_cache: StandardProfileFields | None = None
 
     @classmethod
     async def create(
@@ -65,13 +67,54 @@ class CopilotTokenManager(BaseTokenManager[CopilotCredentials]):
             detection_service=detection_service,
         )
 
+    def _build_token_snapshot(self, credentials: CopilotCredentials) -> TokenSnapshot:
+        """Construct a token snapshot for Copilot credentials."""
+        access_token: str | None = None
+        if credentials.copilot_token and credentials.copilot_token.token:
+            access_token = credentials.copilot_token.token.get_secret_value()
+        elif credentials.oauth_token.access_token:
+            access_token = credentials.oauth_token.access_token.get_secret_value()
+
+        refresh_token: str | None = None
+        if credentials.oauth_token.refresh_token:
+            refresh_token = credentials.oauth_token.refresh_token.get_secret_value()
+
+        expires_at = None
+        if credentials.copilot_token and credentials.copilot_token.expires_at:
+            expires_at = credentials.copilot_token.expires_at
+        else:
+            if (
+                credentials.oauth_token.expires_in
+                and credentials.oauth_token.created_at
+            ):
+                expires_at = credentials.oauth_token.expires_at_datetime
+
+        scope_value = credentials.oauth_token.scope or ""
+        scopes = tuple(
+            scope
+            for scope in (item.strip() for item in scope_value.split(" "))
+            if scope
+        )
+
+        extras = {
+            "account_type": credentials.account_type,
+            "has_copilot_token": bool(credentials.copilot_token),
+        }
+
+        return TokenSnapshot(
+            provider="copilot",
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at=expires_at,
+            scopes=scopes,
+            extras=extras,
+        )
+
     # ==================================================================
     # BaseTokenManager protocol implementations
     # ==================================================================
 
-    async def refresh_token(
-        self, oauth_client: Any = None
-    ) -> CopilotCredentials | None:
+    async def refresh_token(self) -> CopilotCredentials | None:
         credentials = await self.load_credentials()
         if not credentials:
             logger.error("copilot_refresh_no_credentials", category="auth")
@@ -152,26 +195,24 @@ class CopilotTokenManager(BaseTokenManager[CopilotCredentials]):
             )
             return None
 
-    async def get_access_token_with_refresh(
-        self, oauth_client: Any = None
-    ) -> str | None:
+    async def get_access_token_with_refresh(self) -> str | None:
         return await self.get_access_token()
 
-    async def get_profile(self) -> CopilotProfileInfo | None:
+    async def get_profile(self) -> StandardProfileFields | None:
         if self._profile_cache:
             return self._profile_cache
         credentials = await self.load_credentials()
         if not credentials:
             return None
         try:
-            profile = await self._client.get_user_profile(credentials.oauth_token)
+            profile = await self._client.get_standard_profile(credentials.oauth_token)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.debug("copilot_profile_fetch_failed", error=str(exc))
             return None
         self._profile_cache = profile
         return profile
 
-    async def get_profile_quick(self) -> CopilotProfileInfo | None:
+    async def get_profile_quick(self) -> StandardProfileFields | None:
         return await self.get_profile()
 
     async def aclose(self) -> None:

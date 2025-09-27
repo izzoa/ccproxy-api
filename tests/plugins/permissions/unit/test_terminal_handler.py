@@ -10,11 +10,6 @@ from ccproxy.plugins.permissions.handlers.terminal import TerminalPermissionHand
 from ccproxy.plugins.permissions.models import PermissionRequest
 
 
-pytestmark = pytest.mark.skip(
-    reason="Terminal handler tests require full application context and should be moved to integration tests"
-)
-
-
 @pytest.fixture
 def terminal_handler() -> TerminalPermissionHandler:
     """Create a terminal handler for testing."""
@@ -194,8 +189,8 @@ class TestTerminalPermissionHandler:
             mock_app.run_async = AsyncMock(return_value=True)
             mock_app_class.return_value = mock_app
 
-            # Start processing task
-            terminal_handler._ensure_processing_task_running()
+            # Start processing task using async version for testing
+            await terminal_handler._ensure_processing_task_running_async()
             assert terminal_handler._processing_task is not None
             assert not terminal_handler._processing_task.done()
 

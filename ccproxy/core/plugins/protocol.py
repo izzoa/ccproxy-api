@@ -178,28 +178,3 @@ class ProviderPlugin(BasePlugin, Protocol):
         Returns:
             OAuth client instance or None if plugin doesn't support OAuth
         """
-        ...
-
-    async def get_profile_info(self) -> dict[str, Any] | None:
-        """Get provider-specific profile information from stored credentials.
-
-        Returns:
-            Dictionary containing provider-specific profile information or None
-        """
-        ...
-
-    def get_auth_commands(self) -> list[AuthCommandDefinition] | None:
-        """Get provider-specific auth command extensions.
-
-        Returns:
-            List of auth command definitions or None if no custom commands
-        """
-        ...
-
-    async def get_auth_summary(self) -> dict[str, Any]:
-        """Get authentication summary for the plugin.
-
-        Returns:
-            Dictionary containing authentication status and details
-        """
-        ...

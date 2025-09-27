@@ -259,7 +259,6 @@ class ResultMessage(BaseModel):
     )
     result: str | None = Field(None, description="Result string if available")
 
-    # Add computed properties for backward compatibility
     @property
     def stop_reason(self) -> str:
         """Get stop reason from result or default to end_turn."""
@@ -269,7 +268,7 @@ class ResultMessage(BaseModel):
 
     @property
     def usage_model(self) -> anthropic_models.Usage:
-        """Get usage information as a Usage model for backward compatibility."""
+        """Get usage information as a Usage model."""
         if self.usage is None:
             return anthropic_models.Usage(input_tokens=0, output_tokens=0)
         return anthropic_models.Usage.model_validate(self.usage)

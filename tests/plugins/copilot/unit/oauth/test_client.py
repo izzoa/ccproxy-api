@@ -7,6 +7,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
+from ccproxy.auth.oauth.protocol import StandardProfileFields
 from ccproxy.plugins.copilot.config import CopilotOAuthConfig
 from ccproxy.plugins.copilot.oauth.client import CopilotOAuthClient
 from ccproxy.plugins.copilot.oauth.models import (
@@ -452,6 +453,54 @@ class TestCopilotOAuthClient:
         assert result.email == "test@example.com"
         assert result.copilot_access is True
         assert result.copilot_plan == "individual"
+
+    async def test_get_standard_profile_normalizes_features(
+        self,
+        mock_config: CopilotOAuthConfig,
+        mock_storage: CopilotOAuthStorage,
+    ) -> None:
+        """Ensure `get_standard_profile` returns standardized data."""
+
+        oauth_token = CopilotOAuthToken(
+            access_token=SecretStr("github-token"),
+            token_type="bearer",
+            scope="read:user",
+            created_at=int(datetime.now(UTC).timestamp()),
+            expires_in=None,
+        )
+
+        profile_info = CopilotProfileInfo(
+            account_id="u-123",
+            login="octocat",
+            name="Octo Cat",
+            email="octo@example.com",
+            avatar_url="https://avatar.example.com/octo",
+            html_url="https://github.com/octo",
+            copilot_plan="business",
+            copilot_access=True,
+        )
+
+        client = CopilotOAuthClient(
+            config=mock_config,
+            storage=mock_storage,
+        )
+
+        with patch.object(
+            client, "get_user_profile", new_callable=AsyncMock
+        ) as mock_get_profile:
+            mock_get_profile.return_value = profile_info
+
+            result = await client.get_standard_profile(oauth_token)
+
+        assert isinstance(result, StandardProfileFields)
+        assert result.account_id == "u-123"
+        assert result.display_name == "Octo Cat"
+        assert result.email == "octo@example.com"
+        assert result.subscription_type == "business"
+        assert result.features["copilot_access"] is True
+        assert result.features["copilot_plan"] == "business"
+        assert result.features["login"] == "octocat"
+        assert "copilot_profile" in result.raw_profile_data
 
     async def test_complete_authorization_success(
         self,

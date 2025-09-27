@@ -146,6 +146,7 @@ class TestSchedulerLifecycle:
         """Create a mock FastAPI app."""
         app = FastAPI()
         app.state = Mock()
+        app.state.service_container = Mock()
         return app
 
     @pytest.fixture
@@ -168,8 +169,10 @@ class TestSchedulerLifecycle:
             with patch("ccproxy.utils.startup_helpers.logger") as mock_logger:
                 await setup_scheduler_startup(mock_app, mock_settings)
 
-                # Verify scheduler was started and stored
-                mock_start.assert_called_once_with(mock_settings)
+                # Verify scheduler was started with container and stored
+                mock_start.assert_called_once_with(
+                    mock_settings, mock_app.state.service_container
+                )
                 assert mock_app.state.scheduler == mock_scheduler
 
                 # Verify debug log was called

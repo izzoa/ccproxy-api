@@ -111,7 +111,7 @@ async def claude_api_health_check(
         )
 
         config_health = ConfigHealth(
-            model_count=len(config.models) if config.models else 0,
+            model_count=len(config.models_endpoint) if config.models_endpoint else 0,
             supports_openai_format=config.support_openai_format,
             extra=None,
         )
@@ -139,8 +139,8 @@ async def claude_api_health_check(
         else:
             output_parts.append("CLI not found")
 
-        if config.models:
-            output_parts.append(f"{len(config.models)} models available")
+        if config.models_endpoint:
+            output_parts.append(f"{len(config.models_endpoint)} models available")
 
         output = "Claude API: " + ", ".join(output_parts)
 

@@ -140,8 +140,7 @@ class OpenAITokenWrapper(BaseTokenInfo):
     # Embed the original credentials to preserve JSON schema
     credentials: OpenAICredentials
 
-    @computed_field  # type: ignore[prop-decorator]
-    @property
+    @computed_field
     def access_token_value(self) -> str:
         """Get access token (now SecretStr in OpenAI)."""
         return self.credentials.access_token

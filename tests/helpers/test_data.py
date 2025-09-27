@@ -237,7 +237,7 @@ E2E_ENDPOINT_CONFIGURATIONS = [
     },
     {
         "name": "anthropic_api_openai_stream",
-        "endpoint": "/api/v1/chat/completions",
+        "endpoint": "/claude/v1/chat/completions",
         "stream": True,
         "model": "claude-sonnet-4-20250514",
         "format": FORMAT_OPENAI_CHAT,
@@ -245,7 +245,7 @@ E2E_ENDPOINT_CONFIGURATIONS = [
     },
     {
         "name": "anthropic_api_openai",
-        "endpoint": "/api/v1/chat/completions",
+        "endpoint": "/claude/v1/chat/completions",
         "stream": False,
         "model": "claude-sonnet-4-20250514",
         "format": FORMAT_OPENAI_CHAT,
@@ -253,7 +253,7 @@ E2E_ENDPOINT_CONFIGURATIONS = [
     },
     {
         "name": "anthropic_api_responses_stream",
-        "endpoint": "/api/v1/responses",
+        "endpoint": "/claude/v1/responses",
         "stream": True,
         "model": "claude-sonnet-4-20250514",
         "format": FORMAT_OPENAI_RESPONSES,
@@ -261,7 +261,7 @@ E2E_ENDPOINT_CONFIGURATIONS = [
     },
     {
         "name": "anthropic_api_responses",
-        "endpoint": "/api/v1/responses",
+        "endpoint": "/claude/v1/responses",
         "stream": False,
         "model": "claude-sonnet-4-20250514",
         "format": FORMAT_OPENAI_RESPONSES,
@@ -269,7 +269,7 @@ E2E_ENDPOINT_CONFIGURATIONS = [
     },
     {
         "name": "codex_chat_completions_stream",
-        "endpoint": "/api/codex/v1/chat/completions",
+        "endpoint": "/codex/v1/chat/completions",
         "stream": True,
         "model": "gpt-5",
         "format": "openai",
@@ -277,7 +277,7 @@ E2E_ENDPOINT_CONFIGURATIONS = [
     },
     {
         "name": "codex_chat_completions",
-        "endpoint": "/api/codex/v1/chat/completions",
+        "endpoint": "/codex/v1/chat/completions",
         "stream": False,
         "model": "gpt-5",
         "format": "openai",

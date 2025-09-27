@@ -54,7 +54,7 @@ async def claude_sdk_health_check(
 
     # Check configuration
     if config:
-        checks.append(f"Models: {len(config.models)} configured")
+        checks.append(f"Models: {len(config.models_endpoint)} configured")
         checks.append(
             f"Session pool: {'enabled' if config.session_pool_enabled else 'disabled'}"
         )
@@ -90,7 +90,9 @@ async def claude_sdk_health_check(
         cli=cli_health,
         auth=None,
         config=ConfigHealth(
-            model_count=len(config.models) if config and config.models else 0,
+            model_count=len(config.models_endpoint)
+            if config and config.models_endpoint
+            else 0,
             supports_openai_format=config.supports_streaming if config else None,
             extra={
                 "session_pool_enabled": bool(config.session_pool_enabled)

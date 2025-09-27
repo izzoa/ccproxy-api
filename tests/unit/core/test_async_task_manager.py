@@ -1,19 +1,31 @@
 """Tests for the AsyncTaskManager."""
 
 import asyncio
+import contextlib
 from unittest.mock import Mock, patch
 
 import pytest
 
+from ccproxy.api.bootstrap import create_service_container
 from ccproxy.core.async_task_manager import (
     AsyncTaskManager,
     TaskInfo,
     create_fire_and_forget_task,
     create_managed_task,
-    get_task_manager,
     start_task_manager,
     stop_task_manager,
 )
+from ccproxy.services.container import ServiceContainer
+
+
+@pytest.fixture
+async def service_container() -> ServiceContainer:
+    """Provide a fresh service container for each test."""
+    container = create_service_container()
+    try:
+        yield container
+    finally:
+        await container.shutdown()
 
 
 class TestTaskInfo:
@@ -93,13 +105,17 @@ class TestAsyncTaskManager:
     """Test AsyncTaskManager functionality."""
 
     @pytest.fixture
-    def manager(self):
+    async def manager(self):
         """Create a task manager for testing."""
-        return AsyncTaskManager(
+        manager = AsyncTaskManager(
             cleanup_interval=0.1,
             shutdown_timeout=5.0,
             max_tasks=10,
         )
+        yield manager
+        # Ensure cleanup after each test to prevent unawaited coroutines
+        if manager.is_started:
+            await manager.stop()
 
     async def test_manager_initialization(self, manager):
         """Test manager initialization."""
@@ -139,7 +155,12 @@ class TestAsyncTaskManager:
             return "test"
 
         with pytest.raises(RuntimeError, match="Task manager is not started"):
-            await manager.create_task(dummy_coro())
+            # Pass the coroutine directly instead of calling it to avoid unawaited warning
+            coro = dummy_coro()
+            try:
+                await manager.create_task(coro)
+            finally:
+                coro.close()  # Clean up the unawaited coroutine
 
     async def test_create_and_manage_task(self, manager):
         """Test creating and managing a task."""
@@ -207,8 +228,9 @@ class TestAsyncTaskManager:
             name="long_task",
         )
 
-        # Give task time to start
-        await asyncio.sleep(0.01)
+        # Wait for task to be tracked in manager
+        while len(await manager.list_active_tasks()) == 0:
+            await asyncio.sleep(0.001)
 
         # Stop manager (should cancel task)
         await manager.stop()
@@ -250,24 +272,39 @@ class TestAsyncTaskManager:
         await manager.start()
 
         # Create max number of tasks
+        async def long_running_task():
+            """Long running task that can be cancelled cleanly."""
+            try:
+                while True:
+                    await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                raise
+
         tasks = []
         for i in range(manager.max_tasks):
             task = await manager.create_task(
-                asyncio.sleep(1),  # Long enough to not complete
+                long_running_task(),
                 name=f"task_{i}",
             )
             tasks.append(task)
 
         # Next task should raise error
         with pytest.raises(RuntimeError, match="Task manager at capacity"):
-            await manager.create_task(
-                asyncio.sleep(0.01),
-                name="overflow_task",
-            )
+            # Create coroutine and clean up to avoid unawaited warning
+            overflow_coro = asyncio.sleep(0.01)
+            try:
+                await manager.create_task(
+                    overflow_coro,
+                    name="overflow_task",
+                )
+            finally:
+                overflow_coro.close()  # Clean up the unawaited coroutine
 
-        # Cancel all tasks
+        # Cancel all tasks and wait for them to complete cancellation
         for task in tasks:
             task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
         await manager.stop()
 
@@ -331,33 +368,33 @@ class TestAsyncTaskManager:
         assert "age_seconds" in found_task
 
         task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
         await manager.stop()
 
 
 class TestGlobalFunctions:
-    """Test global task manager functions."""
+    """Test task manager helper functions relying on DI."""
 
-    async def test_global_task_manager_lifecycle(self):
-        """Test global task manager start/stop."""
-        # Stop any existing global manager
-        await stop_task_manager()
+    async def test_task_manager_lifecycle_via_container(
+        self, service_container: ServiceContainer
+    ) -> None:
+        """Test task manager start/stop using a DI container."""
+        await start_task_manager(container=service_container)
 
-        # Start global manager
-        await start_task_manager()
-
-        manager = get_task_manager()
+        manager = service_container.get_async_task_manager()
         assert manager.is_started
 
-        # Stop global manager
-        await stop_task_manager()
+        await stop_task_manager(container=service_container)
 
-        # Manager should be reset
-        new_manager = get_task_manager()
-        assert not new_manager.is_started
+        # Manager instance remains but should be stopped
+        assert manager.is_started is False
 
-    async def test_create_managed_task_global(self):
-        """Test creating managed task using global manager."""
-        await start_task_manager()
+    async def test_create_managed_task_via_container(
+        self, service_container: ServiceContainer
+    ) -> None:
+        """Test creating managed task using DI-resolved manager."""
+        await start_task_manager(container=service_container)
 
         async def test_coro():
             return "global_test"
@@ -366,35 +403,18 @@ class TestGlobalFunctions:
             test_coro(),
             name="global_task",
             creator="test",
+            container=service_container,
         )
 
         result = await task
         assert result == "global_test"
 
-        await stop_task_manager()
+        await stop_task_manager(container=service_container)
 
-    async def test_create_fire_and_forget_task(self):
-        """Test fire and forget task creation."""
-        executed = asyncio.Event()
-
-        async def test_coro():
-            executed.set()
-
-        # This should not raise even if manager isn't started
-        create_fire_and_forget_task(
-            test_coro(),
-            name="fire_forget_task",
-            creator="test",
-        )
-
-        # Give time for task to execute
-        await asyncio.sleep(0.1)
-        assert executed.is_set()
-
-    async def test_fire_and_forget_with_started_manager(self):
-        """Test fire and forget with started manager."""
-        await start_task_manager()
-
+    async def test_create_fire_and_forget_task_without_started_manager(
+        self, service_container: ServiceContainer
+    ) -> None:
+        """Fire-and-forget should fall back when manager not started."""
         executed = asyncio.Event()
 
         async def test_coro():
@@ -404,13 +424,32 @@ class TestGlobalFunctions:
             test_coro(),
             name="fire_forget_task",
             creator="test",
+            container=service_container,
         )
 
-        # Give time for task to execute
-        await asyncio.sleep(0.1)
-        assert executed.is_set()
+        await asyncio.wait_for(executed.wait(), timeout=1.0)
 
-        await stop_task_manager()
+    async def test_create_fire_and_forget_task_with_started_manager(
+        self, service_container: ServiceContainer
+    ) -> None:
+        """Fire-and-forget should use task manager when started."""
+        executed = asyncio.Event()
+
+        async def test_coro():
+            executed.set()
+
+        await start_task_manager(container=service_container)
+
+        create_fire_and_forget_task(
+            test_coro(),
+            name="fire_forget_task",
+            creator="test",
+            container=service_container,
+        )
+
+        await asyncio.wait_for(executed.wait(), timeout=1.0)
+
+        await stop_task_manager(container=service_container)
 
 
 class TestTaskManagerIntegration:

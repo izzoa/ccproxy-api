@@ -18,7 +18,6 @@ __all__ = [
     "StreamTransformer",
     "TransformerProtocol",
     # Storage interfaces
-    "TokenStorage",
     # Metrics interfaces
     "MetricExporter",
     # Streaming configuration protocol
@@ -99,65 +98,6 @@ class TransformerProtocol(Protocol[T, R]):
     async def transform(self, data: T, context: TransformContext | None = None) -> R:
         """Transform the input data."""
         ...
-
-
-# === Storage Interfaces ===
-
-
-class TokenStorage(ABC):
-    """Abstract interface for token storage backends.
-
-    Note: This is kept for backward compatibility but the generic
-    version in ccproxy.auth.storage.base should be used instead.
-    """
-
-    @abstractmethod
-    async def load(self) -> Any:
-        """Load credentials from storage.
-
-        Returns:
-            Parsed credentials if found and valid, None otherwise
-        """
-        pass
-
-    @abstractmethod
-    async def save(self, credentials: Any) -> bool:
-        """Save credentials to storage.
-
-        Args:
-            credentials: Credentials to save
-
-        Returns:
-            True if saved successfully, False otherwise
-        """
-        pass
-
-    @abstractmethod
-    async def exists(self) -> bool:
-        """Check if credentials exist in storage.
-
-        Returns:
-            True if credentials exist, False otherwise
-        """
-        pass
-
-    @abstractmethod
-    async def delete(self) -> bool:
-        """Delete credentials from storage.
-
-        Returns:
-            True if deleted successfully, False otherwise
-        """
-        pass
-
-    @abstractmethod
-    def get_location(self) -> str:
-        """Get the storage location description.
-
-        Returns:
-            Human-readable description of where credentials are stored
-        """
-        pass
 
 
 # === Metrics Interfaces ===

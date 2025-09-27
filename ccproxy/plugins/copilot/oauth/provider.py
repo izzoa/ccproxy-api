@@ -13,7 +13,7 @@ from ..config import CopilotOAuthConfig
 from .client import CopilotOAuthClient
 from .models import (
     CopilotCredentials,
-    CopilotProfileInfo,
+    CopilotOAuthToken,
     CopilotTokenInfo,
     CopilotTokenResponse,
 )
@@ -54,7 +54,7 @@ class CopilotOAuthProvider(ProfileLoggingMixin):
         self.hook_manager = hook_manager
         self.detection_service = detection_service
         self.http_client = http_client
-        self._cached_profile: CopilotProfileInfo | None = None
+        self._cached_profile: StandardProfileFields | None = None
 
         self.client = CopilotOAuthClient(
             self.config,
@@ -215,30 +215,72 @@ class CopilotOAuthProvider(ProfileLoggingMixin):
         else:
             raise ValueError("Failed to refresh Copilot token")
 
-    async def get_user_profile(self, access_token: str) -> StandardProfileFields:
+    async def get_user_profile(
+        self, access_token: str | None = None
+    ) -> StandardProfileFields:
         """Get user profile information.
 
         Args:
-            access_token: OAuth access token (not Copilot token)
+            access_token: Optional OAuth access token (not Copilot token)
 
         Returns:
             User profile information
         """
-        credentials = await self.storage.load_credentials()
-        if not credentials:
-            raise ValueError("No credentials found")
+        oauth_token: CopilotOAuthToken | None = None
 
-        # Get the actual profile info from the client
-        profile = await self.client.get_user_profile(credentials.oauth_token)
+        if access_token:
+            from pydantic import SecretStr
 
-        # Convert to StandardProfileFields
-        display_name = getattr(profile, "computed_display_name", None)
-        return StandardProfileFields(
-            account_id=profile.account_id,
-            provider_type="copilot",
-            email=profile.email or None,
-            display_name=display_name,
-        )
+            oauth_token = CopilotOAuthToken(
+                access_token=SecretStr(access_token), expires_in=None, created_at=None
+            )
+        else:
+            credentials = await self.storage.load_credentials()
+            if not credentials:
+                raise ValueError("No credentials found")
+            oauth_token = credentials.oauth_token
+
+        profile = await self.client.get_standard_profile(oauth_token)
+        self._cached_profile = profile
+        return profile
+
+    async def get_standard_profile(
+        self, credentials: Any | None = None
+    ) -> StandardProfileFields | None:
+        """Get standardized profile information from credentials.
+
+        Args:
+            credentials: Copilot credentials object (optional)
+
+        Returns:
+            Standardized profile fields or None if not available
+        """
+        try:
+            # If credentials is None, try to load from storage
+            if credentials is None:
+                try:
+                    credentials = await self.storage.load_credentials()
+                    if not credentials:
+                        return None
+                except Exception:
+                    return None
+
+            # If credentials has OAuth token, use it directly
+            if hasattr(credentials, "oauth_token") and credentials.oauth_token:
+                return await self.client.get_standard_profile(credentials.oauth_token)
+            else:
+                # Fallback to loading from storage
+                return await self.get_user_profile()
+        except Exception as e:
+            logger.debug(
+                "get_standard_profile_failed",
+                error=str(e),
+                exc_info=e,
+            )
+            # Return fallback profile using _extract_standard_profile if we have credentials
+            if credentials is not None:
+                return self._extract_standard_profile(credentials)
+            return None
 
     async def get_copilot_token_data(self) -> CopilotTokenResponse | None:
         credentials = await self.storage.load_credentials()
@@ -267,7 +309,7 @@ class CopilotOAuthProvider(ProfileLoggingMixin):
         # Get profile for additional info
         profile = None
         with contextlib.suppress(Exception):
-            profile = await self.get_user_profile("")
+            profile = await self.get_user_profile()
 
         return CopilotTokenInfo(
             provider="copilot",
@@ -372,24 +414,71 @@ class CopilotOAuthProvider(ProfileLoggingMixin):
         """Clear stored credentials."""
         await self.storage.clear_credentials()
 
-    async def save_credentials(self, credentials: CopilotCredentials) -> bool:
+    def get_storage(self) -> Any:
+        """Get storage implementation for this provider.
+
+        Returns:
+            Storage implementation
+        """
+        return self.storage
+
+    async def load_credentials(self, custom_path: Any | None = None) -> Any | None:
+        """Load credentials from provider's storage.
+
+        Args:
+            custom_path: Optional custom storage path (Path object)
+
+        Returns:
+            Credentials if found, None otherwise
+        """
+        try:
+            if custom_path:
+                # Create storage with custom path
+                from pathlib import Path
+
+                from .storage import CopilotOAuthStorage
+
+                storage = CopilotOAuthStorage(credentials_path=Path(custom_path))
+                credentials = await storage.load_credentials()
+            else:
+                # Load from default storage
+                credentials = await self.storage.load_credentials()
+
+            # Use standardized profile logging
+            self._log_credentials_loaded("copilot", credentials)
+
+            return credentials
+        except Exception as e:
+            logger.debug(
+                "copilot_load_credentials_failed",
+                error=str(e),
+                exc_info=e,
+            )
+            return None
+
+    async def save_credentials(self, credentials: CopilotCredentials | None) -> bool:
         """Save credentials to storage.
 
         Args:
-            credentials: Copilot credentials to save
+            credentials: Copilot credentials to save (None to clear)
 
         Returns:
             True if save was successful
         """
         try:
-            await self.storage.save_credentials(credentials)
-            logger.info(
-                "copilot_credentials_saved",
-                account_type=credentials.account_type,
-                has_oauth=bool(credentials.oauth_token),
-                has_copilot_token=bool(credentials.copilot_token),
-            )
-            return True
+            if credentials is None:
+                await self.storage.clear_credentials()
+                logger.info("copilot_credentials_cleared")
+                return True
+            else:
+                await self.storage.save_credentials(credentials)
+                logger.info(
+                    "copilot_credentials_saved",
+                    account_type=credentials.account_type,
+                    has_oauth=bool(credentials.oauth_token),
+                    has_copilot_token=bool(credentials.copilot_token),
+                )
+                return True
         except Exception as e:
             logger.error(
                 "copilot_credentials_save_failed",

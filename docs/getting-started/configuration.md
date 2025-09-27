@@ -66,9 +66,6 @@ All formats use the same configured `SECURITY__AUTH_TOKEN` value.
 | - | `LOGGING__FORMAT` | Log format | `auto` | `LOGGING__FORMAT=json` |
 | - | `LOGGING__FILE` | Log file path | - | `LOGGING__FILE=/var/log/app.log` |
 | - | `LOGGING__VERBOSE_API` | Verbose API logging | `false` | `LOGGING__VERBOSE_API=true` |
-| - | `LOGGING__PIPELINE_ENABLED` | Enable logging pipeline | `false` | `LOGGING__PIPELINE_ENABLED=true` |
-| - | `LOGGING__ENABLE_PLUGIN_LOGGING` | Global plugin logging | `true` | `LOGGING__ENABLE_PLUGIN_LOGGING=false` |
-| - | `LOGGING__PLUGIN_OVERRIDES` | Per-plugin control (JSON) | `{}` | `LOGGING__PLUGIN_OVERRIDES='{"pricing":false}'` |
 | - | `LOGGING__PLUGIN_LOG_BASE_DIR` | Plugin log base directory | `/tmp/ccproxy/plugins` | `LOGGING__PLUGIN_LOG_BASE_DIR=/var/log/plugins` |
 
 ### Claude CLI Configuration
@@ -127,7 +124,6 @@ workers = 2
 level = "DEBUG"
 format = "json"
 file = "/var/log/ccproxy/app.log"
-enable_plugin_logging = true
 
 # Security settings
 cors_origins = ["https://example.com", "https://app.com"]
@@ -159,15 +155,7 @@ level = "INFO"
 format = "json"
 file = "/var/log/ccproxy/app.log"
 verbose_api = false
-pipeline_enabled = false
-enable_plugin_logging = true
 plugin_log_base_dir = "/tmp/ccproxy/plugins"
-
-# Per-plugin logging overrides
-[logging.plugin_overrides]
-raw_http_logger = true
-pricing = false
-permissions = true
 
 # Claude Code options
 [claude_code_options]
@@ -199,7 +187,9 @@ Create a `config.json` file in the project root for advanced configuration:
   "logging": {
     "level": "INFO",
     "format": "json",
-    "file": "logs/app.log"
+    "file": "logs/app.log",
+    "verbose_api": false,
+    "plugin_log_base_dir": "/tmp/ccproxy/plugins"
   },
 
   "cors": {
@@ -266,12 +256,6 @@ Controls application logging (centralized under `[logging]` section):
     "format": "json",                   // Log format (json, text)
     "file": "logs/app.log",            // Log file path (optional)
     "verbose_api": false,               // Enable verbose API logging
-    "pipeline_enabled": false,          // Enable logging pipeline
-    "enable_plugin_logging": true,      // Global plugin logging control
-    "plugin_overrides": {               // Per-plugin logging overrides
-      "raw_http_logger": true,
-      "pricing": false
-    },
     "plugin_log_base_dir": "/tmp/ccproxy/plugins"  // Base directory for plugin logs
   }
 }
@@ -614,11 +598,10 @@ CORS_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
 # Advanced configuration using nested syntax
 LOGGING__FORMAT=json
 LOGGING__FILE=/var/log/ccproxy/app.log
-LOGGING__ENABLE_PLUGIN_LOGGING=true
+LOGGING__PLUGIN_LOG_BASE_DIR=/tmp/ccproxy/plugins
 SCHEDULER__ENABLED=true
 SCHEDULER__PRICING_UPDATE_INTERVAL_HOURS=24
 PRICING__UPDATE_ON_STARTUP=true
-LOGGING__PIPELINE_ENABLED=false
 
 # Special environment variables
 CONFIG_FILE=/etc/ccproxy/config.toml
@@ -637,7 +620,8 @@ CCPROXY_JSON_LOGS=true
   "logging": {
     "level": "INFO",
     "format": "json",
-    "enable_plugin_logging": true
+    "verbose_api": false,
+    "plugin_log_base_dir": "/tmp/ccproxy/plugins"
   },
   "cors_origins": ["https://yourdomain.com"],
   "claude_cli_path": "/usr/local/bin/claude",

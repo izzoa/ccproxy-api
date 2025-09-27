@@ -208,6 +208,12 @@ context = ProviderContext(
 )
 ```
 
+### Model Mapping & `/models` Responses
+- Define ordered `model_mappings` on each provider config to translate client model IDs before reaching upstream APIs (supports `exact`, `prefix`, `suffix`, `regex`).
+- Serve `/models` from configuration using `models_endpoint`; avoid hard-coding JSON payloads in route modules.
+- Keep default mapping and model lists close to the plugin (e.g., `plugins/<name>/model_defaults.py`) and clone them via `model_copy(deep=True)` in config defaults.
+- Adapters should rely on `BaseHTTPAdapter` for applying mappings and restoring aliases in responses rather than duplicating per-plugin logic.
+
 ### Transformer Pattern
 ```python
 class RequestTransformer:

@@ -2,6 +2,7 @@
 
 from typing import Any, cast
 
+from ccproxy.auth.oauth import OAuthProviderProtocol
 from ccproxy.core.logging import get_plugin_logger
 from ccproxy.core.plugins import (
     AuthProviderPluginFactory,
@@ -105,7 +106,7 @@ class OAuthClaudeFactory(AuthProviderPluginFactory):
 
     def create_auth_provider(
         self, context: PluginContext | None = None
-    ) -> ClaudeOAuthProvider:
+    ) -> OAuthProviderProtocol:
         """Create OAuth provider instance.
 
         Args:
@@ -125,13 +126,14 @@ class OAuthClaudeFactory(AuthProviderPluginFactory):
         # CLIDetectionService is injected under 'cli_detection_service' in base context
         detection_service = context.get("cli_detection_service") if context else None
         settings = context.get("settings") if context else None
-        return ClaudeOAuthProvider(
+        provider = ClaudeOAuthProvider(
             config,
             http_client=http_client,
             hook_manager=hook_manager,
             detection_service=detection_service,
             settings=settings,
         )
+        return cast(OAuthProviderProtocol, provider)
 
     def create_storage(self) -> Any | None:
         """Create storage for OAuth credentials.

@@ -1,19 +1,24 @@
 import json
-from typing import Any
+import time
+import uuid
+from typing import Any, cast
 
 import httpx
 from starlette.responses import Response, StreamingResponse
 
+from ccproxy.auth.exceptions import CredentialsInvalidError
 from ccproxy.core.logging import get_plugin_logger
+from ccproxy.core.plugins.interfaces import (
+    DetectionServiceProtocol,
+    TokenManagerProtocol,
+)
 from ccproxy.services.adapters.http_adapter import BaseHTTPAdapter
-from ccproxy.streaming import DeferredStreaming
 from ccproxy.utils.headers import (
     extract_response_headers,
     filter_request_headers,
 )
 
 from .config import ClaudeAPISettings
-from .detection_service import ClaudeAPIDetectionService
 
 
 logger = get_plugin_logger()
@@ -24,12 +29,15 @@ class ClaudeAPIAdapter(BaseHTTPAdapter):
 
     def __init__(
         self,
-        detection_service: ClaudeAPIDetectionService,
-        config: ClaudeAPISettings,
+        detection_service: DetectionServiceProtocol,
+        config: ClaudeAPISettings | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(config=config, **kwargs)
-        self.detection_service = detection_service
+        super().__init__(config=config or ClaudeAPISettings(), **kwargs)
+        self.detection_service: DetectionServiceProtocol = detection_service
+        self.token_manager: TokenManagerProtocol = cast(
+            TokenManagerProtocol, self.auth_manager
+        )
 
         self.base_url = self.config.base_url.rstrip("/")
 
@@ -40,29 +48,27 @@ class ClaudeAPIAdapter(BaseHTTPAdapter):
         self, body: bytes, headers: dict[str, str], endpoint: str
     ) -> tuple[bytes, dict[str, str]]:
         # Get a valid access token (auto-refreshes if expired)
-        token_value = await self.auth_manager.get_access_token()
-        if not token_value:
-            raise ValueError("No valid OAuth access token available for Claude API")
+        token_value = await self._resolve_access_token()
 
         # Parse body
         body_data = json.loads(body.decode()) if body else {}
 
+        if self._needs_anthropic_conversion(endpoint):
+            body_data = self._convert_openai_to_anthropic(body_data)
+
         # Inject system prompt based on config mode using detection service helper
-        if (
-            self.detection_service
-            and self.config.system_prompt_injection_mode != "none"
-        ):
-            inject_mode = self.config.system_prompt_injection_mode
-            injection = self.detection_service.get_system_prompt(mode=inject_mode)
-            if injection and "system" in injection:
+        system_mode = self.config.system_prompt_injection_mode
+        if self.detection_service and system_mode != "none":
+            system_value = self._resolve_system_prompt_value(system_mode)
+            if system_value is not None:
                 body_data = self._inject_system_prompt(
-                    body_data, injection.get("system"), mode=inject_mode
+                    body_data, system_value, mode=system_mode
                 )
 
         # Limit cache_control blocks to comply with Anthropic's limit
         body_data = self._limit_cache_control_blocks(body_data)
 
-        # Remove metadata fields immediately after cache processing (format conversion handled by format chain)
+        # Remove internal metadata fields like _ccproxy_injected before sending to the API
         body_data = self._remove_metadata_fields(body_data)
 
         # Filter headers and enforce OAuth Authorization
@@ -71,30 +77,19 @@ class ClaudeAPIAdapter(BaseHTTPAdapter):
         filtered_headers["authorization"] = f"Bearer {token_value}"
 
         # Add CLI headers if available, but never allow overriding auth
-        if self.detection_service:
-            cached_data = self.detection_service.get_cached_data()
-            if cached_data and cached_data.headers:
-                cli_headers: dict[str, str] = cached_data.headers
-                # Do not allow CLI to override sensitive auth headers
-                blocked_overrides = {"authorization", "x-api-key"}
-                ignores = set(
-                    getattr(self.detection_service, "ignores_header", []) or []
-                )
-                for key, value in cli_headers.items():
-                    lk = key.lower()
-                    if lk in blocked_overrides:
-                        logger.debug(
-                            "cli_header_override_blocked",
-                            header=lk,
-                            reason="preserve_oauth_auth_header",
-                        )
-                        continue
-                    if lk in ignores:
-                        continue
-                    if value is None or value == "":
-                        # Skip empty redacted values
-                        continue
-                    filtered_headers[lk] = value
+        cli_headers = self._collect_cli_headers()
+        if cli_headers:
+            blocked_overrides = {"authorization", "x-api-key"}
+            for key, value in cli_headers.items():
+                lk = key.lower()
+                if lk in blocked_overrides:
+                    logger.debug(
+                        "cli_header_override_blocked",
+                        header=lk,
+                        reason="preserve_oauth_auth_header",
+                    )
+                    continue
+                filtered_headers[lk] = value
 
         return json.dumps(body_data).encode(), filtered_headers
 
@@ -108,28 +103,260 @@ class ClaudeAPIAdapter(BaseHTTPAdapter):
         should return a simple Starlette Response.
         """
         response_headers = extract_response_headers(response)
+
+        body_bytes = response.content
+        media_type = response.headers.get("content-type")
+
+        if self._needs_openai_conversion(endpoint):
+            converted = self._convert_anthropic_to_openai_response(response)
+            if converted is not None:
+                body_bytes = json.dumps(converted).encode()
+                media_type = "application/json"
+
         return Response(
-            content=response.content,
+            content=body_bytes,
             status_code=response.status_code,
             headers=response_headers,
-            media_type=response.headers.get("content-type"),
+            media_type=media_type,
         )
 
-    async def _create_streaming_response(
-        self, response: httpx.Response, endpoint: str
-    ) -> DeferredStreaming:
-        """Create streaming response with format conversion support."""
-        # Deprecated: streaming is centrally handled by BaseHTTPAdapter/StreamingHandler
-        # Kept for compatibility; not used.
-        raise NotImplementedError
+    def _needs_openai_conversion(self, endpoint: str) -> bool:
+        if not getattr(self.config, "support_openai_format", True):
+            return False
+        normalized = (endpoint or "").strip().lower()
+        return normalized.startswith("/v1/chat/completions")
 
-    def _get_response_format_conversion(self, endpoint: str) -> tuple[str, str]:
-        """Deprecated: conversion direction decided by format chain upstream."""
-        return ("anthropic", "anthropic")
+    def _needs_anthropic_conversion(self, endpoint: str) -> bool:
+        if not getattr(self.config, "support_openai_format", True):
+            return False
+        normalized = (endpoint or "").strip().lower()
+        return normalized.startswith("/v1/chat/completions")
 
-    def _needs_format_conversion(self, endpoint: str) -> bool:
-        """Deprecated: format conversion handled via format chain in BaseHTTPAdapter."""
-        return False
+    async def _resolve_access_token(self) -> str:
+        """Resolve a usable Claude API OAuth token from the token manager."""
+
+        token_manager = self.token_manager
+
+        # Primary path: rely on manager contract
+        try:
+            token = await token_manager.get_access_token()
+            if token:
+                return token
+        except CredentialsInvalidError:
+            logger.debug("claude_token_invalid", category="auth")
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug(
+                "claude_token_fetch_failed",
+                error=str(exc),
+                category="auth",
+            )
+
+        # Fallback to explicit refresh helper
+        try:
+            refreshed = await token_manager.get_access_token_with_refresh()
+            if refreshed:
+                return refreshed
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug(
+                "claude_token_refresh_failed",
+                error=str(exc),
+                category="auth",
+            )
+
+        # Final fallback: inspect cached credentials directly
+        snapshot = await token_manager.get_token_snapshot()
+        # Type narrowing for mypy
+        if snapshot and hasattr(snapshot, "access_token") and snapshot.access_token:
+            return str(snapshot.access_token)
+
+        raise ValueError("No valid OAuth access token available for Claude API")
+
+    def _resolve_system_prompt_value(self, mode: str) -> Any:
+        """Retrieve system prompt content for injection from detection cache."""
+
+        if not self.detection_service:
+            return None
+
+        # Primary path: detection service helper
+        try:
+            prompt = self.detection_service.get_system_prompt(mode=mode)
+        except Exception:
+            prompt = {}
+        if isinstance(prompt, dict):
+            system_value = prompt.get("system")
+            if system_value:
+                return system_value
+
+        prompts = self.detection_service.get_detected_prompts()
+        if prompts.has_system():
+            system_payload = prompts.system_payload(mode=mode)
+            system_value = system_payload.get("system") if system_payload else None
+            if system_value:
+                return system_value
+            return prompts.system
+
+        cached = self.detection_service.get_cached_data()
+        # Backward compatibility: legacy cached.system_prompt object
+        system_prompt_obj = getattr(cached, "system_prompt", None) if cached else None
+        if system_prompt_obj is not None:
+            return getattr(system_prompt_obj, "system_field", system_prompt_obj)
+
+        return None
+
+    def _collect_cli_headers(self) -> dict[str, str]:
+        """Collect safe CLI headers from detection cache for request forwarding."""
+
+        if not self.detection_service:
+            return {}
+
+        headers_data = self.detection_service.get_detected_headers()
+        if not headers_data:
+            return {}
+
+        ignores = {h.lower() for h in self.detection_service.get_ignored_headers()}
+        redacted = {h.lower() for h in self.detection_service.get_redacted_headers()}
+
+        return headers_data.filtered(ignores=ignores, redacted=redacted)
+
+    def _convert_openai_to_anthropic(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Convert an OpenAI chat.completions style payload to Anthropic format."""
+
+        if not isinstance(payload, dict):
+            return payload
+
+        messages = payload.get("messages")
+        if not isinstance(messages, list):
+            return payload
+
+        system_blocks: list[Any] = []
+        anthropic_messages: list[dict[str, Any]] = []
+
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            content = msg.get("content", "")
+
+            if role == "system":
+                block = self._normalize_text_block(content)
+                if block is not None:
+                    if isinstance(block, list):
+                        system_blocks.extend(block)
+                    else:
+                        system_blocks.append(block)
+                continue
+
+            block = self._normalize_text_block(content)
+            if block is None:
+                block = []
+
+            anthropic_messages.append(
+                {
+                    "role": role or "user",
+                    "content": block if isinstance(block, list) else [block],
+                }
+            )
+
+        converted = {k: v for k, v in payload.items() if k != "messages"}
+        if system_blocks:
+            converted["system"] = system_blocks
+        converted["messages"] = anthropic_messages
+        return converted
+
+    def _normalize_text_block(self, content: Any) -> Any:
+        if isinstance(content, list):
+            blocks = []
+            for part in content:
+                if isinstance(part, dict):
+                    blocks.append(part)
+                elif isinstance(part, str):
+                    blocks.append({"type": "text", "text": part})
+            return blocks
+        if isinstance(content, dict):
+            return content
+        if isinstance(content, str):
+            return {"type": "text", "text": content}
+        return None
+
+    def _convert_anthropic_to_openai_response(
+        self, response: httpx.Response
+    ) -> dict[str, Any] | None:
+        try:
+            payload = json.loads(response.content.decode()) if response.content else {}
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+
+        message = {
+            "role": "assistant",
+            "content": "",
+        }
+
+        content_blocks = payload.get("content")
+        if isinstance(content_blocks, list):
+            texts = [
+                block.get("text", "")
+                for block in content_blocks
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            message["content"] = "".join(texts)
+        elif isinstance(content_blocks, str):
+            message["content"] = content_blocks
+
+        finish_reason = payload.get("stop_reason") or payload.get("stop_sequence")
+        finish_reason_map = {
+            "end_turn": "stop",
+            "stop_sequence": "stop",
+            "max_tokens": "length",
+        }
+        if isinstance(finish_reason, str):
+            mapped_finish_reason = finish_reason_map.get(finish_reason, "stop")
+        else:
+            mapped_finish_reason = "stop"
+
+        usage = payload.get("usage")
+        usage_converted = None
+        if isinstance(usage, dict):
+            prompt_tokens = int(usage.get("input_tokens") or 0)
+            completion_tokens = int(usage.get("output_tokens") or 0)
+            total_tokens = int(
+                usage.get("total_tokens") or prompt_tokens + completion_tokens
+            )
+            usage_converted = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            }
+
+        model_value = payload.get("model")
+        if not isinstance(model_value, str) or not model_value:
+            mappings = getattr(self.config, "model_mappings", None) or []
+            if mappings:
+                model_value = mappings[0].target
+            else:
+                model_value = ""
+
+        converted = {
+            "id": payload.get("id") or f"chatcmpl-{uuid.uuid4().hex}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model_value,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": message,
+                    "finish_reason": mapped_finish_reason,
+                    "logprobs": None,
+                }
+            ],
+        }
+
+        if usage_converted is not None:
+            converted["usage"] = usage_converted
+
+        return converted
 
     # Helper methods (move from transformers)
     def _inject_system_prompt(

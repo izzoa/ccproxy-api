@@ -640,50 +640,6 @@ class DockerAdapter(BaseAdapter, DockerAdapterProtocol):
 
         return image, volumes, env_vars, command or [], user_context, metadata
 
-    def exec_container_legacy(
-        self,
-        image: str,
-        volumes: list[str],
-        environment: list[str],
-        command: list[str],
-        user_context: dict[str, Any] | None = None,
-        ports: list[str] | None = None,
-    ) -> None:
-        """Legacy exec_container method for backward compatibility."""
-        # Convert legacy format to new format
-        docker_volumes = []
-        for volume in volumes:
-            parts = volume.split(":")
-            if len(parts) >= 2:
-                docker_volumes.append((parts[0], parts[1]))
-
-        docker_env = {}
-        for env_var in environment:
-            if "=" in env_var:
-                key, value = env_var.split("=", 1)
-                docker_env[key] = value
-
-        docker_user_context = None
-        if user_context:
-            uid = user_context.get("uid")
-            gid = user_context.get("gid")
-            if uid is not None and gid is not None:
-                docker_user_context = DockerUserContext(
-                    uid=uid,
-                    gid=gid,
-                    username=f"user_{uid}",
-                )
-
-        # Use new exec_container method
-        self.exec_container(
-            image=image,
-            volumes=docker_volumes,
-            environment=docker_env,
-            command=command,
-            user_context=docker_user_context,
-            ports=ports,
-        )
-
     async def handle_request(
         self, request: Request
     ) -> Response | StreamingResponse | DeferredStreaming:

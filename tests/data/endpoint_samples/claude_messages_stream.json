@@ -1,0 +1,278 @@
+{
+  "endpoint": "/claude/v1/messages",
+  "metadata": {
+    "error": null,
+    "success": true
+  },
+  "model": "claude-sonnet-4-20250514",
+  "name": "claude_messages_stream",
+  "request": {
+    "payload": {
+      "max_tokens": 1000,
+      "messages": [
+        {
+          "content": "Hello",
+          "role": "user"
+        }
+      ],
+      "model": "claude-sonnet-4-20250514",
+      "stream": true
+    },
+    "request_key": "anthropic_stream"
+  },
+  "response": {
+    "events": [
+      {
+        "data": "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_01HTRpp3qoAKyYXSKeQ7hDWL\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-20250514\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":22,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":6,\"service_tier\":\"standard\"}}}",
+        "event": "message_start",
+        "json": {
+          "message": {
+            "content": [],
+            "id": "msg_01HTRpp3qoAKyYXSKeQ7hDWL",
+            "model": "claude-sonnet-4-20250514",
+            "role": "assistant",
+            "stop_reason": null,
+            "stop_sequence": null,
+            "type": "message",
+            "usage": {
+              "cache_creation": {
+                "ephemeral_1h_input_tokens": 0,
+                "ephemeral_5m_input_tokens": 0
+              },
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "input_tokens": 22,
+              "output_tokens": 6,
+              "service_tier": "standard"
+            }
+          },
+          "type": "message_start"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}",
+        "event": "content_block_start",
+        "json": {
+          "content_block": {
+            "text": "",
+            "type": "text"
+          },
+          "index": 0,
+          "type": "content_block_start"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello! I'm Claude Code\"}}",
+        "event": "content_block_delta",
+        "json": {
+          "delta": {
+            "text": "Hello! I'm Claude Code",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\", Anthropic's CLI for Claude. I\"}}",
+        "event": "content_block_delta",
+        "json": {
+          "delta": {
+            "text": ", Anthropic's CLI for Claude. I",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        }
+      },
+      {
+        "data": "{\"type\": \"ping\"}",
+        "event": "ping",
+        "json": {
+          "type": "ping"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" can help you with various programming and development\"}}",
+        "event": "content_block_delta",
+        "json": {
+          "delta": {
+            "text": " can help you with various programming and development",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" tasks through the command line interface.\\n\\nHow\"}}",
+        "event": "content_block_delta",
+        "json": {
+          "delta": {
+            "text": " tasks through the command line interface.\n\nHow",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" can I assist you today? I can help with:\"}}",
+        "event": "content_block_delta",
+        "json": {
+          "delta": {
+            "text": " can I assist you today? I can help with:",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"\\n- Code writing and debugging\\n- File\"}}",
+        "event": "content_block_delta",
+        "json": {
+          "delta": {
+            "text": "\n- Code writing and debugging\n- File",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" operations and analysis\\n- Command line\"}}",
+        "event": "content_block_delta",
+        "json": {
+          "delta": {
+            "text": " operations and analysis\n- Command line",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" utilities\\n- Programming questions\\n- An\"}}",
+        "event": "content_block_delta",
+        "json": {
+          "delta": {
+            "text": " utilities\n- Programming questions\n- An",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"d much more!\\n\\nWhat would you like to\"}}",
+        "event": "content_block_delta",
+        "json": {
+          "delta": {
+            "text": "d much more!\n\nWhat would you like to",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" work on?\"}}",
+        "event": "content_block_delta",
+        "json": {
+          "delta": {
+            "text": " work on?",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        }
+      },
+      {
+        "data": "{\"type\":\"content_block_stop\",\"index\":0}",
+        "event": "content_block_stop",
+        "json": {
+          "index": 0,
+          "type": "content_block_stop"
+        }
+      },
+      {
+        "data": "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"input_tokens\":22,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":83}}",
+        "event": "message_delta",
+        "json": {
+          "delta": {
+            "stop_reason": "end_turn",
+            "stop_sequence": null
+          },
+          "type": "message_delta",
+          "usage": {
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "input_tokens": 22,
+            "output_tokens": 83
+          }
+        }
+      },
+      {
+        "data": "{\"type\":\"message_stop\"}",
+        "event": "message_stop",
+        "json": {
+          "type": "message_stop"
+        }
+      },
+      {
+        "data": "[DONE]",
+        "done": true
+      }
+    ],
+    "headers": {
+      "anthropic-organization-id": "0112d741-46c5-4429-8da8-1addcb04278f",
+      "anthropic-ratelimit-unified-5h-reset": "1758765600",
+      "anthropic-ratelimit-unified-5h-status": "allowed",
+      "anthropic-ratelimit-unified-fallback-percentage": "0.2",
+      "anthropic-ratelimit-unified-overage-disabled-reason": "overage_not_provisioned",
+      "anthropic-ratelimit-unified-representative-claim": "five_hour",
+      "anthropic-ratelimit-unified-reset": "1758765600",
+      "anthropic-ratelimit-unified-status": "allowed",
+      "cache-control": "no-cache",
+      "cf-cache-status": "DYNAMIC",
+      "cf-ray": "984586f0c8ff61ee-MRS",
+      "content-type": "text/event-stream; charset=utf-8",
+      "date": "Wed, 24 Sep 2025 21:55:40 GMT",
+      "request-id": "req_011CTTyJLdXZoE8WArn97qhg",
+      "server": "cloudflare",
+      "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+      "transfer-encoding": "chunked",
+      "via": "1.1 google",
+      "x-envoy-upstream-service-time": "2784",
+      "x-request-id": "5530239f",
+      "x-robots-tag": "none"
+    },
+    "mode": "stream",
+    "status_code": 200,
+    "summary": {
+      "aggregated_response": {
+        "content": [
+          {
+            "text": "Hello! I'm Claude Code, Anthropic's CLI for Claude. I can help you with various programming and development tasks through the command line interface.\n\nHow can I assist you today? I can help with:\n- Code writing and debugging\n- File operations and analysis\n- Command line utilities\n- Programming questions\n- And much more!\n\nWhat would you like to work on?",
+            "type": "text"
+          }
+        ],
+        "id": "msg_01HTRpp3qoAKyYXSKeQ7hDWL",
+        "model": "claude-sonnet-4-20250514",
+        "role": "assistant",
+        "stop_reason": "end_turn",
+        "text": "Hello! I'm Claude Code, Anthropic's CLI for Claude. I can help you with various programming and development tasks through the command line interface.\n\nHow can I assist you today? I can help with:\n- Code writing and debugging\n- File operations and analysis\n- Command line utilities\n- Programming questions\n- And much more!\n\nWhat would you like to work on?",
+        "type": "message",
+        "usage": {
+          "cache_read_input_tokens": 0,
+          "input_tokens": 22,
+          "output_tokens": 83
+        }
+      },
+      "chunk_model_class": "MessageStartEvent",
+      "processed_events": 16
+    }
+  },
+  "stream": true
+}

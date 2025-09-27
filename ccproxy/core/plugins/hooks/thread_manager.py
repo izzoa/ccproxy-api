@@ -172,7 +172,7 @@ class BackgroundHookThreadManager:
                     self._logger.error(
                         "background_hook_execution_failed",
                         hook=hook.name,
-                        event=task.context.event.value
+                        event_type=task.context.event.value
                         if hasattr(task.context.event, "value")
                         else str(task.context.event),
                         error=str(e),

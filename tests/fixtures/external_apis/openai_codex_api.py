@@ -56,11 +56,11 @@ def mock_external_openai_codex_api_streaming(httpx_mock: HTTPXMock) -> HTTPXMock
     Returns:
         HTTPXMock configured with streaming Codex responses
     """
-    streaming_response = """data: {"id":"codex_streaming_123","object":"codex.response.chunk","created":1234567890,"model":"gpt-5","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}],"usage":null}
+    streaming_response = """data: {"id":"chunk_1","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}
 
-data: {"id":"codex_streaming_123","object":"codex.response.chunk","created":1234567890,"model":"gpt-5","choices":[{"index":0,"delta":{"content":" from"},"finish_reason":null}],"usage":null}
+data: {"id":"chunk_1","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5","choices":[{"index":0,"delta":{"content":" from"},"finish_reason":null}]}
 
-data: {"id":"codex_streaming_123","object":"codex.response.chunk","created":1234567890,"model":"gpt-5","choices":[{"index":0,"delta":{"content":" Codex!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}}
+data: {"id":"chunk_1","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5","choices":[{"index":0,"delta":{"content":" Codex!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}}
 
 data: [DONE]
 

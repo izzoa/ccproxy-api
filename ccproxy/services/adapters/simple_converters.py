@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
+from pydantic import TypeAdapter, ValidationError
+
 from ccproxy.core import logging
 from ccproxy.core.constants import (
     FORMAT_ANTHROPIC_MESSAGES as ANTHROPIC_MESSAGES,
@@ -19,11 +21,15 @@ from ccproxy.core.constants import (
 from ccproxy.core.constants import (
     FORMAT_OPENAI_RESPONSES as OPENAI_RESPONSES,
 )
-from ccproxy.llms.formatters.anthropic_to_openai import helpers as anthropic_to_openai
-from ccproxy.llms.formatters.openai_to_anthropic import helpers as openai_to_anthropic
-from ccproxy.llms.formatters.openai_to_openai import helpers as openai_to_openai
+from ccproxy.llms.formatters import (
+    anthropic_to_openai,
+    openai_to_anthropic,
+    openai_to_openai,
+)
+from ccproxy.llms.formatters import anthropic_to_openai as a2o
 from ccproxy.llms.models import anthropic as anthropic_models
 from ccproxy.llms.models import openai as openai_models
+from ccproxy.llms.models.anthropic import MessageStreamEvent
 
 from .format_adapter import DictFormatAdapter
 from .format_registry import FormatRegistry
@@ -34,44 +40,20 @@ FormatDict = dict[str, Any]
 logger = logging.get_logger(__name__)
 
 
-def _safe_validate(model: Any, data: dict[str, Any]) -> Any:
-    """Validate data against a Pydantic model; fallback to SimpleNamespace.
+_type_adapter_cache: dict[Any, TypeAdapter[Any]] = {}
 
-    This keeps stream conversion resilient to unexpected event variants.
+
+def _validate_stream_event(model: Any, data: dict[str, Any]) -> Any:
+    """Validate a streaming event against the provided model.
+
+    Raises ValidationError when the payload does not conform so callers can fail fast.
     """
-    try:
-        from pydantic import TypeAdapter
 
+    adapter = _type_adapter_cache.get(model)
+    if adapter is None:
         adapter = TypeAdapter(model)
-        return adapter.validate_python(data)
-    except Exception:
-        from types import SimpleNamespace
-
-        return SimpleNamespace(**data)
-
-
-async def _convert_stream_single_chunk(
-    chunk_data: dict[str, Any],
-    *,
-    validator_model: Any,
-    converter: Any,
-) -> AsyncIterator[dict[str, Any]]:
-    """Validate a single stream event, convert via converter(stream), yield dicts.
-
-    This helper removes repetitive code across streaming converters by:
-    - attempting typed validation for better downstream behavior
-    - falling back to a SimpleNamespace when schema is unknown
-    - wrapping the single event into an async generator for converter(stream)
-    - re-yielding converted typed chunks as plain dicts
-    """
-    chunk = _safe_validate(validator_model, chunk_data)
-
-    async def _one() -> AsyncIterator[Any]:
-        yield chunk
-
-    converted_chunks = converter(_one())
-    async for converted_chunk in converted_chunks:
-        yield converted_chunk.model_dump(exclude_unset=True)
+        _type_adapter_cache[model] = adapter
+    return adapter.validate_python(data)
 
 
 # Generic stream mapper to DRY conversion loops
@@ -81,13 +63,25 @@ async def map_stream(
     validator_model: Any,
     converter: Any,
 ) -> AsyncIterator[FormatDict]:
-    async for chunk_data in stream:
-        async for out_chunk in _convert_stream_single_chunk(
-            chunk_data,
-            validator_model=validator_model,
-            converter=converter,
-        ):
-            yield out_chunk
+    async def _typed_stream() -> AsyncIterator[Any]:
+        async for chunk_data in stream:
+            try:
+                yield _validate_stream_event(validator_model, chunk_data)
+            except ValidationError as exc:
+                logger.debug(
+                    "stream_chunk_validation_failed",
+                    model=str(validator_model),
+                    error=str(exc),
+                    action="raise",
+                )
+                raise
+
+    converted_chunks = converter(_typed_stream())
+    async for converted_chunk in converted_chunks:
+        if hasattr(converted_chunk, "model_dump"):
+            yield converted_chunk.model_dump(exclude_unset=True)
+        else:
+            yield converted_chunk
 
 
 # OpenAI to Anthropic converters (for plugins that target Anthropic APIs)
@@ -127,11 +121,10 @@ async def convert_anthropic_to_openai_stream(
     stream: AsyncIterator[FormatDict],
 ) -> AsyncIterator[FormatDict]:
     """Convert Anthropic MessageStream to OpenAI ChatCompletion stream."""
-    from ccproxy.llms.models.anthropic import MessageStreamEvent
 
     async for out_chunk in map_stream(
         stream,
-        validator_model=MessageStreamEvent,
+        validator_model=anthropic_models.MessageStreamEvent,
         converter=anthropic_to_openai.convert__anthropic_message_to_openai_chat__stream,
     ):
         yield out_chunk
@@ -301,6 +294,12 @@ async def convert_openai_responses_to_openai_chat_response(
     data: FormatDict,
 ) -> FormatDict:
     """Convert OpenAI Responses response to OpenAI ChatCompletion response."""
+    if isinstance(data, dict):
+        if data.get("object") == "chat.completion" or (
+            "choices" in data and "response" not in data and "model" in data
+        ):
+            return data
+
     # Convert dict to typed model
     response = openai_models.ResponseObject.model_validate(data)
 
@@ -364,8 +363,6 @@ async def convert_anthropic_to_openai_responses_stream(
 
     Avoid dict→model→dict churn by using the shared map_stream helper.
     """
-    from ccproxy.llms.formatters.anthropic_to_openai import helpers as a2o
-    from ccproxy.llms.models.anthropic import MessageStreamEvent
 
     async for out_chunk in map_stream(
         stream,

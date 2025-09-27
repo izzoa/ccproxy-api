@@ -4,6 +4,8 @@ Provides reusable, high-performance fixtures for testing CCProxy plugins
 with minimal startup overhead and proper isolation.
 """
 
+from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -17,6 +19,58 @@ from ccproxy.config.settings import Settings
 from ccproxy.services.container import ServiceContainer
 
 
+PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ccproxy" / "plugins"
+
+
+def _available_plugin_names() -> set[str]:
+    """Return the set of filesystem plugin package names."""
+
+    if not PLUGINS_DIR.exists():
+        return set()
+
+    return {
+        entry.name
+        for entry in PLUGINS_DIR.iterdir()
+        if entry.is_dir() and (entry / "plugin.py").exists()
+    }
+
+
+def _build_isolated_plugin_settings(
+    plugin_configs: dict[str, dict[str, Any]],
+    *,
+    logging_overrides: dict[str, Any] | None = None,
+    extra_disabled: Iterable[str] | None = None,
+) -> Settings:
+    """Create test settings that only enable the explicitly requested plugins."""
+
+    requested_plugins = set(plugin_configs.keys())
+
+    # Always disable DuckDB storage unless explicitly requested (avoids I/O).
+    if "duckdb_storage" not in plugin_configs:
+        plugin_configs = {
+            "duckdb_storage": {"enabled": False},
+            **plugin_configs,
+        }
+        requested_plugins.add("duckdb_storage")
+
+    disabled_plugins = sorted(_available_plugin_names() - requested_plugins)
+
+    if extra_disabled:
+        disabled_plugins.extend(extra_disabled)
+
+    return Settings(
+        enable_plugins=True,
+        plugins_disable_local_discovery=False,
+        disabled_plugins=disabled_plugins,
+        plugins=plugin_configs,
+        logging={
+            "level": "ERROR",
+            "verbose_api": False,
+            **(logging_overrides or {}),
+        },
+    )
+
+
 @pytest.fixture(scope="session")
 def base_integration_settings() -> Settings:
     """Base settings for integration tests with minimal overhead."""
@@ -26,7 +80,6 @@ def base_integration_settings() -> Settings:
         # Disable expensive features for faster tests
         logging={
             "level": "ERROR",  # Minimal logging for speed
-            "enable_plugin_logging": False,
             "verbose_api": False,
         },
         # Minimal server config
@@ -59,25 +112,11 @@ def integration_app_factory():
         # Set up logging manually for test environment - minimal logging for speed
         from ccproxy.core.logging import setup_logging
 
-        setup_logging(json_logs=False, log_level_name="ERROR")
+        setup_logging(json_logs=False, log_level_name="DEBUG")
 
         # Explicitly disable known default-on system plugins that can cause I/O
         # side effects in isolated test environments unless requested.
-        plugin_configs = {
-            "duckdb_storage": {"enabled": False},
-            **plugin_configs,
-        }
-
-        settings = Settings(
-            enable_plugins=True,
-            plugins_disable_local_discovery=False,  # Enable local plugin discovery
-            plugins=plugin_configs,
-            logging={
-                "level": "ERROR",  # Minimal logging for speed
-                "enable_plugin_logging": False,
-                "verbose_api": False,
-            },
-        )
+        settings = _build_isolated_plugin_settings(plugin_configs)
 
         service_container = create_service_container(settings)
         app = create_app(service_container)
@@ -110,20 +149,13 @@ def metrics_integration_app():
     # Set up logging manually for test environment - minimal logging for speed
     setup_logging(json_logs=False, log_level_name="ERROR")
 
-    settings = Settings(
-        enable_plugins=True,
-        plugins_disable_local_discovery=False,  # Enable local plugin discovery
-        plugins={
+    settings = _build_isolated_plugin_settings(
+        {
             "metrics": {
                 "enabled": True,
                 "metrics_endpoint_enabled": True,
             }
-        },
-        logging={
-            "level": "ERROR",  # Minimal logging for speed
-            "enable_plugin_logging": False,
-            "verbose_api": False,
-        },
+        }
     )
 
     service_container = create_service_container(settings)
@@ -152,21 +184,14 @@ def metrics_custom_integration_app():
     # Set up logging once per session - minimal logging for speed
     setup_logging(json_logs=False, log_level_name="ERROR")
 
-    settings = Settings(
-        enable_plugins=True,
-        plugins_disable_local_discovery=False,  # Enable local plugin discovery
-        plugins={
+    settings = _build_isolated_plugin_settings(
+        {
             "metrics": {
                 "enabled": True,
                 "metrics_endpoint_enabled": True,
                 "include_labels": True,
             }
-        },
-        logging={
-            "level": "ERROR",  # Minimal logging for speed
-            "enable_plugin_logging": False,
-            "verbose_api": False,
-        },
+        }
     )
 
     service_container = create_service_container(settings)

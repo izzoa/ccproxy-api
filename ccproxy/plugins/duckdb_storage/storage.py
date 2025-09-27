@@ -617,3 +617,17 @@ class SimpleDuckDBStorage:
         except Exception as e:
             logger.error("simple_duckdb_reset_sync_error", error=str(e), exc_info=e)
             return False
+
+    async def wait_for_queue_processing(self, timeout: float = 5.0) -> None:
+        """Wait for all queued items to be processed by the background worker.
+
+        Args:
+            timeout: Maximum time to wait in seconds
+
+        Raises:
+            asyncio.TimeoutError: If processing doesn't complete within timeout
+        """
+        if not self._initialized or self._shutdown_event.is_set():
+            return
+
+        await asyncio.wait_for(self._write_queue.join(), timeout=timeout)

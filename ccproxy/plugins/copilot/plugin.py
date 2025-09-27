@@ -3,6 +3,7 @@
 import contextlib
 from typing import Any, cast
 
+from ccproxy.auth.oauth import OAuthProviderProtocol
 from ccproxy.core.constants import (
     FORMAT_ANTHROPIC_MESSAGES,
     FORMAT_OPENAI_CHAT,
@@ -18,6 +19,8 @@ from ccproxy.core.plugins import (
     ProviderPluginRuntime,
 )
 from ccproxy.core.plugins.declaration import FormatPair, RouterSpec
+from ccproxy.core.plugins.interfaces import DetectionServiceProtocol
+from ccproxy.llms.streaming.accumulators import OpenAIAccumulator
 from ccproxy.services.adapters.base import BaseAdapter
 from ccproxy.services.interfaces import (
     NullMetricsCollector,
@@ -84,13 +87,6 @@ class CopilotPluginRuntime(ProviderPluginRuntime, AuthProviderPluginRuntime):
             has_detection=bool(self.detection_service),
             has_adapter=bool(self.adapter),
             category="plugin",
-        )
-
-    async def _setup_format_registry(self) -> None:
-        """Format registry setup - using core Anthropic ↔ OpenAI adapters."""
-        logger.debug(
-            "copilot_using_core_format_adapters",
-            required_adapters=[f"{FORMAT_ANTHROPIC_MESSAGES}->{FORMAT_OPENAI_CHAT}"],
         )
 
     async def cleanup(self) -> None:
@@ -172,6 +168,7 @@ class CopilotPluginFactory(BaseProviderPluginFactory, AuthProviderPluginFactory)
         (FORMAT_OPENAI_RESPONSES, FORMAT_OPENAI_CHAT),
         (FORMAT_OPENAI_CHAT, FORMAT_OPENAI_RESPONSES),
     ]
+    tool_accumulator_class = OpenAIAccumulator
 
     def create_context(self, core_services: Any) -> PluginContext:
         """Create context with all plugin components.
@@ -241,8 +238,8 @@ class CopilotPluginFactory(BaseProviderPluginFactory, AuthProviderPluginFactory)
         )
 
     def create_detection_service(
-        self, context: PluginContext | None = None
-    ) -> CopilotDetectionService:
+        self, context: PluginContext
+    ) -> DetectionServiceProtocol:
         """Create detection service instance.
 
         Args:
@@ -251,16 +248,14 @@ class CopilotPluginFactory(BaseProviderPluginFactory, AuthProviderPluginFactory)
         Returns:
             CopilotDetectionService instance
         """
-        if not context:
-            raise ValueError("Context required for detection service")
-
         settings = context.get("settings")
         cli_service = context.get("cli_detection_service")
 
         if not settings or not cli_service:
             raise ValueError("Settings and CLI detection service required")
 
-        return CopilotDetectionService(settings, cli_service)
+        service = CopilotDetectionService(settings, cli_service)
+        return cast(DetectionServiceProtocol, service)
 
     async def create_adapter(self, context: PluginContext) -> BaseAdapter:
         """Create main adapter instance.
@@ -340,7 +335,7 @@ class CopilotPluginFactory(BaseProviderPluginFactory, AuthProviderPluginFactory)
 
     def create_auth_provider(
         self, context: PluginContext | None = None
-    ) -> CopilotOAuthProvider:
+    ) -> OAuthProviderProtocol:
         """Create OAuth provider instance for AuthProviderPluginFactory interface.
 
         Args:
@@ -349,7 +344,8 @@ class CopilotPluginFactory(BaseProviderPluginFactory, AuthProviderPluginFactory)
         Returns:
             CopilotOAuthProvider instance
         """
-        return self.create_oauth_provider(context)
+        provider = self.create_oauth_provider(context)
+        return cast(OAuthProviderProtocol, provider)
 
 
 # Export the factory instance

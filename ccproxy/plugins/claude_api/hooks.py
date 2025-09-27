@@ -5,6 +5,7 @@ from typing import Any
 
 from ccproxy.core.logging import get_plugin_logger
 from ccproxy.core.plugins.hooks import Hook, HookContext, HookEvent
+from ccproxy.streaming.sse_parser import SSEStreamParser
 
 from .streaming_metrics import extract_usage_from_streaming_chunk
 
@@ -32,6 +33,8 @@ class ClaudeAPIStreamingMetricsHook(Hook):
         self.plugin_registry = plugin_registry
         # Store metrics per request_id
         self._metrics_cache: dict[str, dict[str, Any]] = {}
+        # Incremental SSE parsers keyed by request
+        self._sse_parsers: dict[str, SSEStreamParser] = {}
 
     def _get_pricing_service(self) -> Any:
         """Get pricing service, trying lazy loading if not already available."""
@@ -101,20 +104,19 @@ class ClaudeAPIStreamingMetricsHook(Hook):
             }
 
         try:
-            # Handle bytes data
-            if isinstance(chunk_data, bytes):
-                chunk_data = chunk_data.decode("utf-8")
-
-            # Parse SSE data if it's a string
-            if isinstance(chunk_data, str):
-                # Look for data lines in SSE format
-                for line in chunk_data.split("\n"):
-                    if line.startswith("data: "):
-                        data_str = line[6:].strip()
-                        if data_str and data_str != "[DONE]":
-                            event_data = json.loads(data_str)
-                            self._extract_and_accumulate(event_data, request_id)
-                            break
+            if isinstance(chunk_data, str | bytes):
+                parser = self._sse_parsers.setdefault(request_id, SSEStreamParser())
+                for payload in parser.feed(chunk_data):
+                    if isinstance(payload, dict):
+                        self._extract_and_accumulate(payload, request_id)
+                for raw_event, error in parser.consume_errors():
+                    logger.debug(
+                        "chunk_metrics_sse_event_skipped",
+                        plugin="claude_api",
+                        request_id=request_id,
+                        error=str(error),
+                        event_preview=raw_event[:200],
+                    )
             elif isinstance(chunk_data, dict):
                 # Direct dict chunk
                 self._extract_and_accumulate(chunk_data, request_id)
@@ -232,6 +234,20 @@ class ClaudeAPIStreamingMetricsHook(Hook):
 
     async def _finalize_metrics(self, context: HookContext, request_id: str) -> None:
         """Add accumulated metrics to the PROVIDER_STREAM_END event."""
+        parser = self._sse_parsers.pop(request_id, None)
+        if parser:
+            for payload in parser.flush():
+                if isinstance(payload, dict):
+                    self._extract_and_accumulate(payload, request_id)
+            for raw_event, error in parser.consume_errors():
+                logger.debug(
+                    "chunk_metrics_sse_event_skipped",
+                    plugin="claude_api",
+                    request_id=request_id,
+                    error=str(error),
+                    event_preview=raw_event[:200],
+                )
+
         if request_id not in self._metrics_cache:
             return
 

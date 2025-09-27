@@ -143,16 +143,7 @@ class MiddlewareManager:
 
         # Log aggregated success
         if applied_middleware:
-            from ccproxy.core.logging import info_allowed
-
-            # Try to pull app from one of the contexts used earlier in the pipeline; if unavailable, default to INFO
-            app_ref: Any = None
-            log_fn = logger.info
-            try:
-                log_fn = logger.info if info_allowed(app_ref) else logger.debug
-            except Exception:
-                log_fn = logger.info
-            log_fn(
+            logger.info(
                 "middleware_stack_configured",
                 applied=len(applied_middleware),
                 failed=len(failed_middleware),

@@ -3,7 +3,6 @@ Integration test for analytics /logs/query with cursor pagination
 and presence of provider, client_ip, and user_agent fields.
 """
 
-import asyncio
 import time
 from collections.abc import AsyncGenerator
 
@@ -11,6 +10,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from ccproxy.api.bootstrap import create_service_container
+from ccproxy.auth.conditional import get_conditional_auth_manager
 from ccproxy.core.async_task_manager import start_task_manager, stop_task_manager
 
 # Ensure SQLModel knows about AccessLog before storage init
@@ -18,21 +19,30 @@ from ccproxy.plugins.analytics import models as _analytics_models  # noqa: F401
 from ccproxy.plugins.analytics.routes import get_duckdb_storage
 from ccproxy.plugins.analytics.routes import router as analytics_router
 from ccproxy.plugins.duckdb_storage.storage import SimpleDuckDBStorage
+from ccproxy.services.container import ServiceContainer
 
 
 @pytest.fixture(autouse=True)
 async def task_manager_fixture():
     """Start and stop the global async task manager for background tasks."""
-    await start_task_manager()
-    yield
-    await stop_task_manager()
+    container = ServiceContainer.get_current(strict=False)
+    if container is None:
+        container = create_service_container()
+    await start_task_manager(container=container)
+    try:
+        yield
+    finally:
+        await stop_task_manager(container=container)
 
 
 @pytest.fixture
-async def storage() -> AsyncGenerator[SimpleDuckDBStorage, None]:
+async def storage(tmp_path) -> AsyncGenerator[SimpleDuckDBStorage, None]:
     """In-memory DuckDB storage initialized with analytics schema."""
-    storage = SimpleDuckDBStorage(":memory:")
+    storage = SimpleDuckDBStorage(tmp_path / "analytics.duckdb")
     await storage.initialize()
+    from sqlmodel import SQLModel
+
+    SQLModel.metadata.create_all(storage._engine)
     try:
         yield storage
     finally:
@@ -50,6 +60,7 @@ def app(storage: SimpleDuckDBStorage) -> FastAPI:
 
     # Override dependency to return our test storage
     app.dependency_overrides[get_duckdb_storage] = lambda: storage
+    app.dependency_overrides[get_conditional_auth_manager] = lambda: None
     return app
 
 
@@ -99,11 +110,11 @@ class TestAnalyticsQueryCursor:
             await storage.store_request(entry)
 
         # Let background worker flush (optimized for tests)
-        await asyncio.sleep(0.01)
+        await storage.wait_for_queue_processing()
 
         # First page: newest first, limit 2
         r1 = client.get("/logs/query", params={"limit": 2, "order": "desc"})
-        assert r1.status_code == 200
+        assert r1.status_code == 200, r1.text
         d1 = r1.json()
         assert d1["count"] == 2
         assert d1["has_more"] is True

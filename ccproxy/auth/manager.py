@@ -2,8 +2,8 @@
 
 from typing import Any, Protocol, runtime_checkable
 
-from ccproxy.auth.models.base import UserProfile
 from ccproxy.auth.models.credentials import BaseCredentials
+from ccproxy.auth.oauth.protocol import StandardProfileFields
 
 
 @runtime_checkable
@@ -50,11 +50,12 @@ class AuthManager(Protocol):
         """
         ...
 
-    async def get_user_profile(self) -> UserProfile | None:
-        """Get user profile information.
+    async def get_user_profile(self) -> StandardProfileFields | None:
+        """Get standardized user profile information.
 
         Returns:
-            UserProfile if available, None otherwise
+            Standardized profile details when available, otherwise ``None``
+            for providers that do not expose profile metadata.
         """
         ...
 

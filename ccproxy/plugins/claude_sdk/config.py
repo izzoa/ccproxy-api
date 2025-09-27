@@ -6,7 +6,11 @@ from typing import Any
 from claude_code_sdk import ClaudeCodeOptions
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ccproxy.models.provider import ProviderConfig
+from ccproxy.models.provider import ModelCard, ModelMappingRule, ProviderConfig
+from ccproxy.plugins.claude_shared.model_defaults import (
+    DEFAULT_CLAUDE_MODEL_CARDS,
+    DEFAULT_CLAUDE_MODEL_MAPPINGS,
+)
 
 
 def _create_default_claude_code_options(
@@ -144,7 +148,16 @@ class ClaudeSDKSettings(ProviderConfig):
     supports_streaming: bool = True
     requires_auth: bool = False  # SDK handles auth internally
     auth_type: str | None = None
-    models: list[str] = []
+    model_mappings: list[ModelMappingRule] = Field(
+        default_factory=lambda: [
+            rule.model_copy(deep=True) for rule in DEFAULT_CLAUDE_MODEL_MAPPINGS
+        ]
+    )
+    models_endpoint: list[ModelCard] = Field(
+        default_factory=lambda: [
+            card.model_copy(deep=True) for card in DEFAULT_CLAUDE_MODEL_CARDS
+        ]
+    )
 
     # Plugin lifecycle settings
     enabled: bool = True

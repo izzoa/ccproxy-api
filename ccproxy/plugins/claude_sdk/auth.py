@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from ccproxy.auth.models.base import UserProfile
+from ccproxy.auth.oauth.protocol import StandardProfileFields
 from ccproxy.plugins.oauth_claude.models import ClaudeCredentials, ClaudeOAuthToken
 
 
@@ -36,8 +36,8 @@ class NoOpAuthManager:
         """Always return True since SDK handles auth internally."""
         return True
 
-    async def get_user_profile(self) -> UserProfile | None:
-        """Return None since SDK doesn't provide user profile."""
+    async def get_user_profile(self) -> StandardProfileFields | None:
+        """Return ``None`` because the SDK does not surface profile metadata."""
         return None
 
     async def __aenter__(self) -> "NoOpAuthManager":

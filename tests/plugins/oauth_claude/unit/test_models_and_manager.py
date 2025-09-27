@@ -7,7 +7,7 @@ Covers:
 """
 
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import SecretStr
@@ -25,7 +25,7 @@ from ccproxy.plugins.oauth_claude.models import (
 class TestClaudeModels:
     """Test Claude-specific models."""
 
-    def test_claude_token_wrapper(self):
+    def test_claude_token_wrapper(self, tmp_path):
         """Test ClaudeTokenWrapper functionality."""
         # Create test credentials
         oauth = ClaudeOAuthToken(
@@ -37,15 +37,16 @@ class TestClaudeModels:
         )
         credentials = ClaudeCredentials(claudeAiOauth=oauth)
 
-        # Create wrapper
-        wrapper = ClaudeTokenWrapper(credentials=credentials)
+        # Create wrapper with home path isolated from user environment
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            wrapper = ClaudeTokenWrapper(credentials=credentials)
 
-        # Test properties
-        assert wrapper.access_token_value == "test_access"
-        assert wrapper.refresh_token_value == "test_refresh"
-        assert wrapper.is_expired is False
-        assert wrapper.subscription_type == "pro"
-        assert wrapper.scopes == ["read", "write"]
+            # Test properties
+            assert wrapper.access_token_value == "test_access"
+            assert wrapper.refresh_token_value == "test_refresh"
+            assert wrapper.is_expired is False
+            assert wrapper.subscription_type == "pro"
+            assert wrapper.scopes == ["read", "write"]
 
     def test_claude_token_wrapper_expired(self):
         """Test ClaudeTokenWrapper with expired token."""
@@ -161,6 +162,13 @@ class TestTokenManagers:
         assert loaded is not None
         assert manager.is_expired(loaded) is False
         assert await manager.get_access_token_value() == "test_token"
+
+        snapshot = await manager.get_token_snapshot()
+        assert snapshot is not None
+        assert snapshot.provider == "claude-api"
+        assert snapshot.access_token == "test_token"
+        assert snapshot.refresh_token == "refresh_token"
+        assert snapshot.expires_at is not None
 
 
 class TestUnifiedProfiles:

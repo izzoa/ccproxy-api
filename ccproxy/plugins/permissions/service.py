@@ -3,9 +3,9 @@
 import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ccproxy.core.async_task_manager import create_managed_task
+from ccproxy.core.async_task_manager import AsyncTaskManager, create_managed_task
 from ccproxy.core.errors import (
     PermissionNotFoundError,
 )
@@ -17,6 +17,10 @@ from .models import (
     PermissionRequest,
     PermissionStatus,
 )
+
+
+if TYPE_CHECKING:
+    from ccproxy.services.container import ServiceContainer
 
 
 logger = get_plugin_logger()
@@ -33,14 +37,38 @@ class PermissionService:
         self._event_queues: list[asyncio.Queue[dict[str, Any]]] = []
         self._lock = asyncio.Lock()
 
-    async def start(self) -> None:
-        if self._expiry_task is None:
+    async def start(
+        self,
+        *,
+        container: "ServiceContainer | None" = None,
+        task_manager: AsyncTaskManager | None = None,
+    ) -> None:
+        if self._expiry_task is not None:
+            return
+
+        self._shutdown = False
+
+        try:
             self._expiry_task = await create_managed_task(
                 self._expiry_checker(),
                 name="permission_expiry_checker",
                 creator="PermissionService",
+                container=container,
+                task_manager=task_manager,
             )
-            logger.debug("permission_service_started")
+        except RuntimeError as exc:
+            if not self._should_fallback_to_unmanaged_task(exc):
+                raise
+
+            logger.warning(
+                "permission_service_task_manager_unavailable",
+                error=str(exc),
+            )
+            self._expiry_task = asyncio.create_task(
+                self._expiry_checker(), name="permission_expiry_checker"
+            )
+
+        logger.debug("permission_service_started")
 
     async def stop(self) -> None:
         self._shutdown = True
@@ -184,7 +212,7 @@ class PermissionService:
     async def _expiry_checker(self) -> None:
         while not self._shutdown:
             try:
-                await asyncio.sleep(5)
+                await asyncio.sleep(self._get_expiry_poll_interval())
 
                 now = datetime.now(UTC)
                 expired_ids = []
@@ -244,6 +272,27 @@ class PermissionService:
             return (now - request.expires_at) > cleanup_after
 
         return False
+
+    def _get_expiry_poll_interval(self) -> float:
+        """Determine how frequently to poll for expired requests."""
+
+        timeout = max(self._timeout_seconds, 0)
+        if timeout == 0:
+            return 0.5
+
+        return max(0.5, min(5.0, timeout / 2))
+
+    @staticmethod
+    def _should_fallback_to_unmanaged_task(exc: RuntimeError) -> bool:
+        message = str(exc)
+        return any(
+            hint in message
+            for hint in (
+                "Task manager is not started",
+                "ServiceContainer is not available",
+                "AsyncTaskManager is not registered",
+            )
+        )
 
     async def subscribe_to_events(self) -> asyncio.Queue[dict[str, Any]]:
         """Subscribe to permission events.

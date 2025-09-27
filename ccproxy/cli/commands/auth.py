@@ -4,7 +4,8 @@ import asyncio
 import contextlib
 import logging
 import os
-from typing import Annotated, Any
+from datetime import UTC, datetime
+from typing import Annotated, Any, cast
 
 import structlog
 import typer
@@ -12,6 +13,7 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
+from ccproxy.auth.managers.token_snapshot import TokenSnapshot
 from ccproxy.auth.oauth.cli_errors import (
     AuthProviderError,
     AuthTimedOutError,
@@ -98,6 +100,226 @@ def _expected_plugin_class_name(provider: str) -> str:
     parts = [p for p in base.split("_") if p]
     camel = "".join(s[:1].upper() + s[1:] for s in parts)
     return f"Oauth{camel}Plugin"
+
+
+def _token_snapshot_from_credentials(
+    credentials: Any, provider: str | None = None
+) -> TokenSnapshot | None:
+    """Best-effort conversion of provider credentials into a token snapshot.
+
+    Uses the BaseCredentials protocol instead of direct imports to avoid boundary violations.
+    """
+    from ccproxy.auth.models.credentials import BaseCredentials
+
+    # Check if credentials follow the BaseCredentials protocol
+    if not isinstance(credentials, BaseCredentials):
+        # If not following the protocol, try to extract basic info using duck typing
+        return _extract_token_snapshot_duck_typing(credentials, provider)
+
+    # Use the protocol methods
+    try:
+        data = credentials.to_dict()
+        return _build_token_snapshot_from_dict(data, provider)
+    except Exception:
+        return None
+
+
+def _extract_token_snapshot_duck_typing(
+    credentials: Any, provider: str | None = None
+) -> TokenSnapshot | None:
+    """Extract token snapshot using duck typing for non-protocol credentials."""
+    if not credentials:
+        return None
+
+    # Generic duck-typing approach - look for common attributes
+    access_token: str | None = None
+    refresh_token: str | None = None
+    expires_at: datetime | None = None
+    account_id: str | None = None
+    extras: dict[str, Any] = {}
+
+    # Try to extract access token from various possible attributes
+    for attr in ["access_token", "token"]:
+        if hasattr(credentials, attr):
+            token_obj = getattr(credentials, attr)
+            if token_obj:
+                if hasattr(token_obj, "get_secret_value"):
+                    access_token = token_obj.get_secret_value()
+                elif isinstance(token_obj, str):
+                    access_token = token_obj
+                break
+
+    # Try to extract refresh token
+    if hasattr(credentials, "refresh_token"):
+        refresh_obj = credentials.refresh_token
+        if refresh_obj and hasattr(refresh_obj, "get_secret_value"):
+            refresh_token = refresh_obj.get_secret_value()
+        elif isinstance(refresh_obj, str):
+            refresh_token = refresh_obj
+
+    # Try to extract expiration
+    for attr in ["expires_at", "expires_at_datetime", "expiry"]:
+        if hasattr(credentials, attr):
+            expires_obj = getattr(credentials, attr)
+            if isinstance(expires_obj, datetime):
+                expires_at = expires_obj
+                break
+
+    # Try to extract account ID
+    for attr in ["account_id", "user_id", "id"]:
+        if hasattr(credentials, attr):
+            id_obj = getattr(credentials, attr)
+            if isinstance(id_obj, str):
+                account_id = id_obj
+                break
+
+    if not access_token:
+        return None
+
+    return TokenSnapshot(
+        provider=provider or "unknown",
+        account_id=account_id,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_at=expires_at,
+        extras=extras,
+    )
+
+
+def _build_token_snapshot_from_dict(
+    data: dict[str, Any], provider: str | None = None
+) -> TokenSnapshot | None:
+    """Build token snapshot from dictionary data."""
+    if not data:
+        return None
+
+    def _unwrap_secret(value: Any) -> str | None:
+        """Return plain string from SecretStr-like values."""
+        if value is None:
+            return None
+        if hasattr(value, "get_secret_value"):
+            try:
+                result = value.get_secret_value()
+                return str(result) if result is not None else None
+            except Exception:
+                return None
+        if isinstance(value, str):
+            return value or None
+        return None
+
+    def _coerce_datetime(value: Any) -> datetime | None:
+        """Convert supported values into timezone-aware datetime objects."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=UTC)
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value)
+            except ValueError:
+                return None
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+        if isinstance(value, int | float):
+            timestamp = float(value)
+            # Treat very large integers as millisecond timestamps
+            if timestamp > 1e11:
+                timestamp /= 1000
+            try:
+                return datetime.fromtimestamp(timestamp, tz=UTC)
+            except (OSError, ValueError):
+                return None
+        return None
+
+    provider_value = provider or data.get("provider") or "unknown"
+    provider_normalized = provider_value.replace("_", "-")
+
+    extras: dict[str, Any] = dict(data.get("extras", {}))
+    scopes: tuple[str, ...] = tuple(
+        str(scope) for scope in data.get("scopes", []) if scope
+    )
+
+    account_id: str | None = _unwrap_secret(data.get("account_id"))
+    access_token: str | None = _unwrap_secret(data.get("access_token"))
+    refresh_token: str | None = _unwrap_secret(data.get("refresh_token"))
+    expires_at: datetime | None = _coerce_datetime(data.get("expires_at"))
+
+    claude_data = data.get("claudeAiOauth") or data.get("claude_ai_oauth")
+    if isinstance(claude_data, dict):
+        provider_normalized = "claude-api"
+        access_token = access_token or _unwrap_secret(
+            claude_data.get("accessToken") or claude_data.get("access_token")
+        )
+        refresh_token = refresh_token or _unwrap_secret(
+            claude_data.get("refreshToken") or claude_data.get("refresh_token")
+        )
+        expires_at = expires_at or _coerce_datetime(
+            claude_data.get("expiresAt") or claude_data.get("expires_at")
+        )
+        scopes = tuple(str(scope) for scope in claude_data.get("scopes", []) if scope)
+        subscription = claude_data.get("subscriptionType") or claude_data.get(
+            "subscription_type"
+        )
+        if subscription:
+            extras.setdefault("subscription_type", subscription)
+
+    tokens_data = data.get("tokens")
+    if isinstance(tokens_data, dict):
+        provider_normalized = "codex"
+        access_token = access_token or _unwrap_secret(tokens_data.get("access_token"))
+        refresh_token = refresh_token or _unwrap_secret(
+            tokens_data.get("refresh_token")
+        )
+        account_id = account_id or tokens_data.get("account_id")
+        if "id_token_present" not in extras:
+            extras["id_token_present"] = bool(tokens_data.get("id_token"))
+
+    oauth_token_data = data.get("oauth_token") or data.get("oauthToken")
+    copilot_token_data = data.get("copilot_token") or data.get("copilotToken")
+    if isinstance(oauth_token_data, dict) or isinstance(copilot_token_data, dict):
+        provider_normalized = "copilot"
+
+    if isinstance(copilot_token_data, dict):
+        token_value = _unwrap_secret(copilot_token_data.get("token"))
+        if token_value:
+            access_token = token_value
+        expires_at = (
+            _coerce_datetime(copilot_token_data.get("expires_at")) or expires_at
+        )
+        extras.setdefault("has_copilot_token", True)
+
+    if isinstance(oauth_token_data, dict):
+        access_token = access_token or _unwrap_secret(
+            oauth_token_data.get("access_token")
+        )
+        refresh_token = refresh_token or _unwrap_secret(
+            oauth_token_data.get("refresh_token")
+        )
+        scope_field = oauth_token_data.get("scope") or ""
+        if scope_field and not scopes:
+            scopes = tuple(
+                scope
+                for scope in (item.strip() for item in str(scope_field).split(" "))
+                if scope
+            )
+        if not extras.get("has_copilot_token"):
+            extras["has_copilot_token"] = False
+        if not expires_at:
+            created_at = oauth_token_data.get("created_at")
+            expires_in = oauth_token_data.get("expires_in")
+            if isinstance(created_at, int | float) and isinstance(
+                expires_in, int | float
+            ):
+                expires_at = _coerce_datetime(created_at + expires_in)
+
+    return TokenSnapshot(
+        provider=provider_normalized,
+        account_id=account_id,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_at=expires_at,
+        scopes=scopes,
+        extras=extras,
+    )
 
 
 def _render_profile_table(
@@ -573,6 +795,7 @@ def status_command(
 
         profile_info = None
         credentials = None
+        snapshot: TokenSnapshot | None = None
 
         if oauth_provider:
             try:
@@ -593,6 +816,17 @@ def status_command(
                             manager = mgr
                 except Exception as e:
                     logger.debug("token_manager_unavailable", error=str(e))
+
+                if manager and hasattr(manager, "get_token_snapshot"):
+                    with contextlib.suppress(Exception):
+                        result = manager.get_token_snapshot()
+                        if asyncio.iscoroutine(result):
+                            snapshot = asyncio.run(result)
+                        else:
+                            snapshot = cast(TokenSnapshot | None, result)
+
+                if not snapshot and credentials:
+                    snapshot = _token_snapshot_from_credentials(credentials, provider)
 
                 if credentials:
                     if provider == "codex":
@@ -759,10 +993,10 @@ def status_command(
                                     )
                                     if not orgs:
                                         reasons.append("no_organizations_in_claims")
-                                if (
-                                    hasattr(credentials, "id_token")
-                                    and not credentials.id_token
-                                ):
+                                has_id_token = bool(
+                                    snapshot and snapshot.extras.get("id_token_present")
+                                )
+                                if not has_id_token:
                                     reasons.append("no_id_token_available")
                             elif prov_dbg in {"claude", "claude-api", "claude_api"}:
                                 if not (
@@ -800,22 +1034,17 @@ def status_command(
             _render_profile_table(profile_info, title="Account Information")
             _render_profile_features(profile_info)
 
-            if detailed and credentials:
-                token_str = None
+            if detailed:
+                token_snapshot = snapshot
+                if not token_snapshot and credentials:
+                    token_snapshot = _token_snapshot_from_credentials(
+                        credentials, provider
+                    )
 
-                if hasattr(credentials, "access_token"):
-                    token_str = str(credentials.access_token)
-                elif hasattr(credentials, "claude_ai_oauth"):
-                    oauth = credentials.claude_ai_oauth
-                    if hasattr(oauth, "access_token"):
-                        if hasattr(oauth.access_token, "get_secret_value"):
-                            token_str = oauth.access_token.get_secret_value()
-                        else:
-                            token_str = str(oauth.access_token)
-
-                if token_str and len(token_str) > 20:
-                    token_preview = f"{token_str[:8]}...{token_str[-8:]}"
-                    console.print(f"\n  Token: [dim]{token_preview}[/dim]")
+                if token_snapshot:
+                    preview = token_snapshot.access_token_preview()
+                    if preview:
+                        console.print(f"\n  Token: [dim]{preview}[/dim]")
         else:
             console.print("[red]✗[/red] Not authenticated or provider not found")
             console.print(f"  Run 'ccproxy auth login {provider}' to authenticate")
