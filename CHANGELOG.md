@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-09-27
+
+### Added
+
+- Added a plugin-based runtime with manifest-driven discovery, adapter registries, and lifecycle hooks (`ccproxy/core/plugins/**`, `ccproxy/api/app.py`, `ccproxy/api/dependencies.py`).
+- Added provider plugins for GitHub Copilot and OpenAI Codex covering detection, OAuth credential management, and proxy routing (`ccproxy/plugins/copilot/**`, `ccproxy/plugins/oauth_codex/**`, `tests/plugins/copilot/**`, `tests/plugins/codex/**`).
+- Added bidirectional OpenAI chat ⇄ Responses formatters that preserve reasoning, tool calls, audio blocks, and usage metadata across streaming and non-streaming flows (`ccproxy/llms/formatters/openai_to_openai.py`, `ccproxy/llms/models/openai.py`, `tests/unit/llms/test_openai_to_openai_reasoning.py`).
+- Added provider-neutral streaming accumulators to rebuild chunked events into complete responses for Anthropic, OpenAI, Copilot, and Codex integrations (`ccproxy/llms/streaming/accumulators.py`, `tests/unit/llms/streaming/test_accumulators.py`).
+- Added a `TokenSnapshot` API and integrated it with provider managers and CLI status output for consistent, masked token diagnostics (`ccproxy/auth/managers/token_snapshot.py`, `ccproxy/plugins/oauth_codex/manager.py`, `ccproxy/cli/commands/auth.py`).
+
+### Changed
+
+- Updated provider configuration models to carry ordered model-mapping rules and `/models` endpoint metadata so adapters can translate client model IDs deterministically (`ccproxy/models/provider.py`).
+- Updated settings loading to perform deep merges that respect environment variable overrides and to include explicit plugin discovery configuration (`ccproxy/config/settings.py`).
+- Updated plugin contexts to expose typed detection/token manager protocols and to register the FastAPI app in the service container, simplifying provider factory wiring (`ccproxy/core/plugins/interfaces.py`, `ccproxy/api/app.py`).
+- Updated token manager bases to derive expiration and refresh behaviour from snapshots instead of ad-hoc attribute probing, clarifying refresh flows across providers (`ccproxy/auth/managers/base.py`, `ccproxy/auth/managers/base_enhanced.py`).
+
+### Fixed
+
+- Fixed hooks middleware to wrap streaming responses so HTTP_REQUEST/HTTP_RESPONSE and completion hooks fire after streams finish, restoring tracing and analytics for long-lived responses (`ccproxy/api/middleware/hooks.py`, `ccproxy/api/middleware/streaming_hooks.py`).
+
+### Documentation
+
+- Added an auth provider developer guide covering OAuth providers, token managers, and snapshot usage for CLI tooling (`docs/development/auth-providers.md`).
+
 ## [0.1.7] - 2025-08-13
 
 ### Added
