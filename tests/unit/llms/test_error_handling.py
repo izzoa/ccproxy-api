@@ -148,3 +148,71 @@ class TestEdgeCases:
         long_content = "Hello " * 10000  # 60k characters
         message = AnthropicMessage(role="user", content=long_content)
         assert len(message.content) == 60000
+
+    def test_anthropic_tool_nested_custom_payload(self) -> None:
+        """Incoming tool payloads with nested custom definition parse correctly."""
+
+        payload = {
+            "type": "tool",
+            "custom": {
+                "name": "read_file",
+                "description": "Read project files",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+        }
+
+        request = AnthropicCreateMessageRequest(
+            model="claude-3-opus-20240229",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=128,
+            tools=[payload],
+        )
+
+        tool = request.tools[0]
+        assert tool.type == "tool"
+        assert tool.name == "read_file"
+        assert tool.input_schema == {"type": "object", "properties": {}}
+
+    def test_anthropic_tool_nested_custom_legacy_tag(self) -> None:
+        """Legacy `type=custom` payloads still validate and forward."""
+
+        payload = {
+            "type": "custom",
+            "custom": {
+                "name": "write_file",
+                "description": "Write project files",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+        }
+
+        request = AnthropicCreateMessageRequest(
+            model="claude-3-opus-20240229",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=128,
+            tools=[payload],
+        )
+
+        tool = request.tools[0]
+        assert tool.type == "custom"
+        assert tool.name == "write_file"
+        assert tool.input_schema == {"type": "object", "properties": {}}
+
+    def test_anthropic_tool_missing_type_defaults_to_custom(self) -> None:
+        """Tool definitions without a discriminator assume legacy custom tag."""
+
+        payload = {
+            "name": "list",
+            "description": "List files in a directory",
+            "input_schema": {"type": "object"},
+        }
+
+        request = AnthropicCreateMessageRequest(
+            model="claude-3-opus-20240229",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=128,
+            tools=[payload],
+        )
+
+        tool = request.tools[0]
+        assert tool.type == "custom"
+        assert tool.name == "list"

@@ -174,9 +174,9 @@ async def list_models_v1(
     config: CopilotConfigDep,
 ) -> OpenAIResponse:
     """List available Copilot models."""
-    if config.models_endpoint:
-        models = [card.model_dump(mode="json") for card in config.models_endpoint]
-        return JSONResponse(content={"object": "list", "data": models})
+    # if config.models_endpoint:
+    #     models = [card.model_dump(mode="json") for card in config.models_endpoint]
+    #     return JSONResponse(content={"object": "list", "data": models})
 
     # Forward request to upstream Copilot API when no override configured
     request.state.context.metadata["endpoint"] = UPSTREAM_ENDPOINT_OPENAI_MODELS

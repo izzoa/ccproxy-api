@@ -1,7 +1,8 @@
+from copy import deepcopy
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from ccproxy.llms.formatters import LlmBaseModel
 
@@ -229,8 +230,8 @@ class ServerToolUsage(LlmBaseModel):
 class Usage(LlmBaseModel):
     """Token usage statistics."""
 
-    input_tokens: int
-    output_tokens: int
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     cache_creation: CacheCreation | None = None
     cache_creation_input_tokens: int | None = None
     cache_read_input_tokens: int | None = None
@@ -239,16 +240,52 @@ class Usage(LlmBaseModel):
 
 
 # --- Tool Definitions ---
-class Tool(LlmBaseModel):
-    """Definition of a custom tool the model can use."""
+def _normalize_tool_payload(value: Any) -> Any:
+    """Return a mutable dict with required tool fields normalized."""
 
-    # Discriminator field for union matching
-    type: Literal["custom"] = Field(default="custom", alias="type")
+    if not isinstance(value, dict):
+        return value
+
+    normalized: dict[str, Any] = deepcopy(value)
+    custom = normalized.get("custom")
+    if isinstance(custom, dict):
+        for key in ("name", "description", "input_schema"):
+            normalized.setdefault(key, custom.get(key))
+
+    normalized.setdefault("input_schema", normalized.get("input_schema") or {})
+
+    if "type" not in normalized:
+        normalized["type"] = "custom"
+
+    return normalized
+
+
+class ToolBase(LlmBaseModel):
+    """Shared fields for custom tool definitions."""
+
     name: str = Field(
         ..., min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]{1,128}$"
     )
     description: str | None = None
-    input_schema: dict[str, Any]
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _merge_nested_custom(cls, value: Any) -> Any:
+        """Support nested {"custom": {...}} payloads by flattening fields."""
+        return _normalize_tool_payload(value)
+
+
+class Tool(ToolBase):
+    """Definition of a custom tool in the current Anthropic schema."""
+
+    type: Literal["tool"] = Field(default="tool", alias="type")
+
+
+class LegacyCustomTool(ToolBase):
+    """Backward-compatible support for earlier 'custom' tool payloads."""
+
+    type: Literal["custom"] = Field(default="custom", alias="type")
 
 
 class WebSearchTool(LlmBaseModel):
@@ -262,7 +299,7 @@ class WebSearchTool(LlmBaseModel):
 
 # Add other specific built-in tool models here as needed
 AnyTool = Annotated[
-    Tool | WebSearchTool,  # Union of all tool types
+    Tool | LegacyCustomTool | WebSearchTool,  # Union of all tool types
     Field(discriminator="type"),
 ]
 
@@ -386,6 +423,18 @@ class CreateMessageRequest(LlmBaseModel):
     top_k: int | None = None
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_tools(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        tools = data.get("tools")
+        if isinstance(tools, list):
+            data["tools"] = [_normalize_tool_payload(tool) for tool in tools]
+
+        return data
+
 
 class CountMessageTokensRequest(LlmBaseModel):
     """Request model for counting tokens in a message."""
@@ -394,6 +443,18 @@ class CountMessageTokensRequest(LlmBaseModel):
     messages: list[Message]
     system: str | list[TextBlock] | None = None
     tools: list[AnyTool] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_tools(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        tools = data.get("tools")
+        if isinstance(tools, list):
+            data["tools"] = [_normalize_tool_payload(tool) for tool in tools]
+
+        return data
 
 
 # --- Response Models ---

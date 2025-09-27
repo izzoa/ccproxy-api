@@ -211,7 +211,7 @@ class ChatCompletionRequest(LlmBaseModel):
     """
 
     messages: list[ChatMessage]
-    model: str
+    model: str | None = Field(default=None)
     audio: dict[str, Any] | None = None
     frequency_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
     logit_bias: dict[str, float] | None = Field(default=None)
@@ -325,9 +325,9 @@ class ChatCompletionChunk(LlmBaseModel):
     id: str
     object: Literal["chat.completion.chunk"] = Field(default="chat.completion.chunk")
     created: int
-    model: str
+    model: str | None = None
     system_fingerprint: str | None = None
-    choices: list[StreamingChoice]
+    choices: list[StreamingChoice] = Field(default_factory=list)
     usage: CompletionUsage | None = Field(
         default=None,
         description="Usage stats, present only in the final chunk if requested.",
@@ -535,7 +535,7 @@ class ResponseObject(LlmBaseModel):
     reasoning: Reasoning | None = None
     store: bool | None = None
     temperature: float | None = None
-    text: dict[str, Any] | None = None
+    text: dict[str, Any] | str | None = None
     tool_choice: str | dict[str, Any] | None = None
     tools: list[Any] | None = None
     top_p: float | None = None

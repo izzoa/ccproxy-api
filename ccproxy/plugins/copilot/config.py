@@ -2,7 +2,16 @@
 
 from pydantic import BaseModel, Field
 
-from ccproxy.models.provider import ProviderConfig
+from ccproxy.models.provider import (
+    ModelCard,
+    ModelMappingRule,
+    ProviderConfig,
+)
+
+from .model_defaults import (
+    DEFAULT_COPILOT_MODEL_CARDS,
+    DEFAULT_COPILOT_MODEL_MAPPINGS,
+)
 
 
 class CopilotOAuthConfig(BaseModel):
@@ -110,6 +119,25 @@ class CopilotProviderConfig(ProviderConfig):
             "X-GitHub-Api-Version": "2025-04-01",
         },
         description="Default headers for Copilot API requests",
+    )
+
+    model_mappings: list[ModelMappingRule] = Field(
+        default_factory=lambda: [
+            rule.model_copy(deep=True) for rule in DEFAULT_COPILOT_MODEL_MAPPINGS
+        ],
+        description=(
+            "Ordered model translation rules mapping client model identifiers to "
+            "Copilot upstream equivalents."
+        ),
+    )
+    models_endpoint: list[ModelCard] = Field(
+        default_factory=lambda: [
+            card.model_copy(deep=True) for card in DEFAULT_COPILOT_MODEL_CARDS
+        ],
+        description=(
+            "Fallback metadata served from /models when the Copilot API listing is "
+            "unavailable."
+        ),
     )
 
 

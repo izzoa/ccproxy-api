@@ -58,6 +58,28 @@ def _log_missing_dependency(
     logging.warning("%s %s", event_name, log_payload)
 
 
+def build_combined_plugin_denylist(
+    disabled_plugins: Iterable[str] | None,
+    plugin_configs: dict[str, Any] | None,
+) -> set[str]:
+    """Merge explicit and per-plugin disabled settings into a single deny list."""
+
+    combined = set(disabled_plugins or [])
+
+    if not plugin_configs:
+        return combined
+
+    for plugin_name, config in plugin_configs.items():
+        if not isinstance(config, dict):
+            continue
+
+        enabled_flag = config.get("enabled")
+        if enabled_flag is False:
+            combined.add(plugin_name)
+
+    return combined
+
+
 class PluginDiscovery:
     """Discovers and loads plugins from the filesystem."""
 
@@ -366,60 +388,26 @@ class PluginFilter:
     def __init__(
         self,
         enabled_plugins: list[str] | None = None,
-        disabled_plugins: list[str] | None = None,
-        settings: Any | None = None,
+        disabled_plugins: Iterable[str] | None = None,
     ):
         """Initialize plugin filter.
 
         Args:
             enabled_plugins: List of explicitly enabled plugins (None = all)
-            disabled_plugins: List of explicitly disabled plugins
-            settings: Settings object to check individual plugin enabled flags
+            disabled_plugins: Precomputed deny list of disabled plugins
         """
         self.enabled_plugins = set(enabled_plugins) if enabled_plugins else None
-        self.disabled_plugins = set(disabled_plugins) if disabled_plugins else set()
-        self.settings = settings
+        self.disabled_plugins = set(disabled_plugins or [])
 
     def is_enabled(self, plugin_name: str) -> bool:
-        """Check if a plugin is enabled.
+        """Check if a plugin is enabled using allow/deny-list precedence."""
 
-        Priority hierarchy:
-        1. enabled_plugins whitelist (if specified, ONLY these are enabled)
-        2. disabled_plugins blacklist (blocks specific plugins)
-        3. Individual plugin enabled=false setting (blocks unless overridden by enabled_plugins)
-
-        Args:
-            plugin_name: Plugin name
-
-        Returns:
-            True if plugin is enabled
-        """
         # 1. If enabled_plugins is specified, ONLY those are allowed
         if self.enabled_plugins is not None:
             return plugin_name in self.enabled_plugins
 
         # 2. Check disabled_plugins blacklist
-        if plugin_name in self.disabled_plugins:
-            return False
-
-        # 3. Check individual plugin enabled setting
-        if self.settings is not None:
-            try:
-                # Try to get the plugin config via plugins[name]["enabled"]
-                plugins_config = getattr(self.settings, "plugins", {})
-                if plugin_name in plugins_config:
-                    individual_config = plugins_config[plugin_name]
-                    if (
-                        isinstance(individual_config, dict)
-                        and individual_config.get("enabled") is False
-                    ):
-                        return False
-            except (AttributeError, TypeError):
-                # If we can't check individual settings, fall back to enabled by default
-                pass
-
-        # Otherwise, enabled by default
-        return True
+        return plugin_name not in self.disabled_plugins
 
     def filter_factories(
         self, factories: dict[str, PluginFactory]
@@ -434,12 +422,25 @@ class PluginFilter:
         """
         logger_filter = _get_logger("filter")
         filtered = {}
+        enabled_plugins = []
+        disabled_plugins = []
 
         for name, factory in factories.items():
             if self.is_enabled(name):
                 filtered[name] = factory
+                enabled_plugins.append(name)
             else:
+                disabled_plugins.append(name)
                 _get_logger("filter", name).info("plugin_disabled")
+
+        # Debug logging for enabled and disabled plugins
+        logger_filter.debug(
+            "plugin_filter_summary",
+            enabled_plugins=sorted(enabled_plugins),
+            disabled_plugins=sorted(disabled_plugins),
+            enabled_count=len(enabled_plugins),
+            disabled_count=len(disabled_plugins),
+        )
 
         return filtered
 
@@ -469,10 +470,14 @@ def discover_and_load_plugins(settings: Settings) -> dict[str, PluginFactory]:
     # Discover plugins
     discovery = PluginDiscovery(plugin_dirs)
 
+    combined_denylist = build_combined_plugin_denylist(
+        getattr(settings, "disabled_plugins", None),
+        getattr(settings, "plugins", None),
+    )
+
     filter_config = PluginFilter(
         enabled_plugins=getattr(settings, "enabled_plugins", None),
-        disabled_plugins=getattr(settings, "disabled_plugins", None),
-        settings=settings,
+        disabled_plugins=combined_denylist,
     )
 
     # Determine whether to use local filesystem discovery

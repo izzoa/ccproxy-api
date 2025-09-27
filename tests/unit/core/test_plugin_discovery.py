@@ -9,9 +9,14 @@ from ccproxy.core.plugins.declaration import PluginContext, PluginManifest
 from ccproxy.core.plugins.discovery import (
     PluginDiscovery,
     PluginFilter,
+    build_combined_plugin_denylist,
     discover_and_load_plugins,
 )
+from ccproxy.core.plugins.hooks.manager import HookManager
 from ccproxy.core.plugins.interfaces import PluginFactory
+from ccproxy.plugins.claude_api.config import ClaudeAPISettings
+from ccproxy.plugins.claude_api.plugin import ClaudeAPIFactory
+from ccproxy.services.container import ServiceContainer
 
 
 class DummyFactory(PluginFactory):
@@ -28,6 +33,40 @@ class DummyFactory(PluginFactory):
         self, core_services
     ) -> PluginContext:  # pragma: no cover - not used
         return PluginContext()
+
+
+@pytest.mark.unit
+def test_build_combined_plugin_denylist_merges_sources() -> None:
+    denylist = build_combined_plugin_denylist(
+        ["alpha"],
+        {
+            "beta": {"enabled": False},
+            "gamma": {"enabled": True},
+            "delta": {"enabled": None},
+            "epsilon": {"enabled": True, "other": "value"},
+        },
+    )
+
+    assert denylist == {"alpha", "beta"}
+
+
+@pytest.mark.unit
+def test_create_context_populates_default_config_when_missing() -> None:
+    settings = Settings()
+    container = ServiceContainer(settings)
+    hook_registry = container.get_hook_registry()
+    background_manager = container.get_background_hook_thread_manager()
+    container.register_service(
+        HookManager,
+        instance=HookManager(hook_registry, background_manager),
+    )
+    factory = ClaudeAPIFactory()
+
+    context = factory.create_context(container)
+
+    assert (
+        context.get(ClaudeAPISettings).model_dump() == ClaudeAPISettings().model_dump()
+    )
 
 
 @pytest.mark.unit

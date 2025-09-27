@@ -24,6 +24,7 @@ from .commands.auth import app as auth_app
 from .commands.config import app as config_app
 from .commands.plugins import app as plugins_app
 from .commands.serve import api
+from .commands.status import app as status_app
 
 
 def version_callback(value: bool) -> None:
@@ -44,6 +45,8 @@ app = typer.Typer(
 
 # Logger will be configured by configuration manager
 logger = get_logger(__name__)
+
+_plugins_registered = False
 
 
 def register_plugin_cli_extensions(app: typer.Typer) -> None:
@@ -86,6 +89,16 @@ def register_plugin_cli_extensions(app: typer.Typer) -> None:
     except Exception as e:
         # Graceful degradation - CLI still works without plugin extensions
         logger.debug("plugin_cli_extension_registration_failed", error=str(e))
+
+
+def ensure_plugin_cli_extensions_registered(app: typer.Typer) -> None:
+    """Register plugin CLI extensions once, after logging is configured."""
+    global _plugins_registered
+    if _plugins_registered:
+        return
+
+    register_plugin_cli_extensions(app)
+    _plugins_registered = True
 
 
 def _register_plugin_command(
@@ -289,6 +302,7 @@ def _get_command_app(command_name: str) -> typer.Typer | None:
         "auth": auth_app,
         "config": config_app,
         "plugins": plugins_app,
+        "status": status_app,
     }
     return command_apps.get(command_name)
 
@@ -350,11 +364,12 @@ app.add_typer(auth_app)
 # Register plugins command
 app.add_typer(plugins_app)
 
+# Register status command
+app.add_typer(status_app)
+
 # Register imported commands first
 app.command(name="serve")(api)
 
-# After all built-in commands are registered, allow plugins to extend them
-register_plugin_cli_extensions(app)
 # Claude command removed - functionality moved to serve command
 
 
@@ -364,13 +379,15 @@ def main() -> None:
     set_command_context()
     # Early logging bootstrap from env/argv; safe to reconfigure later
     bootstrap_cli_logging()
+    # Register plugin-supplied CLI commands after logging honors env overrides
+    ensure_plugin_cli_extensions_registered(app)
     # Log invocation context (argv + env) for all commands
     _log_cli_invocation_context()
     app()
 
 
 if __name__ == "__main__":
-    sys.exit(app())
+    main()
 
 
 def _mask_env_value(key: str, value: str) -> str:

@@ -13,7 +13,10 @@ from typing import Any
 import structlog
 
 from ccproxy.core.plugins.declaration import PluginManifest
-from ccproxy.core.plugins.discovery import PluginFilter
+from ccproxy.core.plugins.discovery import (
+    PluginFilter,
+    build_combined_plugin_denylist,
+)
 from ccproxy.core.plugins.interfaces import PluginFactory
 
 
@@ -60,10 +63,14 @@ def discover_plugin_cli_extensions(
 
     # Apply plugin filtering if settings provided
     if settings is not None:
+        combined_denylist = build_combined_plugin_denylist(
+            getattr(settings, "disabled_plugins", None),
+            getattr(settings, "plugins", None),
+        )
+
         plugin_filter = PluginFilter(
             enabled_plugins=getattr(settings, "enabled_plugins", None),
-            disabled_plugins=getattr(settings, "disabled_plugins", None),
-            settings=settings,
+            disabled_plugins=combined_denylist,
         )
 
         filtered_manifests = []

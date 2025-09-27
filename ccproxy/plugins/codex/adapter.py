@@ -291,11 +291,19 @@ class CodexAdapter(BaseHTTPAdapter):
         if "max_completion_tokens" in body_data:
             body_data.pop("max_completion_tokens")
 
+        list_input = body_data.get("input", [])
+        # Remove any input types that Codex does not support
+        body_data["input"] = [
+            input for input in list_input if input.get("type") != "item_reference"
+        ]
+
+        #
         # Remove any prefixed metadata fields that shouldn't be sent to the API
         body_data = self._remove_metadata_fields(body_data)
 
         # Filter and add headers
         filtered_headers = filter_request_headers(headers, preserve_auth=False)
+
         session_id = filtered_headers.get("session_id") or str(uuid.uuid4())
         conversation_id = filtered_headers.get("conversation_id") or str(uuid.uuid4())
 

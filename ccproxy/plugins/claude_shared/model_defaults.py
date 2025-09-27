@@ -7,6 +7,38 @@ from ccproxy.models.provider import ModelCard, ModelMappingRule
 
 DEFAULT_CLAUDE_MODEL_CARDS: list[ModelCard] = [
     ModelCard(
+        id="claude-opus-4-1-20250805",
+        created=1722816000,
+        owned_by="anthropic",
+        permission=[],
+        root="claude-opus-4-1-20250805",
+        parent=None,
+    ),
+    ModelCard(
+        id="claude-opus-4-20250514",
+        created=1716336000,
+        owned_by="anthropic",
+        permission=[],
+        root="claude-opus-4-20250514",
+        parent=None,
+    ),
+    ModelCard(
+        id="claude-sonnet-4-20250514",
+        created=1716336000,
+        owned_by="anthropic",
+        permission=[],
+        root="claude-sonnet-4-20250514",
+        parent=None,
+    ),
+    ModelCard(
+        id="claude-3-7-sonnet-20250219",
+        created=1708819200,
+        owned_by="anthropic",
+        permission=[],
+        root="claude-3-7-sonnet-20250219",
+        parent=None,
+    ),
+    ModelCard(
         id="claude-3-5-sonnet-20241022",
         created=1696000000,
         owned_by="anthropic",

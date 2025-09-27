@@ -247,7 +247,7 @@ class AICodeDiscussionManager:
         # Code access tools definition - custom tools with proper format
         self.tools = [
             {
-                "type": "custom",
+                "type": "tool",
                 "custom": {
                     "name": "read_file",
                     "description": "Read the contents of a file from the project directory to analyze code",
@@ -264,7 +264,7 @@ class AICodeDiscussionManager:
                 },
             },
             {
-                "type": "custom",
+                "type": "tool",
                 "custom": {
                     "name": "list_files",
                     "description": "List files and directories in the project directory to explore the codebase",
@@ -289,7 +289,7 @@ class AICodeDiscussionManager:
                 },
             },
             {
-                "type": "custom",
+                "type": "tool",
                 "custom": {
                     "name": "run_bash",
                     "description": "Execute bash commands for code exploration (allowed: rg, fd, find, cat, xargs, head, tail, wc, grep)",

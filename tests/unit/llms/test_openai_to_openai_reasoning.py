@@ -219,6 +219,51 @@ async def test_chat_request_to_responses_respects_disable_env(monkeypatch: Any) 
 
 
 @pytest.mark.asyncio
+async def test_responses_request_promotes_developer_to_system() -> None:
+    request = openai_models.ResponseRequest(
+        model="gpt-test",
+        input=[
+            {
+                "role": "developer",
+                "content": "Developer instructions go here.\nFollow them exactly.",
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "hello"},
+                ],
+            },
+        ],
+    )
+
+    chat_request = await convert__openai_responses_to_openaichat__request(request)
+
+    assert chat_request.messages[0].role == "system"
+    assert "Developer instructions" in chat_request.messages[0].content
+    assert chat_request.messages[1].role == "user"
+    assert chat_request.messages[1].content == "hello"
+
+
+@pytest.mark.asyncio
+async def test_responses_request_preserves_plain_text_content() -> None:
+    request = openai_models.ResponseRequest(
+        model="gpt-test",
+        input=[
+            {
+                "role": "user",
+                "content": "plain text message",
+            }
+        ],
+    )
+
+    chat_request = await convert__openai_responses_to_openaichat__request(request)
+
+    assert len(chat_request.messages) == 1
+    assert chat_request.messages[0].role == "user"
+    assert chat_request.messages[0].content == "plain text message"
+
+
+@pytest.mark.asyncio
 async def test_responses_stream_includes_thinking_xml() -> None:
     async def source():
         yield openai_models.ResponseCreatedEvent(

@@ -33,6 +33,8 @@ THINKING_CLOSE_PATTERN = re.compile(r"</thinking>", re.IGNORECASE)
 
 _REASONING_SUMMARY_MODES = {"auto", "concise", "detailed"}
 
+_RESPONSES_TEXTUAL_PART_TYPES = {"input_text", "text", "output_text"}
+
 
 @dataclass(slots=True)
 class ThinkingSegment:
@@ -376,6 +378,89 @@ def _split_content_segments(content: str) -> list[tuple[str, Any]]:
     return segments
 
 
+def _as_serializable_dict(part: Any) -> dict[str, Any] | None:
+    if isinstance(part, dict):
+        return part
+    if hasattr(part, "model_dump"):
+        with contextlib.suppress(Exception):
+            data = part.model_dump(mode="json", exclude_none=True)
+            if isinstance(data, dict):
+                return data
+    return None
+
+
+def _normalize_responses_input_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, list | tuple):
+        text_parts: list[str] = []
+        fallback_parts: list[Any] = []
+
+        for part in content:
+            serializable = _as_serializable_dict(part)
+            if serializable is not None:
+                part_type = serializable.get("type")
+                if part_type in _RESPONSES_TEXTUAL_PART_TYPES:
+                    text_value = serializable.get("text")
+                    if isinstance(text_value, str) and text_value.strip():
+                        text_parts.append(text_value.strip())
+                        continue
+                fallback_parts.append(serializable)
+                continue
+
+            if isinstance(part, str) and part.strip():
+                text_parts.append(part.strip())
+            else:
+                fallback_parts.append(part)
+
+        if text_parts:
+            return "\n\n".join(text_parts)
+
+        if fallback_parts:
+            with contextlib.suppress(TypeError, ValueError):
+                return json.dumps(fallback_parts, ensure_ascii=False)
+        return ""
+
+    if isinstance(content, dict):
+        with contextlib.suppress(TypeError, ValueError):
+            return json.dumps(content, ensure_ascii=False)
+        return ""
+
+    if content is None:
+        return ""
+
+    if hasattr(content, "model_dump"):
+        with contextlib.suppress(Exception):
+            data = content.model_dump(mode="json", exclude_none=True)
+            if isinstance(data, dict | list):
+                with contextlib.suppress(TypeError, ValueError):
+                    return json.dumps(data, ensure_ascii=False)
+
+    if hasattr(content, "dict"):
+        with contextlib.suppress(Exception):
+            data = content.dict()
+            if isinstance(data, dict | list):
+                with contextlib.suppress(TypeError, ValueError):
+                    return json.dumps(data, ensure_ascii=False)
+
+    return str(content)
+
+
+def _extract_responses_role_and_content(item: Any) -> tuple[str, Any]:
+    if isinstance(item, dict):
+        role = item.get("role")
+        content = item.get("content")
+    else:
+        role = getattr(item, "role", None)
+        content = getattr(item, "content", None)
+
+    if isinstance(role, str) and role:
+        return role, content
+
+    return "user", content
+
+
 def register_request_tools(tools: list[Any] | None) -> None:
     """Record the most recent request tool definitions for streaming heuristics."""
 
@@ -632,71 +717,54 @@ async def convert__openai_responses_to_openaichat__request(
     request: openai_models.ResponseRequest,
 ) -> openai_models.ChatCompletionRequest:
     _log = logger.bind(category="formatter", converter="responses_to_chat_request")
-    system_message: str | None = request.instructions
+    system_segments: list[str] = []
     messages: list[dict[str, Any]] = []
 
-    # Handle string input shortcut
+    if isinstance(request.instructions, str) and request.instructions.strip():
+        system_segments.append(request.instructions.strip())
+
     if isinstance(request.input, str):
-        messages.append({"role": "user", "content": request.input})
+        user_text = request.input.strip()
+        if user_text:
+            messages.append({"role": "user", "content": user_text})
     else:
         for item in request.input or []:
-            role = getattr(item, "role", None) or "user"
-            content_blocks = getattr(item, "content", [])
-            text_parts: list[str] = []
+            role, raw_content = _extract_responses_role_and_content(item)
+            normalized_role = role.lower() if isinstance(role, str) else "user"
+            content_text = _normalize_responses_input_content(raw_content)
 
-            for part in content_blocks or []:
-                if isinstance(part, dict):
-                    if part.get("type") in {"input_text", "text"}:
-                        text = part.get("text")
-                        if isinstance(text, str):
-                            text_parts.append(text)
-                else:
-                    part_type = getattr(part, "type", None)
-                    if part_type in {"input_text", "text"} and hasattr(part, "text"):
-                        text_value = part.text
-                        if isinstance(text_value, str):
-                            text_parts.append(text_value)
+            if normalized_role in {"system", "developer"}:
+                if content_text:
+                    system_segments.append(content_text)
+                continue
 
-            content_text = " ".join([p for p in text_parts if p]).strip()
+            if normalized_role not in {"assistant", "tool", "user"}:
+                normalized_role = "user"
 
-            if not content_text:
-                # Fallback to serialized content blocks if no plain text extracted
-                blocks = []
-                for part in content_blocks or []:
-                    if isinstance(part, dict):
-                        blocks.append(part)
-                    elif hasattr(part, "model_dump"):
-                        blocks.append(part.model_dump(mode="json"))
-                if blocks:
-                    content_text = json.dumps(blocks)
+            final_content = (
+                content_text.strip() if isinstance(content_text, str) else ""
+            )
 
-            if role == "system":
-                # Merge all system content into a single system message
-                system_message = content_text or system_message
-            else:
-                messages.append(
-                    {
-                        "role": role,
-                        "content": content_text or "(empty request)",
-                    }
-                )
+            if not final_content and raw_content not in (None, ""):
+                with contextlib.suppress(TypeError, ValueError):
+                    serialized = json.dumps(raw_content, ensure_ascii=False)
+                    if isinstance(serialized, str) and serialized.strip():
+                        final_content = serialized.strip()
 
-    if system_message:
-        messages.insert(0, {"role": "system", "content": system_message})
+            if not final_content:
+                final_content = "(empty request)"
 
-    # Provide a default user prompt if none extracted
+            messages.append({"role": normalized_role, "content": final_content})
+
+    if system_segments:
+        merged_system = "\n\n".join(
+            segment for segment in system_segments if segment
+        ).strip()
+        if merged_system:
+            messages.insert(0, {"role": "system", "content": merged_system})
+
     if not messages:
         messages.append({"role": "user", "content": "(empty request)"})
-
-    # Ensure all message contents are non-empty strings
-    for entry in messages:
-        content = entry.get("content")
-        if not isinstance(content, str) or not content.strip():
-            entry["content"] = (
-                content.strip()
-                if isinstance(content, str) and content.strip()
-                else "(empty request)"
-            )
 
     payload: dict[str, Any] = {
         "model": request.model or "gpt-4o-mini",
@@ -1715,6 +1783,9 @@ def convert__openai_chat_to_openai_responses__stream(
     response.output_text.delta for each delta content, optional
     response.in_progress with usage if present mid-stream, and a final
     response.completed when stream ends.
+
+    Copilot is emiting the first ChatCompletionChunk without choices
+    we should ignore it
     """
 
     async def generator() -> AsyncGenerator[
@@ -1779,6 +1850,10 @@ def convert__openai_chat_to_openai_responses__stream(
                         has_delta=bool(delta_text),
                         model=model,
                     )
+                    # we don't send the first chunk if no choices and no model
+                    if len(choices) == 0 and not model:
+                        log.debug("chat_stream_ignoring_first_chunk")
+                        continue
 
             # Emit created once we know model (or immediately on first chunk)
             if not created_sent:

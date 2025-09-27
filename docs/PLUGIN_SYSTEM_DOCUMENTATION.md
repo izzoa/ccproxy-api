@@ -626,6 +626,13 @@ class Settings(BaseModel):
     disabled_plugins: list[str] | None = None
 ```
 
+During startup `disabled_plugins` is merged with any `plugins.<name>.enabled = false`
+entries to produce a single deny list. The loader checks the allow list first
+and then confirms a plugin is not deny listed before continuing.
+
+For quick inspection, run `ccproxy plugins list` to see discovered plugins and
+`ccproxy plugins settings <plugin>` to display configuration fields.
+
 Environment variables:
 ```bash
 export ENABLE_PLUGINS=true

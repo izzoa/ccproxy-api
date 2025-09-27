@@ -452,7 +452,7 @@ async def convert__openai_chat_to_anthropic_message__request(
     if request.stream is not None:
         payload_data["stream"] = request.stream
 
-    # Tools mapping (OpenAI function tools -> Anthropic custom tools)
+    # Tools mapping (OpenAI function tools -> Anthropic tool definitions)
     tools_in = request.tools or []
     if tools_in:
         anth_tools: list[dict[str, Any]] = []
@@ -590,16 +590,24 @@ def convert__openai_responses_to_anthropic_message__request(
         anth_tools: list[dict[str, Any]] = []
         for tool in tools_in:
             if isinstance(tool, dict):
-                if tool.get("type") == "function" and isinstance(
-                    tool.get("function"), dict
-                ):
-                    fn = tool["function"]
+                if tool.get("type") == "function":
+                    fn = tool.get("function")
+                    parameters = tool.get("parameters")
+                    if isinstance(fn, dict):
+                        name = fn.get("name") or tool.get("name")
+                        description = fn.get("description") or tool.get("description")
+                        schema = fn.get("parameters") or parameters or {}
+                    else:
+                        name = tool.get("name")
+                        description = tool.get("description")
+                        schema = parameters or {}
+
                     anth_tools.append(
                         {
                             "type": "custom",
-                            "name": tool.get("name"),
-                            "description": tool.get("description"),
-                            "input_schema": tool.get("parameters") or {},
+                            "name": name,
+                            "description": description,
+                            "input_schema": schema,
                         }
                     )
             elif (

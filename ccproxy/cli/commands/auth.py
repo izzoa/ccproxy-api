@@ -2,8 +2,10 @@
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import os
+from collections.abc import Coroutine
 from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 
@@ -403,6 +405,113 @@ def _provider_plugin_name(provider: str) -> str | None:
     return mapping.get(key)
 
 
+def _await_if_needed(value: Any) -> Any:
+    """Await coroutine values in synchronous CLI context."""
+    if inspect.isawaitable(value):
+        return asyncio.run(cast(Coroutine[Any, Any, Any], value))
+    return value
+
+
+def _resolve_token_manager_from_registry(
+    provider: str, oauth_provider: Any, container: ServiceContainer
+) -> Any | None:
+    """Try fetching an auth manager from the global registry."""
+    try:
+        registry = container.get_auth_manager_registry()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("auth_manager_registry_unavailable", error=str(exc))
+        return None
+
+    candidates: list[str] = []
+
+    def _push(name: str | None) -> None:
+        if not name:
+            return
+        normalized = name.strip()
+        if not normalized:
+            return
+        for variant in {
+            normalized,
+            normalized.replace("-", "_"),
+        }:  # normalize hyphen/underscore
+            if variant not in candidates:
+                candidates.append(variant)
+
+    _push(provider)
+    _push(_provider_plugin_name(provider))
+    _push(getattr(oauth_provider, "provider_name", None))
+
+    try:
+        info = oauth_provider.get_provider_info()
+        _push(getattr(info, "plugin_name", None))
+    except Exception as exc:  # pragma: no cover - defensive logging only
+        logger.debug("provider_info_lookup_failed", error=str(exc))
+
+    for candidate in candidates:
+        try:
+            manager = asyncio.run(registry.get(candidate))
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(
+                "auth_manager_registry_get_failed", name=candidate, error=str(exc)
+            )
+            continue
+        if manager:
+            return manager
+
+    return None
+
+
+def _resolve_token_manager(
+    provider: str, oauth_provider: Any, container: ServiceContainer
+) -> Any | None:
+    """Resolve token manager via registry or provider helpers."""
+    manager = _resolve_token_manager_from_registry(provider, oauth_provider, container)
+    if manager:
+        return manager
+
+    if hasattr(oauth_provider, "get_token_manager"):
+        try:
+            candidate = oauth_provider.get_token_manager()
+            manager = _await_if_needed(candidate)
+            if manager:
+                return manager
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug("get_token_manager_failed", error=str(exc))
+
+    if hasattr(oauth_provider, "create_token_manager"):
+        try:
+            candidate = oauth_provider.create_token_manager()
+            manager = _await_if_needed(candidate)
+            if manager:
+                return manager
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug("create_token_manager_failed", error=str(exc))
+
+    return None
+
+
+def _format_seconds(seconds: int | None) -> str:
+    """Format seconds into a short human-readable duration."""
+    if seconds is None:
+        return "Unknown"
+    if seconds <= 0:
+        return "Expired"
+
+    remaining = int(seconds)
+    parts: list[str] = []
+    for label, divisor in (("d", 86_400), ("h", 3_600), ("m", 60)):
+        value, remaining = divmod(remaining, divisor)
+        if value:
+            parts.append(f"{value}{label}")
+        if len(parts) == 2:
+            break
+
+    if remaining and len(parts) < 2:
+        parts.append(f"{remaining}s")
+
+    return " ".join(parts) if parts else "<1s"
+
+
 async def _lazy_register_oauth_provider(
     provider: str,
     registry: OAuthRegistry,
@@ -753,6 +862,172 @@ def login_command(
         raise typer.Exit(1) from e
 
 
+def _refresh_provider_tokens(provider: str) -> None:
+    """Shared implementation for refresh/renew commands."""
+    toolkit = get_rich_toolkit()
+    provider_key = provider.strip().lower()
+    display_name = provider_key.replace("_", "-").title()
+
+    toolkit.print(
+        f"[bold cyan]{display_name} Token Refresh[/bold cyan]",
+        centered=True,
+    )
+    toolkit.print_line()
+
+    try:
+        container = _get_service_container()
+        registry = container.get_oauth_registry()
+        oauth_provider = asyncio.run(
+            get_oauth_provider_for_name(provider_key, registry, container)
+        )
+
+        if not oauth_provider:
+            providers = asyncio.run(discover_oauth_providers(container))
+            available = ", ".join(providers.keys()) if providers else "none"
+            toolkit.print(
+                f"Provider '{provider_key}' not found. Available: {available}",
+                tag="error",
+            )
+            raise typer.Exit(1)
+
+        if not bool(getattr(oauth_provider, "supports_refresh", False)):
+            toolkit.print(
+                f"Provider '{provider_key}' does not support token refresh.",
+                tag="warning",
+            )
+            raise typer.Exit(1)
+
+        credentials = asyncio.run(oauth_provider.load_credentials())
+        if not credentials:
+            toolkit.print(
+                "No credentials found. Run 'ccproxy auth login' first.",
+                tag="warning",
+            )
+            raise typer.Exit(1)
+
+        snapshot = _token_snapshot_from_credentials(credentials, provider_key)
+
+        manager = _resolve_token_manager(provider_key, oauth_provider, container)
+
+        refreshed_credentials: Any | None = None
+        try:
+            if manager and hasattr(manager, "refresh_token"):
+                refreshed_credentials = asyncio.run(manager.refresh_token())
+            else:
+                refresh_token = snapshot.refresh_token if snapshot else None
+                if not refresh_token:
+                    toolkit.print(
+                        "Stored credentials do not include a refresh token; "
+                        "re-authentication is required.",
+                        tag="warning",
+                    )
+                    raise typer.Exit(1)
+
+                refreshed_credentials = asyncio.run(
+                    oauth_provider.refresh_access_token(refresh_token)
+                )
+        except Exception as exc:
+            toolkit.print(f"Token refresh failed: {exc}", tag="error")
+            logger.error(
+                "token_refresh_failed",
+                provider=provider_key,
+                error=str(exc),
+                exc_info=exc,
+            )
+            raise typer.Exit(1) from exc
+
+        if refreshed_credentials is None:
+            with contextlib.suppress(Exception):
+                refreshed_credentials = asyncio.run(oauth_provider.load_credentials())
+            if (
+                not refreshed_credentials
+                and manager
+                and hasattr(manager, "load_credentials")
+            ):
+                with contextlib.suppress(Exception):
+                    refreshed_credentials = asyncio.run(manager.load_credentials())
+
+        refreshed_snapshot = None
+        if refreshed_credentials:
+            refreshed_snapshot = _token_snapshot_from_credentials(
+                refreshed_credentials, provider_key
+            )
+
+        if not refreshed_snapshot and snapshot:
+            refreshed_snapshot = snapshot
+
+        if not refreshed_snapshot:
+            toolkit.print(
+                "Token refresh completed but updated credentials could not be loaded. "
+                "Check logs for details.",
+                tag="warning",
+            )
+            return
+
+        account_display = refreshed_snapshot.account_id or "—"
+        expires_at = (
+            refreshed_snapshot.expires_at.isoformat()
+            if refreshed_snapshot.expires_at
+            else "Unknown"
+        )
+        expires_in = _format_seconds(refreshed_snapshot.expires_in_seconds())
+        access_preview = refreshed_snapshot.access_token_preview() or "(hidden)"
+        refresh_preview = (
+            refreshed_snapshot.refresh_token_preview()
+            if refreshed_snapshot.refresh_token
+            else None
+        )
+
+        toolkit.print("Tokens refreshed successfully", tag="success")
+
+        summary = Table(show_header=False, box=box.SIMPLE)
+        summary.add_column("Field", style="bold")
+        summary.add_column("Value")
+        summary.add_row("Account", account_display)
+        summary.add_row("Expires At", expires_at)
+        summary.add_row("Expires In", expires_in)
+        summary.add_row("Access Token", access_preview)
+        if refresh_preview:
+            summary.add_row("Refresh Token", refresh_preview)
+        if refreshed_snapshot.scopes:
+            summary.add_row("Scopes", ", ".join(refreshed_snapshot.scopes))
+
+        console.print(summary)
+
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        toolkit.print(f"Unexpected error during refresh: {exc}", tag="error")
+        logger.error(
+            "refresh_command_error", provider=provider_key, error=str(exc), exc_info=exc
+        )
+        raise typer.Exit(1) from exc
+
+
+@app.command(name="refresh")
+def refresh_command(
+    provider: Annotated[
+        str,
+        typer.Argument(help="Provider to refresh (claude-api, codex, copilot)"),
+    ],
+) -> None:
+    """Refresh stored credentials using the provider's refresh token."""
+    _ensure_logging_configured()
+    _refresh_provider_tokens(provider)
+
+
+@app.command(name="renew")
+def renew_command(
+    provider: Annotated[
+        str,
+        typer.Argument(help="Alias for refresh command"),
+    ],
+) -> None:
+    """Alias for refresh."""
+    _ensure_logging_configured()
+    _refresh_provider_tokens(provider)
+
+
 @app.command(name="status")
 def status_command(
     provider: Annotated[
@@ -1016,6 +1291,36 @@ def status_command(
             except Exception as e:
                 logger.debug(f"{provider}_status_error", error=str(e), exc_info=e)
 
+        token_snapshot = snapshot
+        if not token_snapshot and credentials:
+            token_snapshot = _token_snapshot_from_credentials(credentials, provider)
+
+        if token_snapshot:
+            # Ensure we surface token metadata in the rendered profile table
+            if not profile_info:
+                profile_info = {
+                    "provider_type": token_snapshot.provider or provider,
+                    "authenticated": True,
+                }
+
+            if token_snapshot.expires_at:
+                profile_info["token_expires_at"] = token_snapshot.expires_at
+
+            profile_info["has_refresh_token"] = token_snapshot.has_refresh_token()
+            profile_info["has_access_token"] = token_snapshot.has_access_token()
+
+            has_id_token = bool(
+                token_snapshot.extras.get("id_token_present")
+                or token_snapshot.extras.get("has_id_token")
+            )
+            if not has_id_token and credentials and hasattr(credentials, "id_token"):
+                with contextlib.suppress(Exception):
+                    has_id_token = bool(credentials.id_token)
+            profile_info["has_id_token"] = has_id_token
+
+            if token_snapshot.scopes and not profile_info.get("scopes"):
+                profile_info["scopes"] = list(token_snapshot.scopes)
+
         if profile_info:
             console.print("[green]✓[/green] Authenticated with valid credentials")
 
@@ -1034,17 +1339,10 @@ def status_command(
             _render_profile_table(profile_info, title="Account Information")
             _render_profile_features(profile_info)
 
-            if detailed:
-                token_snapshot = snapshot
-                if not token_snapshot and credentials:
-                    token_snapshot = _token_snapshot_from_credentials(
-                        credentials, provider
-                    )
-
-                if token_snapshot:
-                    preview = token_snapshot.access_token_preview()
-                    if preview:
-                        console.print(f"\n  Token: [dim]{preview}[/dim]")
+            if detailed and token_snapshot:
+                preview = token_snapshot.access_token_preview()
+                if preview:
+                    console.print(f"\n  Token: [dim]{preview}[/dim]")
         else:
             console.print("[red]✗[/red] Not authenticated or provider not found")
             console.print(f"  Run 'ccproxy auth login {provider}' to authenticate")

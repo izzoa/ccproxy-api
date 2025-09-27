@@ -58,8 +58,8 @@ def anthropic_usage_snapshot(usage: Any) -> UsageSnapshot:
         )
 
     return UsageSnapshot(
-        input_tokens=normalized.input_tokens,
-        output_tokens=normalized.output_tokens,
+        input_tokens=normalized.input_tokens or 0,
+        output_tokens=normalized.output_tokens or 0,
         cache_read_tokens=cache_read,
         cache_creation_tokens=cache_creation,
     )

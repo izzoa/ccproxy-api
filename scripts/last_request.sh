@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Use a function - it won't visually expand
 fdcat() {
-  fd -t f "$@" -x sh -c 'printf "\n\033[1;34m=== %s ===\033[0m\n" "$1" && cat "$1"' _ {}
+  fd -t f "$@" -x sh -c 'printf "\n=== %s ===\n" "$1" && cat "$1"' _ {}
 }
 PATH_LOG="/tmp/ccproxy"
 PATH_REQ="${PATH_LOG}/tracer/"
@@ -53,14 +53,43 @@ if [[ -z "$LAST_UUID" ]]; then
   exit 1
 fi
 
-printf "\n\033[1;34m=== Log ===\033[0m\n"
+printf "\n## Log\n"
+printf '```json\n'
 rg -I -t log "${LAST_UUID}" ${PATH_LOG} | jq .
-printf "\n\033[1;34m=== Raw ===\033[0m\n"
-bat --paging never "${PATH_REQ}/"*"${LAST_UUID}"*.http
-printf "\n\033[1;34m=== Requests ===\033[0m\n"
-bat --paging never "${PATH_REQ}/"*"${LAST_UUID}"*.json
-printf "\n\033[1;34m=== Command ===\033[0m\n"
-fd ${LAST_UUID} "${COMMAND_REQ}" | xargs -I{} -- echo {}
+printf '```\n'
 
-# bat --paging never "${COMMAND_REQ}/"*"${LAST_UUID}"*.txt
-cat "${PATH_REQ}/"*"${LAST_UUID}"*core_http.json | grep '^data: ' | sed 's/^data: //' | jq -r .
+printf "\n## Raw\n"
+for f in "${PATH_REQ}/"*"${LAST_UUID}"*.http; do
+  [ -e "$f" ] || continue
+  echo "$f"
+  printf '```http\n'
+  cat "$f"
+  printf '```\n'
+done
+
+printf "\n## Requests\n"
+for f in "${PATH_REQ}/"*"${LAST_UUID}"*.json; do
+  [ -e "$f" ] || continue
+  echo "$f"
+  printf '```json\n'
+  cat "$f" | jq .
+  printf '```\n'
+done
+
+printf "\n## Response Strem\n"
+for f in "${PATH_REQ}/"*"${LAST_UUID}"*response_core_http.json; do
+  [ -e "$f" ] || continue
+  echo "$f"
+  printf '```json\n'
+  jq -r .body "$f" | grep '^data: ' | sed 's/^data: //' | jq -r .
+  printf '```\n'
+done
+
+printf "\n## Command\n"
+for f in "${COMMAND_REQ}/"*"${LAST_UUID}"*.txt; do
+  [ -e "$f" ] || continue
+  echo "$f"
+  printf '```sh\n'
+  cat "$f"
+  printf '```\n'
+done

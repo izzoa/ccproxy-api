@@ -23,12 +23,12 @@
   "response": {
     "events": [
       {
-        "data": "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_01HTRpp3qoAKyYXSKeQ7hDWL\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-20250514\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":22,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":6,\"service_tier\":\"standard\"}}}",
+        "data": "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_01MxCJa17DFnuQpjqtSrdxyu\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-20250514\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":24,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":3,\"service_tier\":\"standard\"}}}",
         "event": "message_start",
         "json": {
           "message": {
             "content": [],
-            "id": "msg_01HTRpp3qoAKyYXSKeQ7hDWL",
+            "id": "msg_01MxCJa17DFnuQpjqtSrdxyu",
             "model": "claude-sonnet-4-20250514",
             "role": "assistant",
             "stop_reason": null,
@@ -41,8 +41,8 @@
               },
               "cache_creation_input_tokens": 0,
               "cache_read_input_tokens": 0,
-              "input_tokens": 22,
-              "output_tokens": 6,
+              "input_tokens": 24,
+              "output_tokens": 3,
               "service_tier": "standard"
             }
           },
@@ -62,11 +62,11 @@
         }
       },
       {
-        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello! I'm Claude Code\"}}",
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello! It\"}}",
         "event": "content_block_delta",
         "json": {
           "delta": {
-            "text": "Hello! I'm Claude Code",
+            "text": "Hello! It",
             "type": "text_delta"
           },
           "index": 0,
@@ -74,11 +74,11 @@
         }
       },
       {
-        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\", Anthropic's CLI for Claude. I\"}}",
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"'s nice to meet you. I'm\"}}",
         "event": "content_block_delta",
         "json": {
           "delta": {
-            "text": ", Anthropic's CLI for Claude. I",
+            "text": "'s nice to meet you. I'm",
             "type": "text_delta"
           },
           "index": 0,
@@ -93,11 +93,11 @@
         }
       },
       {
-        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" can help you with various programming and development\"}}",
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" Claude, an AI assistant created by Anthropic. How are\"}}",
         "event": "content_block_delta",
         "json": {
           "delta": {
-            "text": " can help you with various programming and development",
+            "text": " Claude, an AI assistant created by Anthropic. How are",
             "type": "text_delta"
           },
           "index": 0,
@@ -105,83 +105,11 @@
         }
       },
       {
-        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" tasks through the command line interface.\\n\\nHow\"}}",
+        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" you doing today, and is there anything I can help you with?\"}}",
         "event": "content_block_delta",
         "json": {
           "delta": {
-            "text": " tasks through the command line interface.\n\nHow",
-            "type": "text_delta"
-          },
-          "index": 0,
-          "type": "content_block_delta"
-        }
-      },
-      {
-        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" can I assist you today? I can help with:\"}}",
-        "event": "content_block_delta",
-        "json": {
-          "delta": {
-            "text": " can I assist you today? I can help with:",
-            "type": "text_delta"
-          },
-          "index": 0,
-          "type": "content_block_delta"
-        }
-      },
-      {
-        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"\\n- Code writing and debugging\\n- File\"}}",
-        "event": "content_block_delta",
-        "json": {
-          "delta": {
-            "text": "\n- Code writing and debugging\n- File",
-            "type": "text_delta"
-          },
-          "index": 0,
-          "type": "content_block_delta"
-        }
-      },
-      {
-        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" operations and analysis\\n- Command line\"}}",
-        "event": "content_block_delta",
-        "json": {
-          "delta": {
-            "text": " operations and analysis\n- Command line",
-            "type": "text_delta"
-          },
-          "index": 0,
-          "type": "content_block_delta"
-        }
-      },
-      {
-        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" utilities\\n- Programming questions\\n- An\"}}",
-        "event": "content_block_delta",
-        "json": {
-          "delta": {
-            "text": " utilities\n- Programming questions\n- An",
-            "type": "text_delta"
-          },
-          "index": 0,
-          "type": "content_block_delta"
-        }
-      },
-      {
-        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"d much more!\\n\\nWhat would you like to\"}}",
-        "event": "content_block_delta",
-        "json": {
-          "delta": {
-            "text": "d much more!\n\nWhat would you like to",
-            "type": "text_delta"
-          },
-          "index": 0,
-          "type": "content_block_delta"
-        }
-      },
-      {
-        "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" work on?\"}}",
-        "event": "content_block_delta",
-        "json": {
-          "delta": {
-            "text": " work on?",
+            "text": " you doing today, and is there anything I can help you with?",
             "type": "text_delta"
           },
           "index": 0,
@@ -197,7 +125,7 @@
         }
       },
       {
-        "data": "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"input_tokens\":22,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":83}}",
+        "data": "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"input_tokens\":24,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":41}}",
         "event": "message_delta",
         "json": {
           "delta": {
@@ -208,8 +136,8 @@
           "usage": {
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
-            "input_tokens": 22,
-            "output_tokens": 83
+            "input_tokens": 24,
+            "output_tokens": 41
           }
         }
       },
@@ -227,25 +155,25 @@
     ],
     "headers": {
       "anthropic-organization-id": "0112d741-46c5-4429-8da8-1addcb04278f",
-      "anthropic-ratelimit-unified-5h-reset": "1758765600",
+      "anthropic-ratelimit-unified-5h-reset": "1759010400",
       "anthropic-ratelimit-unified-5h-status": "allowed",
       "anthropic-ratelimit-unified-fallback-percentage": "0.2",
       "anthropic-ratelimit-unified-overage-disabled-reason": "overage_not_provisioned",
       "anthropic-ratelimit-unified-representative-claim": "five_hour",
-      "anthropic-ratelimit-unified-reset": "1758765600",
+      "anthropic-ratelimit-unified-reset": "1759010400",
       "anthropic-ratelimit-unified-status": "allowed",
       "cache-control": "no-cache",
       "cf-cache-status": "DYNAMIC",
-      "cf-ray": "984586f0c8ff61ee-MRS",
+      "cf-ray": "985dc88058bde173-MRS",
       "content-type": "text/event-stream; charset=utf-8",
-      "date": "Wed, 24 Sep 2025 21:55:40 GMT",
-      "request-id": "req_011CTTyJLdXZoE8WArn97qhg",
+      "date": "Sat, 27 Sep 2025 20:34:43 GMT",
+      "request-id": "req_011CTZYZ6ns38rGnYVZvFTvt",
       "server": "cloudflare",
       "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
       "transfer-encoding": "chunked",
       "via": "1.1 google",
-      "x-envoy-upstream-service-time": "2784",
-      "x-request-id": "5530239f",
+      "x-envoy-upstream-service-time": "2488",
+      "x-request-id": "e4b0fce5",
       "x-robots-tag": "none"
     },
     "mode": "stream",
@@ -254,24 +182,24 @@
       "aggregated_response": {
         "content": [
           {
-            "text": "Hello! I'm Claude Code, Anthropic's CLI for Claude. I can help you with various programming and development tasks through the command line interface.\n\nHow can I assist you today? I can help with:\n- Code writing and debugging\n- File operations and analysis\n- Command line utilities\n- Programming questions\n- And much more!\n\nWhat would you like to work on?",
+            "text": "Hello! It's nice to meet you. I'm Claude, an AI assistant created by Anthropic. How are you doing today, and is there anything I can help you with?",
             "type": "text"
           }
         ],
-        "id": "msg_01HTRpp3qoAKyYXSKeQ7hDWL",
+        "id": "msg_01MxCJa17DFnuQpjqtSrdxyu",
         "model": "claude-sonnet-4-20250514",
         "role": "assistant",
         "stop_reason": "end_turn",
-        "text": "Hello! I'm Claude Code, Anthropic's CLI for Claude. I can help you with various programming and development tasks through the command line interface.\n\nHow can I assist you today? I can help with:\n- Code writing and debugging\n- File operations and analysis\n- Command line utilities\n- Programming questions\n- And much more!\n\nWhat would you like to work on?",
+        "text": "Hello! It's nice to meet you. I'm Claude, an AI assistant created by Anthropic. How are you doing today, and is there anything I can help you with?",
         "type": "message",
         "usage": {
           "cache_read_input_tokens": 0,
-          "input_tokens": 22,
-          "output_tokens": 83
+          "input_tokens": 24,
+          "output_tokens": 41
         }
       },
       "chunk_model_class": "MessageStartEvent",
-      "processed_events": 16
+      "processed_events": 10
     }
   },
   "stream": true

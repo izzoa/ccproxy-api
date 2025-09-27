@@ -160,7 +160,8 @@ If you see SSL certificate verification errors:
 
 ## OpenAI Format Endpoints
 
-When using tools like Aider that expect OpenAI-formatted responses, ensure you're using the correct endpoint:
+When using tools like Aider that expect OpenAI-formatted e correct endpoint:
+
 
 ### Endpoint Differences
 

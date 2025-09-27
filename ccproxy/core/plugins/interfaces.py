@@ -26,6 +26,8 @@ from .declaration import PluginContext, PluginManifest
 # Type variable for service type checking
 T = TypeVar("T")
 
+logger = structlog.get_logger(__name__)
+
 # --- Adapter protocol helpers -------------------------------------------------
 
 
@@ -183,15 +185,25 @@ class BasePluginFactory(PluginFactory):
         # Add plugin-specific config if available
         # ServiceContainer doesn't have get_plugin_config, so we'll get it from settings directly
         if self.manifest.config_class:
-            plugin_config = service_container.settings.plugins.get(
-                self.manifest.name, {}
-            )
-            if plugin_config:
-                # Validate config with plugin's config class
-                validated_config = self.manifest.config_class.model_validate(
-                    plugin_config
+            plugin_config = service_container.settings.plugins.get(self.manifest.name)
+
+            try:
+                if plugin_config is None:
+                    # No explicit config provided; instantiate defaults
+                    context.config = self.manifest.config_class()
+                else:
+                    # Validate (even if empty dict) to honor model defaults
+                    validated_config = self.manifest.config_class.model_validate(
+                        plugin_config
+                    )
+                    context.config = validated_config
+            except Exception as exc:  # pragma: no cover - defensive safety
+                logger.warning(
+                    "plugin_config_initialization_failed",
+                    plugin=self.manifest.name,
+                    error=str(exc),
                 )
-                context.config = validated_config
+                raise
 
         # Add format registry
         context.format_registry = service_container.get_format_registry()

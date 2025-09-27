@@ -367,7 +367,16 @@ ccproxy serve --disable-plugin docker
 ccproxy serve --enable-plugin metrics --disable-plugin docker
 ```
 
-These map to configuration fields `enabled_plugins` and `disabled_plugins` for the current process. Use TOML to make changes persistent.
+These map to configuration fields `enabled_plugins` and `disabled_plugins` for
+the current process. Use TOML to make changes persistent.
+
+At startup we merge `disabled_plugins` with any `plugins.<name>.enabled = false`
+flags into a single deny list, so you can hard-disable plugins in config while
+still using CLI switches for temporary overrides.
+
+Tip: `ccproxy plugins list` shows which plugins are available, and
+`ccproxy plugins settings <plugin>` prints the configuration fields for a
+specific plugin.
 
 ## Claude CLI Auto-Detection
 
