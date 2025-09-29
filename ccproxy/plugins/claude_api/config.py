@@ -1,7 +1,10 @@
 """Claude API plugin configuration."""
 
+from pathlib import Path
+
 from pydantic import Field
 
+from ccproxy.core.system import get_xdg_cache_home
 from ccproxy.models.provider import ModelCard, ModelMappingRule, ProviderConfig
 from ccproxy.plugins.claude_shared.model_defaults import (
     DEFAULT_CLAUDE_MODEL_CARDS,
@@ -49,4 +52,50 @@ class ClaudeAPISettings(ProviderConfig):
     # NEW: Auth manager override support
     auth_manager: str | None = (
         None  # Override auth manager name (e.g., 'oauth_claude_lb' for load balancing)
+    )
+
+    # Dynamic model fetching configuration
+    dynamic_models_enabled: bool = Field(
+        default=True,
+        description="Enable dynamic model fetching from LiteLLM",
+    )
+    models_source_url: str = Field(
+        default="https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+        description="URL to fetch model metadata from",
+    )
+    models_cache_dir: Path = Field(
+        default_factory=lambda: get_xdg_cache_home() / "ccproxy" / "models",
+        description="Directory for caching model metadata",
+    )
+    models_cache_ttl_hours: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        description="Hours before model cache expires",
+    )
+    models_fetch_timeout: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        description="Timeout in seconds for fetching model metadata",
+    )
+
+    # Model validation configuration
+    validate_token_limits: bool = Field(
+        default=True,
+        description="Enforce token limits based on model metadata",
+    )
+    enforce_capabilities: bool = Field(
+        default=True,
+        description="Enforce model capabilities (vision, function calling, etc.)",
+    )
+    warn_on_limits: bool = Field(
+        default=True,
+        description="Add warning headers when approaching token limits",
+    )
+    warn_threshold: float = Field(
+        default=0.9,
+        ge=0.5,
+        le=1.0,
+        description="Token usage threshold (0.0-1.0) to trigger warnings",
     )

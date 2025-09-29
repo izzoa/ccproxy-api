@@ -22,6 +22,7 @@ from ccproxy.core.logging import get_plugin_logger
 from ccproxy.llms.models import anthropic as anthropic_models
 from ccproxy.llms.models import openai as openai_models
 from ccproxy.streaming import DeferredStreaming
+from ccproxy.utils.model_fetcher import ModelFetcher
 
 from .config import ClaudeAPISettings
 
@@ -114,5 +115,19 @@ async def list_models(
     config: ClaudeAPIConfigDep,
 ) -> dict[str, Any]:
     """List available Claude models from configuration."""
+    if config.dynamic_models_enabled:
+        fetcher = ModelFetcher(
+            source_url=config.models_source_url,
+            cache_dir=config.models_cache_dir,
+            cache_ttl_hours=config.models_cache_ttl_hours,
+            timeout=config.models_fetch_timeout,
+        )
+        dynamic_models = await fetcher.fetch_models_by_provider(
+            provider="anthropic", use_cache=True
+        )
+        if dynamic_models:
+            models = [card.model_dump(mode="json") for card in dynamic_models]
+            return {"object": "list", "data": models}
+
     models = [card.model_dump(mode="json") for card in config.models_endpoint]
     return {"object": "list", "data": models}

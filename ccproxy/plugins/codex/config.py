@@ -1,5 +1,6 @@
 """Codex plugin-specific configuration settings."""
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -9,6 +10,7 @@ from ccproxy.core.constants import (
     FORMAT_OPENAI_CHAT,
     FORMAT_OPENAI_RESPONSES,
 )
+from ccproxy.core.system import get_xdg_cache_home
 from ccproxy.models.provider import ModelCard, ModelMappingRule, ProviderConfig
 from ccproxy.plugins.codex.model_defaults import (
     DEFAULT_CODEX_MODEL_CARDS,
@@ -129,6 +131,52 @@ class CodexSettings(ProviderConfig):
     detection_home_mode: Literal["temp", "home"] = Field(
         default="home",
         description="Home directory mode for CLI detection: 'temp' uses temporary directory, 'home' uses actual user HOME",
+    )
+
+    # Dynamic model fetching configuration
+    dynamic_models_enabled: bool = Field(
+        default=True,
+        description="Enable dynamic model fetching from LiteLLM",
+    )
+    models_source_url: str = Field(
+        default="https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+        description="URL to fetch model metadata from",
+    )
+    models_cache_dir: Path = Field(
+        default_factory=lambda: get_xdg_cache_home() / "ccproxy" / "models",
+        description="Directory for caching model metadata",
+    )
+    models_cache_ttl_hours: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        description="Hours before model cache expires",
+    )
+    models_fetch_timeout: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        description="Timeout in seconds for fetching model metadata",
+    )
+
+    # Model validation configuration
+    validate_token_limits: bool = Field(
+        default=True,
+        description="Enforce token limits based on model metadata",
+    )
+    enforce_capabilities: bool = Field(
+        default=True,
+        description="Enforce model capabilities (vision, function calling, etc.)",
+    )
+    warn_on_limits: bool = Field(
+        default=True,
+        description="Add warning headers when approaching token limits",
+    )
+    warn_threshold: float = Field(
+        default=0.9,
+        ge=0.5,
+        le=1.0,
+        description="Token usage threshold (0.0-1.0) to trigger warnings",
     )
 
     @field_validator("base_url")

@@ -47,6 +47,59 @@ class ModelCard(BaseModel):
     parent: str | None = Field(
         default=None, description="Parent model identifier, if any"
     )
+    max_input_tokens: int | None = Field(
+        default=None, description="Maximum input tokens supported by the model"
+    )
+    max_output_tokens: int | None = Field(
+        default=None, description="Maximum output tokens supported by the model"
+    )
+    max_tokens: int | None = Field(
+        default=None, description="Maximum total tokens (legacy field)"
+    )
+    supports_vision: bool | None = Field(
+        default=None, description="Whether the model supports vision/image inputs"
+    )
+    supports_function_calling: bool | None = Field(
+        default=None, description="Whether the model supports function calling"
+    )
+    supports_parallel_function_calling: bool | None = Field(
+        default=None, description="Whether the model supports parallel function calling"
+    )
+    supports_tool_choice: bool | None = Field(
+        default=None, description="Whether the model supports tool choice"
+    )
+    supports_response_schema: bool | None = Field(
+        default=None,
+        description="Whether the model supports response schema (structured output)",
+    )
+    supports_prompt_caching: bool | None = Field(
+        default=None, description="Whether the model supports prompt caching"
+    )
+    supports_system_messages: bool | None = Field(
+        default=None, description="Whether the model supports system messages"
+    )
+    supports_assistant_prefill: bool | None = Field(
+        default=None, description="Whether the model supports assistant prefill"
+    )
+    supports_computer_use: bool | None = Field(
+        default=None, description="Whether the model supports computer use tools"
+    )
+    supports_pdf_input: bool | None = Field(
+        default=None, description="Whether the model supports PDF input"
+    )
+    supports_reasoning: bool | None = Field(
+        default=None, description="Whether the model supports reasoning mode"
+    )
+    mode: str | None = Field(
+        default=None,
+        description="Model mode (e.g., 'chat', 'completion', 'image_generation')",
+    )
+    litellm_provider: str | None = Field(
+        default=None, description="Provider identifier from LiteLLM"
+    )
+    deprecation_date: str | None = Field(
+        default=None, description="Date when the model will be deprecated (YYYY-MM-DD)"
+    )
 
     model_config = ConfigDict(extra="allow")
 

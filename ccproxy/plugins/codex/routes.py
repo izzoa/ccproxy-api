@@ -20,6 +20,7 @@ from ccproxy.core.constants import (
     UPSTREAM_ENDPOINT_OPENAI_RESPONSES,
 )
 from ccproxy.streaming import DeferredStreaming
+from ccproxy.utils.model_fetcher import ModelFetcher
 
 from .config import CodexSettings
 
@@ -98,6 +99,20 @@ async def list_models(
     config: CodexConfigDep,
 ) -> dict[str, Any]:
     """List available Codex models."""
+    if config.dynamic_models_enabled:
+        fetcher = ModelFetcher(
+            source_url=config.models_source_url,
+            cache_dir=config.models_cache_dir,
+            cache_ttl_hours=config.models_cache_ttl_hours,
+            timeout=config.models_fetch_timeout,
+        )
+        dynamic_models = await fetcher.fetch_models_by_provider(
+            provider="openai", use_cache=True
+        )
+        if dynamic_models:
+            models = [card.model_dump(mode="json") for card in dynamic_models]
+            return {"object": "list", "data": models}
+
     models = [card.model_dump(mode="json") for card in config.models_endpoint]
     return {"object": "list", "data": models}
 

@@ -13,6 +13,7 @@ from typing_extensions import TypedDict
 from ccproxy.api.bootstrap import create_service_container
 from ccproxy.api.middleware.cors import setup_cors_middleware
 from ccproxy.api.middleware.errors import setup_error_handlers
+from ccproxy.api.middleware.model_validation import ModelValidationMiddleware
 from ccproxy.api.routes.health import router as health_router
 from ccproxy.api.routes.plugins import router as plugins_router
 from ccproxy.auth.oauth.router import oauth_router
@@ -33,6 +34,7 @@ from ccproxy.services.adapters.chain_validation import (
     validate_stream_pairs,
 )
 from ccproxy.services.container import ServiceContainer
+from ccproxy.utils.model_registry import get_model_registry
 from ccproxy.utils.startup_helpers import (
     check_claude_cli_startup,
     check_version_updates_startup,
@@ -42,6 +44,50 @@ from ccproxy.utils.startup_helpers import (
 
 
 logger: TraceBoundLogger = get_logger()
+
+
+def _get_validation_config(settings: Settings) -> dict[str, Any]:
+    """Extract model validation configuration from plugin settings.
+
+    Checks both Codex and Claude API plugin configs for validation settings,
+    using the first enabled plugin's configuration.
+
+    Args:
+        settings: Application settings
+
+    Returns:
+        Dict with validation configuration (enabled, validate_token_limits, etc.)
+    """
+    default_config = {
+        "enabled": False,
+        "validate_token_limits": True,
+        "enforce_capabilities": True,
+        "warn_on_limits": True,
+        "warn_threshold": 0.9,
+    }
+
+    if not hasattr(settings, "plugins"):
+        return default_config
+
+    plugins = settings.plugins
+
+    for plugin_name in ["codex", "claude_api"]:
+        plugin_cfg = getattr(plugins, plugin_name, None)
+        if not plugin_cfg:
+            continue
+
+        if not getattr(plugin_cfg, "enabled", False):
+            continue
+
+        return {
+            "enabled": True,
+            "validate_token_limits": getattr(plugin_cfg, "validate_token_limits", True),
+            "enforce_capabilities": getattr(plugin_cfg, "enforce_capabilities", True),
+            "warn_on_limits": getattr(plugin_cfg, "warn_on_limits", True),
+            "warn_threshold": getattr(plugin_cfg, "warn_threshold", 0.9),
+        }
+
+    return default_config
 
 
 def merge_router_tags(
@@ -302,6 +348,41 @@ async def initialize_hooks_startup(app: FastAPI, settings: Settings) -> None:
     )
 
 
+async def initialize_model_registry_startup(app: FastAPI, settings: Settings) -> None:
+    """Initialize the global model registry with dynamic model fetching.
+
+    This loads and caches model metadata from LiteLLM for both Anthropic and OpenAI models,
+    enabling token limit validation and capability checking during request processing.
+
+    Args:
+        app: FastAPI application instance
+        settings: Application settings
+    """
+    try:
+        registry = get_model_registry()
+
+        await registry.refresh_all()
+
+        anthropic_count = len(await registry.get_all_models(provider="anthropic"))
+        openai_count = len(await registry.get_all_models(provider="openai"))
+
+        logger.info(
+            "model_registry_initialized",
+            anthropic_models=anthropic_count,
+            openai_models=openai_count,
+            total_models=anthropic_count + openai_count,
+            category="lifecycle",
+        )
+
+    except Exception as e:
+        logger.error(
+            "model_registry_initialization_failed",
+            error=str(e),
+            exc_info=e,
+            category="lifecycle",
+        )
+
+
 LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
     {
         "name": "Task Manager",
@@ -332,6 +413,11 @@ LIFECYCLE_COMPONENTS: list[LifecycleComponent] = [
         "name": "Plugin System",
         "startup": initialize_plugins_startup,
         "shutdown": shutdown_plugins,
+    },
+    {
+        "name": "Model Registry",
+        "startup": initialize_model_registry_startup,
+        "shutdown": None,
     },
     {
         "name": "Hook System",
@@ -608,6 +694,22 @@ def create_app(service_container: ServiceContainer | None = None) -> FastAPI:
 
     setup_cors_middleware(app, settings)
     setup_error_handlers(app)
+
+    validation_config = _get_validation_config(settings)
+    if validation_config["enabled"]:
+        app.add_middleware(
+            ModelValidationMiddleware,
+            validate_token_limits=validation_config["validate_token_limits"],
+            enforce_capabilities=validation_config["enforce_capabilities"],
+            warn_on_limits=validation_config["warn_on_limits"],
+            warn_threshold=validation_config["warn_threshold"],
+        )
+        logger.info(
+            "model_validation_middleware_enabled",
+            validate_token_limits=validation_config["validate_token_limits"],
+            enforce_capabilities=validation_config["enforce_capabilities"],
+            category="lifecycle",
+        )
 
     # TODO: middleware should be in the middleware_manager
     # in ccproxy/core/middleware.py

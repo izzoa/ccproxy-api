@@ -56,6 +56,7 @@ class RequestContext:
     log_timestamp: datetime | None = None  # Datetime for consistent logging filenames
     metrics: dict[str, Any] = field(default_factory=dict)  # Request metrics storage
     format_chain: list[str] | None = None  # Format conversion chain
+    model_metadata: Any | None = None  # Model metadata from registry (ModelCard)
 
     @property
     def duration_ms(self) -> float:
