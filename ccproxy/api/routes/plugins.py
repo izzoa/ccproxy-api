@@ -1,13 +1,15 @@
 """Plugin management API endpoints."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from starlette import status
 
 import ccproxy.core.logging
-from ccproxy.auth.conditional import ConditionalAuthDep
+
+if TYPE_CHECKING:
+    from ccproxy.auth.conditional import ConditionalAuthDep
 
 
 logger = ccproxy.core.logging.get_logger(__name__)
@@ -71,7 +73,7 @@ class PluginHealthResponse(BaseModel):
 @router.get("", response_model=PluginListResponse)
 async def list_plugins(
     request: Request,
-    auth: ConditionalAuthDep = None,
+    auth: "ConditionalAuthDep" = None,
 ) -> PluginListResponse:
     """List all loaded plugins and built-in providers.
 
@@ -110,7 +112,7 @@ async def list_plugins(
 async def plugin_health(
     plugin_name: str,
     request: Request,
-    auth: ConditionalAuthDep = None,
+    auth: "ConditionalAuthDep" = None,
 ) -> PluginHealthResponse:
     """Check the health status of a specific plugin.
 
@@ -216,7 +218,7 @@ async def plugin_health(
 
 @router.get("/status", response_model=PluginStatusResponse)
 async def plugins_status(
-    request: Request, auth: ConditionalAuthDep = None
+    request: Request, auth: "ConditionalAuthDep" = None
 ) -> PluginStatusResponse:
     """Get plugin system status, including manifests and init order.
 
