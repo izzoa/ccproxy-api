@@ -126,8 +126,18 @@ async def list_models(
             provider="anthropic", use_cache=True
         )
         if dynamic_models:
-            models = [card.model_dump(mode="json") for card in dynamic_models]
+            models = []
+            for card in dynamic_models:
+                model_data = card.model_dump(mode="json")
+                if model_data.get("created") is None:
+                    model_data["created"] = 0
+                models.append(model_data)
             return {"object": "list", "data": models}
 
-    models = [card.model_dump(mode="json") for card in config.models_endpoint]
+    models = []
+    for card in config.models_endpoint:
+        model_data = card.model_dump(mode="json")
+        if model_data.get("created") is None:
+            model_data["created"] = 0
+        models.append(model_data)
     return {"object": "list", "data": models}
