@@ -221,6 +221,28 @@ class ModelFetcher:
             )
             return None
 
+    def _normalize_model_id(self, model_id: str, litellm_provider: str) -> str | None:
+        """Normalize model ID by stripping provider prefix.
+
+        Args:
+            model_id: Original model ID from LiteLLM
+            litellm_provider: Provider name (e.g., 'anthropic', 'openai')
+
+        Returns:
+            Normalized model ID without provider prefix, or None if no normalization needed
+        """
+        prefixes = [
+            f"{litellm_provider}/",
+            "anthropic/",
+            "openai/",
+        ]
+
+        for prefix in prefixes:
+            if model_id.startswith(prefix):
+                return model_id[len(prefix):]
+
+        return None
+
     async def fetch_models_by_provider(
         self,
         provider: Literal["anthropic", "openai", "all"] = "all",
@@ -260,6 +282,12 @@ class ModelFetcher:
             card = self._convert_to_model_card(model_id, model_data)
             if card is not None:
                 model_cards.append(card)
+
+                normalized_id = self._normalize_model_id(model_id, litellm_provider)
+                if normalized_id and normalized_id != model_id:
+                    normalized_card = self._convert_to_model_card(normalized_id, model_data)
+                    if normalized_card is not None:
+                        model_cards.append(normalized_card)
 
         logger.info(
             "models_fetched_by_provider",
