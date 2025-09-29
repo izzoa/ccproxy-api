@@ -243,6 +243,24 @@ class ModelFetcher:
 
         return None
 
+    def _generate_model_aliases(self, model_id: str) -> list[str]:
+        """Generate common alternative names for a model ID.
+
+        Args:
+            model_id: Model identifier to generate aliases for
+
+        Returns:
+            List of alternative model names
+        """
+        aliases = []
+
+        if "claude-sonnet-4-5" in model_id or "claude-sonnet-4.5" in model_id:
+            base = model_id.replace("claude-sonnet-4-5", "").replace("claude-sonnet-4.5", "")
+            aliases.append(f"{base}claude-4.5-sonnet".strip("-"))
+            aliases.append(f"{base}claude-4-5-sonnet".strip("-"))
+
+        return [alias for alias in aliases if alias and alias != model_id]
+
     async def fetch_models_by_provider(
         self,
         provider: Literal["anthropic", "openai", "all"] = "all",
@@ -288,6 +306,11 @@ class ModelFetcher:
                     normalized_card = self._convert_to_model_card(normalized_id, model_data)
                     if normalized_card is not None:
                         model_cards.append(normalized_card)
+
+                        for alias in self._generate_model_aliases(normalized_id):
+                            alias_card = self._convert_to_model_card(alias, model_data)
+                            if alias_card is not None:
+                                model_cards.append(alias_card)
 
         logger.info(
             "models_fetched_by_provider",
