@@ -77,6 +77,11 @@ class ModelValidationMiddleware(BaseHTTPMiddleware):
             if not body:
                 return await call_next(request)
 
+            async def receive():
+                return {"type": "http.request", "body": body, "more_body": False}
+
+            request._receive = receive
+
             try:
                 request_data = json.loads(body)
             except json.JSONDecodeError:
@@ -119,7 +124,7 @@ class ModelValidationMiddleware(BaseHTTPMiddleware):
             "/responses",
         ]
 
-        return any(path.endswith(vpath) or vpath in path for vpath in validate_paths)
+        return any(path.endswith(vpath) for vpath in validate_paths)
 
     async def _validate_request(
         self, request: Request, request_data: dict[str, Any]
@@ -153,14 +158,29 @@ class ModelValidationMiddleware(BaseHTTPMiddleware):
         if hasattr(request.state, "context"):
             request.state.context.model_metadata = model_metadata
 
-        if self.validate_token_limits:
-            token_error = self._validate_token_limits(request_data, model_metadata)
+        input_tokens: int | None = None
+        if self.validate_token_limits or self.warn_on_limits:
+            messages = request_data.get("messages", [])
+            system = request_data.get("system")
+            try:
+                input_tokens = count_messages_tokens(
+                    messages, model_metadata.id, system
+                )
+            except Exception as e:
+                logger.warning("token_counting_failed", error=str(e))
+
+        if self.validate_token_limits and input_tokens is not None:
+            token_error = self._validate_token_limits(
+                request_data, model_metadata, input_tokens
+            )
             if token_error:
                 result["error"] = token_error
                 return result
 
-        if self.warn_on_limits:
-            warnings = self._check_token_warnings(request_data, model_metadata)
+        if self.warn_on_limits and input_tokens is not None:
+            warnings = self._check_token_warnings(
+                request_data, model_metadata, input_tokens
+            )
             result["warnings"].extend(warnings)
 
         if self.enforce_capabilities:
@@ -187,26 +207,22 @@ class ModelValidationMiddleware(BaseHTTPMiddleware):
         return None
 
     def _validate_token_limits(
-        self, request_data: dict[str, Any], model_metadata: ModelCard
+        self,
+        request_data: dict[str, Any],
+        model_metadata: ModelCard,
+        input_tokens: int,
     ) -> dict[str, Any] | None:
         """Validate token limits.
 
         Args:
             request_data: Request payload
             model_metadata: Model metadata
+            input_tokens: Pre-counted input token count
 
         Returns:
             Error dict if validation fails, None otherwise
         """
-        messages = request_data.get("messages", [])
-        system = request_data.get("system")
         model_id = model_metadata.id
-
-        try:
-            input_tokens = count_messages_tokens(messages, model_id, system)
-        except Exception as e:
-            logger.warning("token_counting_failed", error=str(e))
-            return None
 
         if model_metadata.max_input_tokens:
             if input_tokens > model_metadata.max_input_tokens:
@@ -230,27 +246,22 @@ class ModelValidationMiddleware(BaseHTTPMiddleware):
         return None
 
     def _check_token_warnings(
-        self, request_data: dict[str, Any], model_metadata: ModelCard
+        self,
+        request_data: dict[str, Any],
+        model_metadata: ModelCard,
+        input_tokens: int,
     ) -> list[str]:
         """Check if token usage warrants warnings.
 
         Args:
             request_data: Request payload
             model_metadata: Model metadata
+            input_tokens: Pre-counted input token count
 
         Returns:
             List of warning messages
         """
         warnings: list[str] = []
-
-        messages = request_data.get("messages", [])
-        system = request_data.get("system")
-        model_id = model_metadata.id
-
-        try:
-            input_tokens = count_messages_tokens(messages, model_id, system)
-        except Exception:
-            return warnings
 
         if model_metadata.max_input_tokens:
             threshold = model_metadata.max_input_tokens * self.warn_threshold

@@ -1,12 +1,20 @@
 """Token counting utilities for various LLM providers."""
 
 import json
+import threading
 from typing import Any
 
 from ccproxy.core.logging import get_logger
 
 
 logger = get_logger(__name__)
+
+# Token counting constants
+CHARS_PER_TOKEN = 4  # Rough approximation; prefer tiktoken if available
+IMAGE_TOKEN_OVERHEAD = 85  # Heuristic for vision content
+MESSAGE_FORMATTING_OVERHEAD = 4  # Tokens per message for formatting
+ANTHROPIC_MESSAGE_OVERHEAD = 3  # Anthropic-specific message overhead
+COMPLETION_TOKENS_OVERHEAD = 2  # Overhead for completion priming
 
 
 class TokenCounter:
@@ -43,19 +51,19 @@ class TokenCounter:
     def _count_with_tiktoken(self, text: str, model: str) -> int:
         """Count tokens using tiktoken (accurate for OpenAI models)."""
         try:
-            if model.startswith(("gpt-", "o1-", "o3-")):
-                encoding = self._tiktoken.encoding_for_model("gpt-4")
-            else:
+            try:
+                encoding = self._tiktoken.encoding_for_model(model)
+            except KeyError:
                 encoding = self._tiktoken.get_encoding("cl100k_base")
 
             return len(encoding.encode(text))
         except Exception as e:
-            logger.warning("tiktoken_encoding_failed", error=str(e))
+            logger.warning("tiktoken_encoding_failed", error=str(e), model=model)
             return self._count_approximate(text)
 
     def _count_approximate(self, text: str) -> int:
-        """Approximate token count (4 chars per token heuristic)."""
-        return len(text) // 4
+        """Approximate token count using character-based heuristic."""
+        return len(text) // CHARS_PER_TOKEN
 
     def count_messages_tokens(
         self, messages: list[dict[str, Any]], model: str = "gpt-4"
@@ -72,7 +80,7 @@ class TokenCounter:
         total_tokens = 0
 
         for message in messages:
-            total_tokens += 4
+            total_tokens += MESSAGE_FORMATTING_OVERHEAD
 
             role = message.get("role", "")
             total_tokens += self.count_tokens(role, model)
@@ -90,7 +98,7 @@ class TokenCounter:
                             item.get("type") == "image_url"
                             or item.get("type") == "image"
                         ):
-                            total_tokens += 85
+                            total_tokens += IMAGE_TOKEN_OVERHEAD
 
             name = message.get("name")
             if name:
@@ -116,7 +124,7 @@ class TokenCounter:
                             total_tokens += self.count_tokens(func_name, model)
                             total_tokens += self.count_tokens(func_args, model)
 
-        total_tokens += 2
+        total_tokens += COMPLETION_TOKENS_OVERHEAD
 
         return total_tokens
 
@@ -138,7 +146,7 @@ class TokenCounter:
             total_tokens += self.count_tokens(system, "claude-3")
 
         for message in messages:
-            total_tokens += 3
+            total_tokens += ANTHROPIC_MESSAGE_OVERHEAD
 
             role = message.get("role", "")
             total_tokens += self.count_tokens(role, "claude-3")
@@ -153,7 +161,7 @@ class TokenCounter:
                             text = item.get("text", "")
                             total_tokens += self.count_tokens(text, "claude-3")
                         elif item.get("type") == "image":
-                            total_tokens += 85
+                            total_tokens += IMAGE_TOKEN_OVERHEAD
                         elif item.get("type") == "tool_use":
                             tool_input = item.get("input", {})
                             if isinstance(tool_input, dict):
@@ -171,6 +179,7 @@ class TokenCounter:
 
 
 _global_counter: TokenCounter | None = None
+_counter_lock = threading.Lock()
 
 
 def get_token_counter() -> TokenCounter:
@@ -181,7 +190,9 @@ def get_token_counter() -> TokenCounter:
     """
     global _global_counter
     if _global_counter is None:
-        _global_counter = TokenCounter()
+        with _counter_lock:
+            if _global_counter is None:
+                _global_counter = TokenCounter()
     return _global_counter
 
 

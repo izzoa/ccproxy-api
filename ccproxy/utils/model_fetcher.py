@@ -1,7 +1,8 @@
 """Dynamic model fetcher for LiteLLM model metadata."""
 
+import asyncio
 import json
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -40,6 +41,8 @@ class ModelFetcher:
         self.timeout = timeout
         self._memory_cache: dict[str, Any] | None = None
         self._memory_cache_time: datetime | None = None
+        self._client: httpx.AsyncClient | None = None
+        self._mem_lock = asyncio.Lock()
 
     def _get_cache_path(self) -> Path | None:
         """Get the cache file path."""
@@ -94,19 +97,35 @@ class ModelFetcher:
         except OSError as e:
             logger.warning("cache_save_failed", error=str(e))
 
+    def _get_client(self) -> httpx.AsyncClient:
+        """Get or create the HTTP client.
+
+        Returns:
+            Shared AsyncClient instance
+        """
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.timeout)
+        return self._client
+
+    async def aclose(self) -> None:
+        """Close the HTTP client."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
     async def _fetch_from_url(self) -> dict[str, Any] | None:
         """Fetch model data from remote URL."""
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(self.source_url)
-                response.raise_for_status()
-                data = response.json()
-                logger.info(
-                    "fetched_models_from_url",
-                    url=self.source_url,
-                    model_count=len(data),
-                )
-                return data
+            client = self._get_client()
+            response = await client.get(self.source_url)
+            response.raise_for_status()
+            data = response.json()
+            logger.info(
+                "fetched_models_from_url",
+                url=self.source_url,
+                model_count=len(data),
+            )
+            return data
         except httpx.HTTPError as e:
             logger.error("model_fetch_http_error", error=str(e), url=self.source_url)
             return None
@@ -128,26 +147,27 @@ class ModelFetcher:
         Returns:
             Dictionary of model metadata in LiteLLM format, or None if fetch fails
         """
-        if use_cache and self._memory_cache is not None and self._memory_cache_time:
-            cache_age = datetime.now(UTC) - self._memory_cache_time
-            if cache_age < timedelta(hours=1):
-                logger.debug("using_memory_cache")
-                return self._memory_cache
+        async with self._mem_lock:
+            if use_cache and self._memory_cache is not None and self._memory_cache_time:
+                cache_age = datetime.now(UTC) - self._memory_cache_time
+                if cache_age < timedelta(hours=1):
+                    logger.debug("using_memory_cache")
+                    return self._memory_cache
 
-        if use_cache:
-            cached_data = self._load_from_cache()
-            if cached_data is not None:
-                self._memory_cache = cached_data
+            if use_cache:
+                cached_data = self._load_from_cache()
+                if cached_data is not None:
+                    self._memory_cache = cached_data
+                    self._memory_cache_time = datetime.now(UTC)
+                    return cached_data
+
+            data = await self._fetch_from_url()
+            if data is not None:
+                self._save_to_cache(data)
+                self._memory_cache = data
                 self._memory_cache_time = datetime.now(UTC)
-                return cached_data
 
-        data = await self._fetch_from_url()
-        if data is not None:
-            self._save_to_cache(data)
-            self._memory_cache = data
-            self._memory_cache_time = datetime.now(UTC)
-
-        return data
+            return data
 
     def _convert_to_model_card(
         self, model_id: str, model_data: dict[str, Any]
@@ -232,11 +252,8 @@ class ModelFetcher:
             if mode != "chat":
                 continue
 
-            if (
-                provider == "anthropic"
-                and litellm_provider != "anthropic"
-                or provider == "openai"
-                and litellm_provider != "openai"
+            if (provider == "anthropic" and litellm_provider != "anthropic") or (
+                provider == "openai" and litellm_provider != "openai"
             ):
                 continue
 

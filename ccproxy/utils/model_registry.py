@@ -1,7 +1,8 @@
 """Centralized model registry for metadata management."""
 
 import asyncio
-from datetime import datetime, timedelta
+import threading
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from ccproxy.core.logging import get_logger
@@ -61,7 +62,7 @@ class ModelRegistry:
                 self._models_by_provider[provider] = {
                     model.id: model for model in models
                 }
-                self._last_refresh[provider] = datetime.now()
+                self._last_refresh[provider] = datetime.now(UTC)
                 logger.debug(
                     "provider_models_fetched",
                     provider=provider,
@@ -79,20 +80,21 @@ class ModelRegistry:
         if last_refresh is None:
             return True
 
-        age = datetime.now() - last_refresh
+        age = datetime.now(UTC) - last_refresh
         return age > timedelta(hours=self.refresh_interval_hours)
 
     async def _refresh_provider(self, provider: str) -> None:
         """Refresh models for a specific provider."""
         try:
             models = await self.fetcher.fetch_models_by_provider(
-                provider=provider, use_cache=False  # type: ignore[arg-type]
+                provider=provider,
+                use_cache=False,  # type: ignore[arg-type]
             )
             async with self._lock:
                 self._models_by_provider[provider] = {
                     model.id: model for model in models
                 }
-                self._last_refresh[provider] = datetime.now()
+                self._last_refresh[provider] = datetime.now(UTC)
             logger.info(
                 "provider_models_refreshed",
                 provider=provider,
@@ -164,6 +166,7 @@ class ModelRegistry:
         """Force refresh all provider models."""
         logger.info("refreshing_all_models")
         await self._fetch_all_providers()
+        self._initialized = True
 
     def get_stats(self) -> dict[str, int]:
         """Get registry statistics.
@@ -178,6 +181,7 @@ class ModelRegistry:
 
 
 _global_registry: ModelRegistry | None = None
+_registry_lock = threading.Lock()
 
 
 def get_model_registry() -> ModelRegistry:
@@ -188,7 +192,9 @@ def get_model_registry() -> ModelRegistry:
     """
     global _global_registry
     if _global_registry is None:
-        _global_registry = ModelRegistry()
+        with _registry_lock:
+            if _global_registry is None:
+                _global_registry = ModelRegistry()
     return _global_registry
 
 
