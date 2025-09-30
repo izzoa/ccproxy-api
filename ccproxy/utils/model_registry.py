@@ -30,6 +30,7 @@ class ModelRegistry:
         self.fetcher = fetcher or ModelFetcher()
         self.refresh_interval_hours = refresh_interval_hours
         self._models_by_provider: dict[str, dict[str, ModelCard]] = {}
+        self._alias_to_canonical: dict[str, str] = {}
         self._last_refresh: dict[str, datetime] = {}
         self._lock = asyncio.Lock()
         self._initialized = False
@@ -52,6 +53,51 @@ class ModelRegistry:
                 openai_models=len(self._models_by_provider.get("openai", {})),
             )
 
+    def _build_alias_map(self, models: list[ModelCard]) -> None:
+        """Build alias-to-canonical mapping from model list.
+
+        Args:
+            models: List of models to process
+        """
+        canonical_models: set[str] = set()
+        all_model_ids: set[str] = {m.id for m in models}
+
+        for model in models:
+            model_id = model.id
+            aliases = self.fetcher._generate_model_aliases(model_id)
+
+            if aliases:
+                if model_id not in all_model_ids:
+                    continue
+
+                if model_id not in canonical_models:
+                    normalized = self.fetcher._normalize_model_id(
+                        model_id, model.litellm_provider or ""
+                    )
+                    if normalized and normalized != model_id:
+                        canonical_models.add(normalized)
+                    else:
+                        canonical_models.add(model_id)
+
+                for alias in aliases:
+                    if alias in all_model_ids:
+                        canonical = next(
+                            (
+                                m.id
+                                for m in models
+                                if m.id == alias or alias in self.fetcher._generate_model_aliases(m.id)
+                            ),
+                            model_id,
+                        )
+                        self._alias_to_canonical[alias] = canonical
+
+        for model_id in all_model_ids:
+            if model_id not in self._alias_to_canonical:
+                for canonical in canonical_models:
+                    if model_id in self.fetcher._generate_model_aliases(canonical):
+                        self._alias_to_canonical[model_id] = canonical
+                        break
+
     async def _fetch_all_providers(self) -> None:
         """Fetch models for all providers."""
         for provider in ["anthropic", "openai"]:  # type: ignore[assignment]
@@ -62,6 +108,7 @@ class ModelRegistry:
                 self._models_by_provider[provider] = {
                     model.id: model for model in models
                 }
+                self._build_alias_map(models)
                 self._last_refresh[provider] = datetime.now(UTC)
                 logger.debug(
                     "provider_models_fetched",
@@ -105,13 +152,24 @@ class ModelRegistry:
                 "provider_refresh_failed", provider=provider, error=str(e), exc_info=e
             )
 
+    def resolve_model_alias(self, model_id: str) -> str:
+        """Resolve model alias to canonical model ID.
+
+        Args:
+            model_id: Model identifier (may be an alias)
+
+        Returns:
+            Canonical model ID, or original if not an alias
+        """
+        return self._alias_to_canonical.get(model_id, model_id)
+
     async def get_model(
         self, model_id: str, provider: Literal["anthropic", "openai"] | None = None
     ) -> ModelCard | None:
         """Get model metadata by ID.
 
         Args:
-            model_id: Model identifier
+            model_id: Model identifier (will resolve aliases)
             provider: Provider name (if known). Will search all if None.
 
         Returns:
@@ -120,18 +178,20 @@ class ModelRegistry:
         if not self._initialized:
             await self.initialize()
 
+        canonical_id = self.resolve_model_alias(model_id)
+
         if provider:
             if await self._should_refresh(provider):
                 await self._refresh_provider(provider)
 
-            return self._models_by_provider.get(provider, {}).get(model_id)
+            return self._models_by_provider.get(provider, {}).get(canonical_id)
 
         for provider_name, models in self._models_by_provider.items():
-            if model_id in models:
+            if canonical_id in models:
                 if await self._should_refresh(provider_name):
                     await self._refresh_provider(provider_name)
                     models = self._models_by_provider.get(provider_name, {})
-                return models.get(model_id)
+                return models.get(canonical_id)
 
         return None
 

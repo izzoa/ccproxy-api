@@ -145,12 +145,24 @@ class ModelValidationMiddleware(BaseHTTPMiddleware):
             return result
 
         provider = self._infer_provider(request.url.path)
-        model_metadata = await self.registry.get_model(model_id, provider=provider)
+
+        canonical_id = self.registry.resolve_model_alias(model_id)
+        if canonical_id != model_id:
+            logger.debug(
+                "model_alias_resolved",
+                requested=model_id,
+                canonical=canonical_id,
+                provider=provider,
+            )
+            request_data["model"] = canonical_id
+
+        model_metadata = await self.registry.get_model(canonical_id, provider=provider)
 
         if not model_metadata:
             logger.debug(
                 "model_metadata_not_found",
-                model_id=model_id,
+                model_id=canonical_id,
+                original_model_id=model_id,
                 provider=provider,
             )
             return result

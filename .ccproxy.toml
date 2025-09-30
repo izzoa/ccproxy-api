@@ -6,6 +6,7 @@ disabled_plugins = [
   "metrics",
   "access_log",
   "dashboard",
+  "claude_sdk",
   # "command_replay",
   # "request_tracer",
 ]
@@ -15,7 +16,7 @@ disabled_plugins = [
 level = "WARNING"
 format = "auto"
 file = "/tmp/ccproxy/ccproxy.log"
-verbose_api = false
+verbose_api = true
 enable_plugin_logging = true
 plugin_log_base_dir = "/tmp/ccproxy"
 
@@ -52,3 +53,9 @@ register_app_state_alias = true
 
 [plugins.command_replay]
 enabled = true
+
+[plugins.claude_api]
+model_mappings = [
+  { match = "claude-4.5-sonnet", target = "claude-sonnet-4-5", kind = "exact" },
+  { match = "claude-4-5-sonnet", target = "claude-sonnet-4-5", kind = "exact" },
+]
