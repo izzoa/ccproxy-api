@@ -252,12 +252,42 @@ class ModelFetcher:
         Returns:
             List of alternative model names
         """
+        import re
+
         aliases = []
 
-        if "claude-sonnet-4-5" in model_id or "claude-sonnet-4.5" in model_id:
-            base = model_id.replace("claude-sonnet-4-5", "").replace("claude-sonnet-4.5", "")
-            aliases.append(f"{base}claude-4.5-sonnet".strip("-"))
-            aliases.append(f"{base}claude-4-5-sonnet".strip("-"))
+        claude_pattern = r"claude-(sonnet|opus|haiku)-(\d+)[.-](\d+)"
+        match = re.search(claude_pattern, model_id)
+        if match:
+            model_type = match.group(1)
+            major = match.group(2)
+            minor = match.group(3)
+            prefix = model_id[:match.start()]
+            suffix = model_id[match.end():]
+
+            aliases.append(f"{prefix}claude-{major}.{minor}-{model_type}{suffix}")
+            aliases.append(f"{prefix}claude-{major}-{minor}-{model_type}{suffix}")
+
+        gpt_pattern = r"gpt-(\d+)[.-](\d+)"
+        match = re.search(gpt_pattern, model_id)
+        if match:
+            major = match.group(1)
+            minor = match.group(2)
+            prefix = model_id[:match.start()]
+            suffix = model_id[match.end():]
+
+            if "." in match.group(0):
+                aliases.append(f"{prefix}gpt-{major}-{minor}{suffix}")
+            else:
+                aliases.append(f"{prefix}gpt-{major}.{minor}{suffix}")
+
+        o_pattern = r"o(\d+)"
+        match = re.search(o_pattern, model_id)
+        if match and model_id.startswith("o"):
+            number = match.group(1)
+            suffix = model_id[match.end():]
+
+            aliases.append(f"o-{number}{suffix}")
 
         return [alias for alias in aliases if alias and alias != model_id]
 
